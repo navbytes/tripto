@@ -14,3 +14,12 @@ DerivedData/
 .swiftpm/
 *.ipa
 *.dSYM.zip
+
+# XcodeGen-generated project — project.yml is the source of truth.
+# Run `xcodegen generate` (or scripts/bootstrap.sh) after cloning.
+*.xcodeproj/
+Tripto/Generated/
+
+# Python (scripts/gen_tokens.py)
+__pycache__/
+*.pyc
