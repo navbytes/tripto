@@ -57,3 +57,36 @@ targets:
         # for anyone on the simulator with no Apple Developer account wired
         # up. CI/verify builds additionally pass CODE_SIGNING_ALLOWED=NO.
         CODE_SIGN_STYLE: Automatic
+
+  TriptoTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: TriptoTests
+    dependencies:
+      - target: Tripto
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.navbytes.tripto.tests
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Tripto:
+    build:
+      targets:
+        Tripto: all
+        TriptoTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TriptoTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

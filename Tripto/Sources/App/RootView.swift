@@ -1,28 +1,24 @@
 import SwiftUI
 
-/// Shell root view. No navigation logic yet (M0 scaffolding only) — this
-/// exists to visually prove the design tokens and bundled fonts render
-/// correctly before any real screens are built.
+/// Auth gate (M1): `WelcomeView` <-> `HomeView`, keyed off `AuthManager`.
+/// `isRestoring` covers the brief window before the very first
+/// `authStateChanges` event tells us whether a Keychain-persisted session
+/// exists — showing nothing (rather than flashing `WelcomeView`) avoids a
+/// visible sign-in-screen flicker for an already-signed-in user.
 struct RootView: View {
+    @Environment(AuthManager.self) private var authManager
+
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             Palette.paper.ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Your trips")
-                    .font(Typo.display())
-                    .foregroundStyle(Palette.ink)
-
-                Text("Everyone's plans, one shared itinerary.")
-                    .font(Typo.body())
-                    .foregroundStyle(Palette.slate)
-
-                PillLabel(text: "Design system online", tint: .amber)
-                    .padding(.top, Spacing.sm)
-
-                Spacer()
+            if authManager.isRestoring {
+                EmptyView()
+            } else if authManager.isSignedIn {
+                HomeView()
+            } else {
+                WelcomeView()
             }
-            .padding(Spacing.xl)
 
             #if DEBUG
             FontCheck()
@@ -32,5 +28,14 @@ struct RootView: View {
 }
 
 #Preview {
-    RootView()
+    let container = AppSchema.makeContainer(inMemory: true)
+    let status = SyncStatus()
+    let engine = SyncEngine(modelContainer: container, status: status)
+    let auth = AuthManager(syncEngine: engine)
+
+    return RootView()
+        .environment(auth)
+        .environment(status)
+        .environment(\.syncEngine, engine)
+        .modelContainer(container)
 }
