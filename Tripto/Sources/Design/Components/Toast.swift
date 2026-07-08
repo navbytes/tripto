@@ -9,6 +9,10 @@ import SwiftUI
 /// own screen with its own overlay.
 struct ToastOverlay: ViewModifier {
     @Binding var message: String?
+    /// Clearance from the bottom edge — defaults to the original
+    /// `Spacing.xxl`. Screens with a FAB in that band (finding 8) pass a
+    /// larger inset so the toast floats clear of it instead of overlapping.
+    var bottomInset: CGFloat = Spacing.xxl
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
@@ -21,7 +25,10 @@ struct ToastOverlay: ViewModifier {
                     .padding(.vertical, Spacing.md)
                     .background(Palette.indigo, in: Capsule())
                     .shadow(color: Palette.shadow.opacity(0.25), radius: 12, y: 6)
-                    .padding(.bottom, Spacing.xxl)
+                    // A multi-line toast (e.g. the ~110-character
+                    // signed-out edit message) never spans edge-to-edge.
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.bottom, bottomInset)
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .task(id: message) {
                         // `.updatesFrequently` alone announces nothing —
@@ -53,8 +60,8 @@ struct ToastOverlay: ViewModifier {
 }
 
 extension View {
-    func toastOverlay(_ message: Binding<String?>) -> some View {
-        modifier(ToastOverlay(message: message))
+    func toastOverlay(_ message: Binding<String?>, bottomInset: CGFloat = Spacing.xxl) -> some View {
+        modifier(ToastOverlay(message: message, bottomInset: bottomInset))
     }
 }
 

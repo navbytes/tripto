@@ -127,4 +127,27 @@ final class PersonFilterTests: XCTestCase {
         XCTAssertEqual(summary.assignedToPerson, 1)
         XCTAssertEqual(summary.hiddenForOthers, 0)
     }
+
+    // MARK: - reconciledSelection (finding 5: stale "Just mine" filter)
+
+    func testReconciledSelectionNilStaysNil() {
+        XCTAssertNil(PersonFilter.reconciledSelection(nil, profileIds: [UUID()]))
+    }
+
+    func testReconciledSelectionKeptWhenPresentInProfileIds() {
+        let meera = UUID()
+        let result = PersonFilter.reconciledSelection(meera, profileIds: [meera, UUID()])
+        XCTAssertEqual(result, meera)
+    }
+
+    func testReconciledSelectionResetsWhenProfileRemoved() {
+        let meera = UUID()
+        let result = PersonFilter.reconciledSelection(meera, profileIds: [UUID()])
+        XCTAssertNil(result)
+    }
+
+    func testReconciledSelectionResetsWhenProfileIdsEmpty() {
+        let meera = UUID()
+        XCTAssertNil(PersonFilter.reconciledSelection(meera, profileIds: []))
+    }
 }

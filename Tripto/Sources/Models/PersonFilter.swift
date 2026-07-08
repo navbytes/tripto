@@ -65,6 +65,20 @@ enum PersonFilter {
         return FilterSummary(assignedToPerson: assignedToPerson, shared: shared, hiddenForOthers: hidden)
     }
 
+    /// UX audit finding 5: the "Just mine" selection can go stale if the
+    /// filtered-to profile is deleted (locally, or pulled via realtime) —
+    /// `selectedProfileFilter` would keep pointing at a `TripProfile` that
+    /// no longer exists, silently hiding the rest of the trip. Returns
+    /// `selection` unchanged when it's already "Everyone" (`nil`) or still
+    /// present in `profileIds`; otherwise resets to `nil` so the full
+    /// timeline returns and the "Everyone" chip renders selected. A silent
+    /// reset is the honest minimal behavior here — the removed profile's
+    /// name is already gone by the time there'd be anything to toast about.
+    static func reconciledSelection(_ selection: UUID?, profileIds: Set<UUID>) -> UUID? {
+        guard let selection else { return nil }
+        return profileIds.contains(selection) ? selection : nil
+    }
+
     /// `itemId` -> the `profileId`s assigned to it, restricted to
     /// `itemIds` — the caller's own trip's item ids. `ItemAssignee` carries
     /// no `tripId` of its own (composite PK item_id+profile_id), so scoping

@@ -38,8 +38,12 @@ struct PersonFilterBar: View {
                 .padding(.trailing, Spacing.xl)
             }
         }
+        .padding(.top, Spacing.md)
+        // Finding 1b: the row grows ~14pt now that each chip's hit area
+        // is 44pt tall; trimming the bottom padding keeps the bar's total
+        // height within a couple points of before.
+        .padding(.bottom, Spacing.xs)
         .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.md)
         .background(Palette.paper)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.mist).frame(height: 1)
@@ -62,6 +66,10 @@ struct PersonFilterBar: View {
             .overlay {
                 Capsule().stroke(isOn ? Color.clear : Palette.mist, lineWidth: 1)
             }
+            // Finding 1b: the ~30pt visual capsule sits centered in a 44pt
+            // hit band (§6.5) — visuals unchanged, hit area compliant.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
@@ -92,6 +100,9 @@ struct PersonFilterBar: View {
             .overlay {
                 Capsule().stroke(isOn ? Color.clear : Palette.mist, lineWidth: 1)
             }
+            // Finding 1b: same 44pt hit band as `everyoneChip` above.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])

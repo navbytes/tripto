@@ -7,6 +7,11 @@ import SwiftUI
 /// tab's cards do, via the shared `ItemRoute` navigation destination.
 struct BookingsTabView: View {
     let items: [ItineraryItem]
+    /// Invokes `TripView`'s `AddItemSheet` presentation (finding 6) — `nil`
+    /// for viewers, who get read-only copy instead of a routing affordance.
+    /// No persistent FAB on this tab; the empty state is the only entry
+    /// point here (mirrors the itinerary tab's own empty-state prompt).
+    var onAdd: (() -> Void)? = nil
 
     private var groups: [(category: ItemCategory, items: [ItineraryItem])] {
         let withConfirmation = items.filter { !($0.confirmation ?? "").isEmpty }
@@ -49,17 +54,40 @@ struct BookingsTabView: View {
         .background(Palette.paper)
     }
 
+    // Finding 6 (§6.6 invitation copy): the old state just described what
+    // would happen ("confirmation codes you add will collect here") without
+    // giving the organizer a way to make it happen — a dead end on the one
+    // tab whose entire purpose is "find the confirmation code." An editor
+    // gets an invitation with a route; a viewer gets the honest read-only
+    // version of the same sentence.
     private var emptyState: some View {
         VStack(spacing: Spacing.md) {
             Spacer()
             Image(systemName: "ticket")
                 .font(.system(size: 34))
                 .foregroundStyle(Palette.slate)
-            Text("Confirmation codes you add will collect here.")
-                .font(Typo.body())
-                .foregroundStyle(Palette.slate)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Spacing.xxl)
+            Text(
+                onAdd != nil
+                    ? "Add a flight or stay with its confirmation code \u{2014} bookings collect here automatically."
+                    : "Bookings the organizers add will collect here."
+            )
+            .font(Typo.body())
+            .foregroundStyle(Palette.slate)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Spacing.xxl)
+            if let onAdd {
+                Button(action: onAdd) {
+                    Text("Add your first booking")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.onAmber)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.vertical, Spacing.md)
+                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                        .contentShape(Capsule())
+                        .background(Palette.amber, in: Capsule())
+                }
+                .padding(.top, Spacing.xs)
+            }
             Spacer()
             Spacer()
         }

@@ -101,7 +101,23 @@ struct TripView: View {
 
     /// Role gate for the FAB and all edit affordances — mirrors RLS
     /// convenience-only (CLAUDE.md): viewers see a read-only trip.
-    private var canAddItems: Bool { myRole != .viewer }
+    ///
+    /// Finding 7: `myRole != .viewer` alone can't tell a signed-out local
+    /// creator (whose `TripMember` row only ever exists locally, and is
+    /// therefore always "resolved") apart from a signed-in joiner whose
+    /// membership row simply hasn't arrived from the first pull yet — both
+    /// read as `nil`. Distinguishing the two nil cases: a signed-out user is
+    /// always the legitimately-permitted local creator; a signed-in user
+    /// with no resolved role yet is mid-first-pull and should see a
+    /// read-only trip until RLS would actually let them write.
+    /// `TripFormView.swift`'s trip-creation path inserts a local organizer
+    /// `TripMember` synchronously, so a signed-in creator always has a
+    /// resolved role by the time this is read — only joiners are affected.
+    private var canAddItems: Bool {
+        guard authManager.userId != nil else { return true }
+        guard let myRole else { return false }
+        return myRole != .viewer
+    }
 
     var body: some View {
         ZStack {
@@ -115,7 +131,14 @@ struct TripView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .toastOverlay($toast)
+        // Finding 8: the default `Spacing.xxl` inset sits inside the FAB's
+        // band, so a toast (esp. the ~110-character signed-out edit
+        // message) can overlap it. Constant inset — FAB height + its own
+        // bottom padding + a gap — rather than FAB-visibility-conditional:
+        // `Packing` renders its own FAB in the same band, and a toast that
+        // jumps position per tab is worse than one that sits slightly high
+        // on `Bookings`.
+        .toastOverlay($toast, bottomInset: Spacing.xxl + Fab.diameter + Spacing.md)
         .onAppear {
             let id = tripId
             Task {
@@ -137,6 +160,13 @@ struct TripView: View {
             if let uitestBookingDetailItemId {
                 NavigationStack { BookingDetailView(itemId: uitestBookingDetailItemId) }
             }
+        }
+        // Finding 5: if the profile the "Just mine" filter points at is
+        // deleted (locally, or via a realtime pull that drops it), snap
+        // back to "Everyone" instead of silently hiding the rest of the
+        // trip behind a filter for a person who no longer exists.
+        .onChange(of: tripProfiles.map(\.id)) { _, ids in
+            selectedProfileFilter = PersonFilter.reconciledSelection(selectedProfileFilter, profileIds: Set(ids))
         }
     }
 
@@ -213,7 +243,7 @@ struct TripView: View {
                         toast: $toast
                     )
                 case .bookings:
-                    BookingsTabView(items: items)
+                    BookingsTabView(items: items, onAdd: canAddItems ? { isPresentingAdd = true } : nil)
                 case .packing:
                     PackingListView(tripId: trip.id)
                 }
@@ -292,32 +322,74 @@ struct TripView: View {
             Text(trip.title)
                 .font(Typo.display(Typo.Size.display))
                 .foregroundStyle(.white)
-                .lineLimit(1)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: Spacing.sm) {
-                Text(dateRangeText(for: trip))
-                metaDot
-                Text("\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")")
-                metaDot
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "person.2.fill").font(.system(size: 10))
-                    Text("\(max(tripProfiles.count, 1))")
-                }
-            }
-            .font(Typo.body(Typo.Size.caption))
-            .foregroundStyle(.white.opacity(0.92))
-            .padding(.top, Spacing.xs)
+            metaRow(for: trip)
+                .padding(.top, Spacing.xs)
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.top, Spacing.xs)
         .padding(.bottom, Spacing.lg)
-        .frame(height: 150, alignment: .bottom)
+        // Finding 2: `minHeight` (not a fixed `height`) so the hero grows
+        // instead of clipping when Dynamic Type scales the title/meta —
+        // the gradient background and scrim below are `.background`/
+        // `.overlay`, so they scale with it for free.
+        .frame(minHeight: 150, alignment: .bottom)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             CoverGradient.from(key: trip.coverGradient)
-                .overlay(Color.black.opacity(0.08)) // contrast scrim (§7.3)
+                // Finding 3: swapped the flat 8%-black scrim for the same
+                // bottom-anchored `textScrim` `TripCard` uses for the
+                // identical white-text-on-gradient problem (clear until 35%
+                // down, ramping to 45%-black at the bottom — see
+                // `PaletteExtras.swift`). The hero's title/meta sit
+                // bottom-anchored in the densest band: the meta row at
+                // ~85% depth composites to ~4.5-5:1, the 30pt display title
+                // at ~70% depth to ~4+:1 — clearing AA's 4.5:1 and 3:1
+                // large-text bars respectively on all three gradients' worst
+                // corners. The top-row glyph buttons no longer need this
+                // scrim now that their own fill is `coverPillFill`.
+                .overlay(CoverGradient.textScrim)
                 .ignoresSafeArea(edges: .top)
         }
+    }
+
+    /// Finding 4 + 9b: two VoiceOver-distinct pieces instead of one run-on
+    /// row of literal "·" fragments — dates/duration read as a single
+    /// sentence, and the traveler count is a real tappable route (not just
+    /// decorative text) to `ShareRoute`'s "who's coming" screen.
+    private func metaRow(for trip: Trip) -> some View {
+        HStack(spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                Text(dateRangeText(for: trip))
+                metaDot
+                Text("\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")")
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "\(accessibleDateRangeText(for: trip)), \(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")"
+            )
+
+            metaDot
+
+            NavigationLink(value: ShareRoute(tripId: trip.id)) {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "person.2.fill").font(.system(size: 10))
+                    Text("\(max(tripProfiles.count, 1))")
+                }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.xxs)
+                .background(Palette.coverPillFill, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(max(tripProfiles.count, 1)) traveler\(max(tripProfiles.count, 1) == 1 ? "" : "s")")
+            .accessibilityHint("Manage people and invites")
+        }
+        .font(Typo.body(Typo.Size.caption))
+        .foregroundStyle(.white.opacity(0.92))
     }
 
     private var metaDot: some View {
@@ -328,6 +400,15 @@ struct TripView: View {
         let start = trip.startDate.formatted(.dateTime.month(.abbreviated).day())
         let end = trip.endDate.formatted(.dateTime.month(.abbreviated).day())
         return "\(start) – \(end)"
+    }
+
+    /// Same formatters as `dateRangeText`, joined with a spoken "to" instead
+    /// of the visual en-dash — VoiceOver reads punctuation like "–" and "·"
+    /// as literal fragments, not implied connectors (finding 9b).
+    private func accessibleDateRangeText(for trip: Trip) -> String {
+        let start = trip.startDate.formatted(.dateTime.month(.abbreviated).day())
+        let end = trip.endDate.formatted(.dateTime.month(.abbreviated).day())
+        return "\(start) to \(end)"
     }
 
     // MARK: - Sub-tabs (Itinerary · Bookings only — Map/$ Split hidden, §9.4)
@@ -346,6 +427,12 @@ struct TripView: View {
                         withAnimation(.easeInOut(duration: 0.18)) { selectedTab = tab }
                     }
                 } label: {
+                    // Finding 1a: `minHeight: 44` (not the HStack's old
+                    // `.padding(.top, Spacing.md)`) so the full 44pt column
+                    // is hit-testable while the text+underline stay
+                    // bottom-aligned exactly where they render today — the
+                    // padding's ~12pt of headroom is absorbed into this
+                    // frame instead.
                     VStack(spacing: Spacing.sm) {
                         Text(tab.rawValue)
                             .font(Typo.body(weight: .semibold))
@@ -360,6 +447,7 @@ struct TripView: View {
                             }
                         }
                     }
+                    .frame(minHeight: 44, alignment: .bottom)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -368,7 +456,12 @@ struct TripView: View {
             Spacer()
         }
         .padding(.horizontal, Spacing.xl)
-        .padding(.top, Spacing.md)
+        // Finding 9a: `.isTabBar` (iOS 17+, matches this app's SwiftData/
+        // @Observable baseline) so VoiceOver announces tab role and "tab N
+        // of M" position; `.contain` groups the row as one navigable unit
+        // rather than three unrelated static elements.
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isTabBar)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.mist).frame(height: 1)
         }
@@ -395,8 +488,15 @@ struct TripView: View {
 
     /// `items` scoped to `selectedProfileFilter` — see `PersonFilter`'s doc
     /// comment for the "no assignees = for everyone" rule.
+    ///
+    /// Reconciles the selection defensively (finding 5) rather than trusting
+    /// `selectedProfileFilter` outright: `.onChange(of: tripProfiles...)`
+    /// handles the steady-state reset, but a single frame between a
+    /// profile's deletion and that `onChange` firing could otherwise render
+    /// a stale-filtered (effectively empty-for-everyone-else) list.
     private var filteredItems: [ItineraryItem] {
-        PersonFilter.filteredItems(items, assignees: itemAssignees, selectedProfileId: selectedProfileFilter)
+        let reconciled = PersonFilter.reconciledSelection(selectedProfileFilter, profileIds: Set(tripProfiles.map(\.id)))
+        return PersonFilter.filteredItems(items, assignees: itemAssignees, selectedProfileId: reconciled)
     }
 
     /// `itemId` -> resolved assignee avatars, for `ItineraryTabView`'s
