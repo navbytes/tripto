@@ -16,6 +16,17 @@ struct PersonFilterBar: View {
     let chips: [Chip]
     @Binding var selection: UUID?
 
+    /// Finding 1: widths of the chip row / its scroll viewport, read via
+    /// `.onGeometryChange` so the trailing overflow scrim below only shows
+    /// when there's actually more to scroll to — not as a standing
+    /// decoration on a bar that already fits everything.
+    @State private var contentWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+
+    private var hasOverflow: Bool {
+        contentWidth > containerWidth - 2 * Spacing.xl + 1
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.xs) {
@@ -32,7 +43,15 @@ struct PersonFilterBar: View {
             }
             .foregroundStyle(Palette.slate)
             .textCase(.uppercase)
+            .padding(.horizontal, Spacing.xl)
 
+            // Finding 1: horizontal padding used to live inside the
+            // ScrollView (on the chip HStack), so a mid-scroll chip clipped
+            // ~22pt short of the true screen edge — a paper-colored gutter
+            // sighted users could easily mistake for "that's the end of the
+            // list." Padding now lives outside as `.contentMargins`, so the
+            // ScrollView itself spans the full width and chips clip flush
+            // with the edge while scrolling, only inset at rest.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Spacing.sm) {
                     everyoneChip
@@ -40,7 +59,24 @@ struct PersonFilterBar: View {
                         personChip(chip)
                     }
                 }
-                .padding(.trailing, Spacing.xl)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { contentWidth = $0 }
+            }
+            .contentMargins(.horizontal, Spacing.xl, for: .scrollContent)
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { containerWidth = $0 }
+            .overlay(alignment: .trailing) {
+                // Sighted-only overflow cue (VoiceOver already reaches every
+                // chip by swiping) — same paper-to-clear scrim pattern as
+                // `ItineraryTabView.dayHeaderBackground`, using `Palette
+                // .paper` since that's this bar's own background below.
+                if hasOverflow {
+                    LinearGradient(
+                        colors: [Palette.paper.opacity(0), Palette.paper],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: Spacing.xl)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
             }
         }
         .padding(.top, Spacing.md)
@@ -48,7 +84,6 @@ struct PersonFilterBar: View {
         // is 44pt tall; trimming the bottom padding keeps the bar's total
         // height within a couple points of before.
         .padding(.bottom, Spacing.xs)
-        .padding(.horizontal, Spacing.xl)
         .background(Palette.paper)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.mist).frame(height: 1)
@@ -164,4 +199,29 @@ struct PersonFilterBanner: View {
         if summary.hiddenForOthers > 0 { parts += " \u{00B7} \(summary.hiddenForOthers) hidden" }
         return parts
     }
+}
+
+/// Finding 1's validate-first artifact: 8 chips, wide enough to overflow
+/// on any iPhone width, pinning the trailing scrim's appearance.
+#Preview("Overflowing chips") {
+    let names = ["Priya", "Kiran", "Meera", "Arjun", "Sara", "Tom", "Ana", "Leo"]
+    let colors = ["amber", "moss", "sky", "plum"]
+    PersonFilterBar(
+        chips: names.enumerated().map { index, name in
+            .init(id: UUID(), firstName: name, initial: String(name.prefix(1)), colorName: colors[index % colors.count])
+        },
+        selection: .constant(nil)
+    )
+}
+
+/// Companion case: only 2 chips, everything fits at rest — the scrim must
+/// stay hidden here instead of showing as a standing decoration.
+#Preview("Chips that fit") {
+    PersonFilterBar(
+        chips: [
+            .init(id: UUID(), firstName: "Priya", initial: "P", colorName: "moss"),
+            .init(id: UUID(), firstName: "Kiran", initial: "K", colorName: "plum"),
+        ],
+        selection: .constant(nil)
+    )
 }

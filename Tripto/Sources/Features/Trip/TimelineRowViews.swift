@@ -172,7 +172,11 @@ struct TimelineCardRow: View, Equatable {
                     .foregroundStyle(Palette.slate)
                     .lineLimit(isAXSize ? 2 : 1)
                 if !model.assignees.isEmpty || !model.tags.isEmpty {
-                    HStack(spacing: Spacing.xs) {
+                    // Finding 2: a plain `HStack` here ellipsized instead of
+                    // wrapping once avatars + a couple of kid-aware tags
+                    // (§5.4) outran the card's width — `WrapLayout` flows
+                    // extra chips onto a new line instead.
+                    WrapLayout(horizontalSpacing: Spacing.xs, verticalSpacing: Spacing.xs) {
                         if !model.assignees.isEmpty {
                             AvatarStack(people: model.assignees, maxVisible: 4, diameter: 18)
                         }
@@ -346,6 +350,15 @@ struct CheckOutRow: View, Equatable {
 struct TagChip: View {
     let tag: String
 
+    /// Finding 2: a chip wider than the whole content column (e.g.
+    /// "Stroller-friendly" beside a 76pt AX gutter) used to ellipsize its
+    /// label at accessibility sizes — same `lineLimit(isAXSize ? 2 : 1)`
+    /// convention as the card's title/subtitle. Read via `@Environment`
+    /// (rather than threaded in) since this view isn't itself `.equatable()`
+    /// — its parent (`TimelineCardRow`) already carries `typeSize` in its
+    /// own `==`, so a live type-size change still re-triggers this body.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     private var itemTag: ItemTag? { ItemTag(rawValue: tag) }
 
     var body: some View {
@@ -364,7 +377,7 @@ struct TagChip: View {
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, 3)
         .background(CategoryColor.activity.soft, in: Capsule())
-        .lineLimit(1)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
     }
 }
 
@@ -427,6 +440,25 @@ struct TZShiftChipRow: View, Equatable {
                     id: UUID(), category: .activity, timeText: "14:00", zoneLabel: "Kathmandu",
                     title: "Boudhanath walking tour", subtitle: "Kathmandu", hasTicket: false,
                     isPending: false, editedBy: nil, assignees: [], tags: []
+                ),
+                typeSize: .xxLarge
+            )
+            .equatable()
+            // Finding 2's validate-first artifact: avatars + three kid-aware
+            // tags (§5.4) at the 56pt `.xxLarge` gutter — the exact
+            // avatars-plus-tags-overrun-the-width state the finding says was
+            // never pinned. Must wrap onto new lines, not ellipsize.
+            TimelineCardRow(
+                model: TimelineCardModel(
+                    id: UUID(), category: .food, timeText: "12:30", zoneLabel: nil,
+                    title: "Lunch at Thamel House", subtitle: "Kathmandu", hasTicket: false,
+                    isPending: false, editedBy: nil,
+                    assignees: [
+                        .init(id: UUID(), initial: "N", colorName: "amber", name: "Naveen"),
+                        .init(id: UUID(), initial: "P", colorName: "moss", name: "Priya"),
+                        .init(id: UUID(), initial: "K", colorName: "plum", name: "Kiran"),
+                    ],
+                    tags: ["nap", "stroller-ok", "kids-menu"]
                 ),
                 typeSize: .xxLarge
             )
