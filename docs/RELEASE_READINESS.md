@@ -43,8 +43,8 @@ Apple App ID exists, (c) budgeting a support escalation if it 500s.
 |---|---|---|
 | App icon (1024, no alpha) | ✅ asset made | `Assets.xcassets/AppIcon`; wire `ASSETCATALOG_COMPILER_APPICON_NAME` in project.yml after M3b |
 | Launch screen (branded) | ⏳ | replace blank `UILaunchScreen: {}` with a dusk wordmark screen |
-| Privacy manifest `PrivacyInfo.xcprivacy` | ⏳ | declare UserDefaults required-reason (CA92.1); tracking = false. §4 |
-| Hosted privacy policy | ⏳ | serve at `tripto.navbytes.io/privacy` (extend the Worker) |
+| Privacy manifest `PrivacyInfo.xcprivacy` | ✅ | UserDefaults CA92.1; tracking=false; collected types declared. §4 |
+| Hosted privacy policy | ✅ | **live at https://tripto.navbytes.io/privacy** (Worker /privacy route) |
 | App Privacy "nutrition labels" | ⏳ draft | §4 — fillable copy ready for App Store Connect |
 | Release-build hygiene (DEBUG gating) | ⏳ | audit anon sign-in / seeder / `-uitest` hooks are `#if DEBUG`; Release archive clean. §3 |
 | Encryption compliance | ✅ | `ITSAppUsesNonExemptEncryption = false` (standard TLS only) |

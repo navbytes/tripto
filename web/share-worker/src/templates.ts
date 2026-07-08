@@ -187,6 +187,111 @@ ${ICON_DEFS}
 </html>`;
 }
 
+/** GET /privacy — the App Store "Privacy Policy URL". Source of truth is
+ * web/share-worker/privacy-policy.md; keep this in sync with it and with
+ * docs/RELEASE_READINESS.md §4. Public + indexable (unlike token pages). */
+export function renderPrivacyPage(): string {
+  const style = `
+${SHARED_STYLES}
+.article{max-width:680px;margin:0 auto;padding:8px 22px 48px}
+.article .eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#E8955A}
+.article h1{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:clamp(26px,7vw,34px);letter-spacing:-.3px;margin:8px 0 4px;color:#1A1B2E}
+.article .updated{font-size:13px;color:#6B6E8F;margin:0 0 26px}
+.article h2{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:19px;margin:28px 0 8px;color:#1A1B2E}
+.article p{font-size:15px;line-height:1.62;color:#2D2F52;margin:0 0 12px;overflow-wrap:anywhere}
+.article strong{color:#1A1B2E}
+.article .lead{font-size:16px;color:#1A1B2E}`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Tripto</title>
+<style>${style}</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero" style="background:${gradientFor("dusk")}">
+    <p class="trip-title">Tripto</p>
+    <p class="trip-meta">Privacy Policy</p>
+  </div>
+  <article class="article">
+    <p class="eyebrow">Privacy</p>
+    <h1>How Tripto handles your data</h1>
+    <p class="updated">Last updated 8 July 2026</p>
+
+    <p class="lead">Tripto helps families and groups turn scattered bookings into
+      one shared itinerary. We collect as little as possible, never sell your
+      data, and never track you across other apps or websites.</p>
+
+    <h2>Who we are</h2>
+    <p>Tripto is a personal-scale app operated by navbytes. You can reach us at
+      <a href="mailto:tripto@navbytes.io">tripto@navbytes.io</a>.</p>
+
+    <h2>What we collect and why</h2>
+    <p><strong>Your account.</strong> When you sign in with Apple we receive your
+      name and an email address (which may be an Apple private-relay address you
+      can revoke at any time). We use it only to create your account, identify
+      you to people you share trips with, and let invited members recognize you.
+      We never send you marketing email.</p>
+    <p><strong>Your trip content.</strong> The trips, itinerary items (including
+      any locations, confirmation codes, and notes you enter), packing lists, and
+      the profiles you add for travel companions — including family members who
+      don't use the app. This is stored so your trips sync across your devices and
+      to the people you invite, and it is protected by row-level security so only
+      trip members can read it.</p>
+    <p>We do <strong>not</strong> collect analytics, advertising identifiers, or
+      location gathered from your device's sensors. Location text and coordinates
+      exist only if you type or pick them for an itinerary item.</p>
+
+    <h2>When trip data is shared</h2>
+    <p><strong>With people you invite.</strong> Trip members you add (as
+      organizer, companion, or viewer) can see that trip's contents according to
+      their role.</p>
+    <p><strong>Through a share link you create.</strong> If you generate an
+      "anyone-can-view" link, anyone holding that unguessable link can see a
+      <strong>sanitized</strong> version of the itinerary — dates, places, and
+      times only. Confirmation codes, notes, exact coordinates, and member emails
+      are never included on the public link, and you can revoke a link at any
+      time, which disables it immediately.</p>
+    <p>We never share your data with advertisers or data brokers.</p>
+
+    <h2>Where it's stored</h2>
+    <p>Trip data is stored in a Supabase (PostgreSQL) database and transmitted
+      over encrypted HTTPS. Your session is kept securely in the iOS Keychain on
+      your device, and the app keeps a local copy of your trips so they work
+      offline.</p>
+
+    <h2>Deleting your data</h2>
+    <p>You can delete your account from <strong>Settings → Delete account</strong>
+      in the app. This permanently removes your account and any trips you created,
+      along with their itinerary and packing content; trips you were only invited
+      to simply lose you as a member. Because we offer Sign in with Apple,
+      deleting your account also revokes Tripto's Apple sign-in token. Deletion is
+      immediate and cannot be undone.</p>
+
+    <h2>Children</h2>
+    <p>Tripto lets you add profiles for children as trip participants, but those
+      profiles are created and managed by an adult account holder; children do not
+      have their own accounts, and we do not knowingly collect data directly from
+      children.</p>
+
+    <h2>Changes</h2>
+    <p>If this policy changes materially, we'll update the date above and, where
+      appropriate, note it in the app.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about your data: <a href="mailto:tripto@navbytes.io">tripto@navbytes.io</a>.</p>
+  </article>
+  <div class="site-footer">
+    <span class="brand">Tripto</span>
+    <span>tripto.navbytes.io</span>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
 export interface MessagePageOptions {
   pageTitle: string;
   heading: string;

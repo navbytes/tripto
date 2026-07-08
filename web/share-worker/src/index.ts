@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { SHARE_TOKEN_PATTERN, INVITE_TOKEN_PATTERN } from "./format";
-import { renderItineraryPage, renderMessagePage } from "./templates";
+import { renderItineraryPage, renderMessagePage, renderPrivacyPage } from "./templates";
 import { fetchPublicTrip } from "./supabase";
 
 // Token URLs must never be edge/browser cached, indexed, or leaked via
@@ -136,6 +136,20 @@ export default {
 
       if (path === "/.well-known/apple-app-site-association") {
         return handleAasa(env);
+      }
+
+      // The App Store "Privacy Policy URL". Unlike token pages this is public,
+      // indexable, and cacheable — so it gets its own headers, not
+      // SECURITY_HEADERS' no-store/noindex.
+      if (path === "/privacy" || path === "/privacy/") {
+        return new Response(renderPrivacyPage(), {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+            "Cache-Control": "public, max-age=3600",
+          },
+        });
       }
 
       const shareMatch = path.match(/^\/t\/([^/]+)\/?$/);
