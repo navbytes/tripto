@@ -57,4 +57,42 @@ enum TripFormValidation {
         }
         return String(scalars)
     }
+
+    /// A resolvable country the picker (finding F3) can list — always a
+    /// real, assigned ISO region, so nothing in `allCountries()` can ever
+    /// fail `isCountryCodeAcceptable`.
+    struct Country: Identifiable, Equatable {
+        let code: String
+        let name: String
+        let flag: String
+        var id: String { code }
+    }
+
+    /// Every 2-letter ISO region Tripto's country field will accept,
+    /// resolved to a display name/flag and sorted for a picker.
+    /// `Locale.Region.isoRegions` also contains 3-digit UN area codes
+    /// (e.g. `"001"` "World", `"150"` "Europe") that aren't real countries
+    /// and must be filtered out, not just the letter-count check alone —
+    /// see the regression test on this.
+    static let allCountries: [Country] = {
+        Locale.Region.isoRegions
+            .map(\.identifier)
+            .filter { $0.count == 2 && $0.allSatisfy(\.isLetter) }
+            .compactMap { code -> Country? in
+                guard let name = countryName(forCode: code), let flag = flagEmoji(forCode: code) else { return nil }
+                return Country(code: code, name: name, flag: flag)
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }()
+
+    /// Countries whose name contains `query` or whose code is prefixed by it
+    /// (case/diacritic-insensitive), so both "portu" and "PT" find Portugal.
+    /// An empty/blank query returns every country.
+    static func countries(matching query: String) -> [Country] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return allCountries }
+        return allCountries.filter { country in
+            country.name.localizedStandardContains(trimmed) || country.code.hasPrefix(trimmed.uppercased())
+        }
+    }
 }

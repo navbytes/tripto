@@ -67,8 +67,10 @@ struct TripCard: View {
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
 
                     metaLayout {
-                        metaItem(icon: "mappin.circle.fill", text: countryDisplayName)
-                        if !dynamicTypeSize.isAccessibilitySize { dot }
+                        if let locationText {
+                            metaItem(icon: "mappin.circle.fill", text: locationText)
+                            if !dynamicTypeSize.isAccessibilitySize { dot }
+                        }
                         metaItem(icon: "calendar", text: startDateText)
                         if !dynamicTypeSize.isAccessibilitySize { dot }
                         Text(durationText)
@@ -91,7 +93,8 @@ struct TripCard: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [trip.title, countryDisplayName]
+        var parts = [trip.title]
+        if let locationText { parts.append(locationText) }
         switch bucket {
         case .inProgress: parts.append("in progress")
         case .upcoming: parts.append("in \(daysUntilStartText)")
@@ -150,12 +153,26 @@ struct TripCard: View {
         Text("·").opacity(0.6)
     }
 
+    /// `nil` when there's nothing to show for location (finding 6) — a
+    /// title-only trip shouldn't render a dangling map-pin + separator with
+    /// no text after it.
+    private var locationText: String? {
+        TripCard.locationText(countryCode: trip.countryCode, destination: trip.destination)
+    }
+
+    /// Split out of `locationText` (finding 6) so it's unit-testable without
+    /// standing up a whole `TripCard`, mirroring `startDateText` below.
     /// `countryCode` is a bare ISO-3166 2-letter code (the form's field);
     /// `Locale` turns it into the display name the mockup shows ("PT" ->
-    /// "Portugal") with no hand-maintained lookup table.
-    private var countryDisplayName: String {
-        guard trip.countryCode.count == 2 else { return trip.destination }
-        return Locale.current.localizedString(forRegionCode: trip.countryCode) ?? trip.countryCode
+    /// "Portugal") with no hand-maintained lookup table. Falls back to the
+    /// free-text `destination`, and to `nil` (nothing to show) only when
+    /// both are blank.
+    static func locationText(countryCode: String, destination: String) -> String? {
+        if countryCode.count == 2 {
+            return Locale.current.localizedString(forRegionCode: countryCode) ?? countryCode
+        }
+        let trimmedDestination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedDestination.isEmpty ? nil : destination
     }
 
     private var startDateText: String {

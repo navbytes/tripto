@@ -310,19 +310,29 @@ extension AddItemSheet {
 /// A single labeled text input matching the mockup's `Field` component
 /// (rounded 13pt border, label above) — this file's one shared text-input
 /// look, so flight/stay/activity/food fields don't each hand-roll it.
-struct FormTextField: View {
+///
+/// Generic over an optional `FocusValue` (UX audit finding 1): `.focused` is
+/// only documented-reliable on the actual focusable control, not a wrapping
+/// `VStack`, so a caller that needs focus forwarding supplies `focusBinding`
+/// + `focusValue` and both land on the inner `TextField` directly. Callers
+/// that don't care about focus (the ~24 existing call sites) keep using the
+/// plain `init` below, which pins `FocusValue == Bool` and leaves both nil —
+/// no call-site changes required.
+struct FormTextField<FocusValue: Hashable>: View {
     let label: String
     @Binding var text: String
     var placeholder: String = ""
     var keyboardType: UIKeyboardType = .default
     var autocapitalization: TextInputAutocapitalization = .sentences
+    var focusBinding: FocusState<FocusValue>.Binding?
+    var focusValue: FocusValue?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(label)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.slate)
-            TextField(placeholder, text: $text)
+            textField
                 .font(Typo.body())
                 .keyboardType(keyboardType)
                 .textInputAutocapitalization(autocapitalization)
@@ -335,6 +345,34 @@ struct FormTextField: View {
                         .stroke(Palette.mist, lineWidth: 1)
                 }
         }
+    }
+
+    @ViewBuilder
+    private var textField: some View {
+        if let focusBinding, let focusValue {
+            TextField(placeholder, text: $text)
+                .focused(focusBinding, equals: focusValue)
+        } else {
+            TextField(placeholder, text: $text)
+        }
+    }
+}
+
+extension FormTextField where FocusValue == Bool {
+    /// The no-focus-forwarding shape every existing call site uses —
+    /// `focusBinding`/`focusValue` stay at their `nil` defaults.
+    init(
+        label: String,
+        text: Binding<String>,
+        placeholder: String = "",
+        keyboardType: UIKeyboardType = .default,
+        autocapitalization: TextInputAutocapitalization = .sentences
+    ) {
+        self.label = label
+        self._text = text
+        self.placeholder = placeholder
+        self.keyboardType = keyboardType
+        self.autocapitalization = autocapitalization
     }
 }
 

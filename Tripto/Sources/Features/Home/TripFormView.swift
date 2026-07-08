@@ -43,11 +43,13 @@ struct TripFormView: View {
     /// F4: gates the "Discard changes?" confirmation on cancel/swipe-dismiss.
     @State private var showDiscardConfirm = false
 
-    /// UX audit finding 5: Trip name -> Destination -> Country keyboard flow,
-    /// so a user filling the form top-to-bottom never has to reach for the
-    /// keyboard's dismiss key or tap the next field by hand.
+    /// UX audit finding 5: Trip name -> Destination keyboard flow, so a user
+    /// filling the form top-to-bottom never has to reach for the keyboard's
+    /// dismiss key or tap the next field by hand. Country dropped out of
+    /// this chain when it became a picker (finding 3) rather than a typed
+    /// field.
     private enum FocusField {
-        case title, destination, country
+        case title, destination
     }
     @FocusState private var focusedField: FocusField?
 
@@ -179,12 +181,27 @@ struct TripFormView: View {
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
         }
+        .background(
+            // Finding 5: surfaces the same "Discard changes?" dialog Cancel
+            // uses when a dirty form's swipe-down is blocked by
+            // `.interactiveDismissDisabled` below, instead of an unexplained
+            // rubber-band.
+            SheetDismissAttemptObserver { showDiscardConfirm = true }
+        )
         .interactiveDismissDisabled(hasChanges)
         .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
         .onChange(of: currentValues) { _, _ in saveError = nil }
+        // Finding 4: only error-toned CTA guidance is announced — see
+        // `ctaGuidance`'s doc comment for why the advisory blank-title copy
+        // is deliberately excluded.
+        .onChange(of: saveError) { _, newValue in
+            if let newValue {
+                AccessibilityNotification.Announcement(newValue).post()
+            }
+        }
         .task {
             // F5, create mode only — editing an existing trip shouldn't pop
             // the keyboard the moment the sheet appears. A short delay
@@ -192,10 +209,14 @@ struct TripFormView: View {
             // sheet-presented `NavigationStack`, where `.defaultFocus`'s
             // timing relative to the sheet's own presentation animation is
             // unreliable; a delayed explicit set is the dependable version
-            // of the same intent.
+            // of the same intent. Guarded by `focusedField == nil` (finding
+            // 1) so a user who's already tapped into Destination within the
+            // delay isn't yanked back to Title.
             if case .create = mode {
                 try? await Task.sleep(for: .milliseconds(500))
-                focusedField = .title
+                if focusedField == nil {
+                    focusedField = .title
+                }
             }
         }
     }
@@ -204,56 +225,32 @@ struct TripFormView: View {
 
     private var tripNameField: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            FormTextField(label: "Trip name", text: $title, placeholder: "Lisbon")
-                .focused($focusedField, equals: .title)
-                .submitLabel(.next)
-                .onSubmit { focusedField = .destination }
+            FormTextField(
+                label: "Trip name", text: $title, placeholder: "Lisbon",
+                focusBinding: $focusedField, focusValue: .title
+            )
+            .submitLabel(.next)
+            .onSubmit { focusedField = .destination }
             Text("This is the big title on your trip card.")
                 .helperTextStyle()
         }
     }
 
     private var destinationField: some View {
-        FormTextField(label: "Destination", text: $destination, placeholder: "Lisbon, Portugal")
-            .focused($focusedField, equals: .destination)
-            .submitLabel(.next)
-            .onSubmit { focusedField = .country }
+        FormTextField(
+            label: "Destination", text: $destination, placeholder: "Lisbon, Portugal",
+            focusBinding: $focusedField, focusValue: .destination
+        )
+        .submitLabel(.done)
+        .onSubmit { focusedField = nil }
     }
 
     private var countryField: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            FormTextField(
-                label: "Country", text: $countryCode, placeholder: "2-letter code, e.g. PT",
-                autocapitalization: .characters
-            )
-            .focused($focusedField, equals: .country)
-            .submitLabel(.done)
-            .onSubmit { focusedField = nil }
-            .onChange(of: countryCode) { _, newValue in
-                let filtered = String(newValue.uppercased().prefix(2))
-                if filtered != countryCode { countryCode = filtered }
-            }
-            // Finding 1: a 1-character code (e.g. mid-type "P") now gets the
-            // same rejection hint as a 2-character one that doesn't resolve,
-            // instead of silently doing nothing until the second keystroke.
-            if let countryName = TripFormValidation.countryName(forCode: countryCode) {
-                // Finding 2: flag + name in one `Text` (so VoiceOver reads
-                // the country name, not a decorative glyph) and styled loud
-                // — ink/semibold, not passive slate caption — so a
-                // resolved-but-wrong country (e.g. CR instead of HR) reads
-                // as something to double-check, not as inert helper text.
-                Text("\(TripFormValidation.flagEmoji(forCode: countryCode) ?? "") \(countryName)")
-                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-            } else if !countryCode.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text(
-                    "\u{2018}\(countryCode)\u{2019} isn\u{2019}t a country code Tripto recognizes " +
-                    "\u{2014} use a 2-letter code like PT for Portugal."
-                )
-                .font(Typo.body(Typo.Size.caption))
-                .foregroundStyle(Palette.rose)
-            }
-        }
+        // Finding 3: a searchable picker instead of a typed 2-letter code —
+        // makes an invalid country unrepresentable, so the old rejection
+        // hint and flag+name confirmation text are both gone. Not part of
+        // the finding-1 focus chain: it's a picker sheet, not a text field.
+        CountryPickerField(label: "Country", code: $countryCode)
     }
 
     private var datesSection: some View {
@@ -268,6 +265,17 @@ struct TripFormView: View {
                 Text("End date must be on or after the start date.")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.rose)
+                    .accessibilityAddTraits(.updatesFrequently)
+                    .onAppear {
+                        // Finding 4: this validation text used to render
+                        // silently — nothing prompted VoiceOver to speak it,
+                        // so a screen-reader user editing dates got no
+                        // feedback at all. Mirrors HomeView's retry-failure
+                        // caption announcement.
+                        AccessibilityNotification.Announcement(
+                            "End date must be on or after the start date."
+                        ).post()
+                    }
             }
         }
     }
@@ -305,6 +313,14 @@ struct TripFormView: View {
                 Text(guidance.message)
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(guidance.isError ? Palette.rose : Palette.slate)
+                    // Finding 4: `.updatesFrequently` so VoiceOver re-reads
+                    // this on change; the actual announcement post for
+                    // error-toned messages is the form-level `saveError`
+                    // `.onChange` above — the advisory blank-title copy is
+                    // deliberately not announced (it's visible from the
+                    // moment a create sheet opens; announcing there would
+                    // spam every presentation).
+                    .accessibilityAddTraits(.updatesFrequently)
             }
             Button {
                 save()
@@ -402,7 +418,12 @@ struct TripFormView: View {
         switch mode {
         case .create:
             guard let userId = authManager.userId else {
-                saveError = "You\u{2019}re signed out \u{2014} sign in again to create this trip."
+                // Finding 7: names the actual consequence instead of an
+                // unreachable in-sheet fix (§6.6 plain, honest register) —
+                // this sheet has no way to trigger sign-in itself, so
+                // telling the user to "sign in again" here was a dead end.
+                saveError = "You\u{2019}ve been signed out, so this trip can\u{2019}t be created. Cancel and " +
+                    "sign back in \u{2014} what you\u{2019}ve entered here won\u{2019}t be kept."
                 return
             }
             let trip = Trip(

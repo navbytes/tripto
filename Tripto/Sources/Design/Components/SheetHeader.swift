@@ -14,17 +14,26 @@ struct SheetHeader: View {
                 Button("Cancel", action: onCancel)
                     .font(Typo.body(weight: .semibold))
                     .foregroundStyle(Palette.slate)
+                    // BUILD_PLAN §6.5's 44pt floor (finding 2) — matches
+                    // SegmentedControl.swift and HomeView.swift's CTAs.
+                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 Spacer()
                 Text(title)
                     .font(Typo.body(weight: .bold))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                 Spacer()
-                Text("Cancel").font(Typo.body(weight: .semibold)).opacity(0) // balances the leading button
+                // Balances the leading button — same frame so the title
+                // stays centered once Cancel grows to the 44pt floor.
+                Text("Cancel")
+                    .font(Typo.body(weight: .semibold))
+                    .opacity(0)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
             }
             .padding(.horizontal, Spacing.lg)
-            .padding(.top, Spacing.md)
-            .padding(.bottom, Spacing.sm)
+            .padding(.top, Spacing.xs)
+            .padding(.bottom, Spacing.xxs)
 
             Rectangle().fill(Palette.mist).frame(height: 1)
         }
