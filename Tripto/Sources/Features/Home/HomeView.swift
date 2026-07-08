@@ -24,8 +24,15 @@ struct HomeView: View {
     /// M3: surfaces `AppRouter.errorToast` (an expired/revoked invite link)
     /// as a persistent `.alert` rather than a toast (finding 6) — a
     /// two-second auto-dismissing toast can be missed entirely, and this is
-    /// the one Home error worth blocking on. Nothing else on Home toasts.
+    /// the one Home error worth blocking on. The refresh-failure toast below
+    /// is the deliberate exception: it's advisory, not blocking, and scoped
+    /// to the pull-to-refresh gesture that triggered it (finding 1).
     @State private var inviteErrorMessage: String?
+    /// Finding 1 (refresh-scoped gap): a manual pull-to-refresh that fails
+    /// silently leaves the list unchanged with no feedback. Driven by
+    /// `HomeRefreshFeedback.shouldToastAfterRefresh` from `refreshFromPull()`
+    /// so all six `.refreshable` closures share one gated path.
+    @State private var refreshFailedToast: String?
     /// The app's one `NavigationPath` (`TripView.swift`'s doc comment: "the
     /// one `NavigationStack` rooted in `HomeView`") — pushing `TripRoute`/
     /// `ItemRoute` values onto this, rather than wrapping each row in a
@@ -94,6 +101,7 @@ struct HomeView: View {
                     }
                 }
             }
+            .toastOverlay($refreshFailedToast)
             .navigationBarTitleDisplayMode(.inline)
             // The one route-based nav stack (`TripView.swift`'s doc
             // comment): Home pushes `TripRoute`; `TripView`'s own tabs push
@@ -251,6 +259,25 @@ struct HomeView: View {
         #endif
     }
 
+    /// Shared path for all six `.refreshable { }` closures on Home (finding
+    /// 1) — routes every pull-to-refresh gesture through the same gate so
+    /// they can't diverge. `pullHome()` itself already drives `SyncStatus`;
+    /// this only decides whether *this* gesture, specifically, should also
+    /// toast. Known accepted edge: a refresh landing while a debounced pull
+    /// is already in flight early-returns from `pullHome()` and reads the
+    /// previous attempt's flag — rare, and the resulting message stays
+    /// truthful either way.
+    private func refreshFromPull() async {
+        await syncEngine?.pullHome()
+        if HomeRefreshFeedback.shouldToastAfterRefresh(
+            lastHomePullFailed: syncStatus.lastHomePullFailed,
+            isOffline: syncStatus.isOffline,
+            hasTrips: !trips.isEmpty
+        ) {
+            refreshFailedToast = "Couldn\u{2019}t refresh \u{2014} pull to try again"
+        }
+    }
+
     // MARK: - Header
 
     private var header: some View {
@@ -262,6 +289,7 @@ struct HomeView: View {
                 Text("Your trips")
                     .font(Typo.display())
                     .foregroundStyle(Palette.ink)
+                    .accessibilityAddTraits(.isHeader)
             }
             Spacer()
             // NavigationLink(value:), same reasoning as TripView's share
@@ -324,7 +352,7 @@ struct HomeView: View {
                 .padding(.bottom, Spacing.lg)
                 .swipeActions(edge: .trailing) {
                     if isOrganizer(of: trip) {
-                        Button("Delete", role: .destructive) {
+                        Button("Delete trip", role: .destructive) {
                             tripPendingDeletion = trip
                         }
                     }
@@ -346,7 +374,7 @@ struct HomeView: View {
         // User-initiated escape hatch for a missed realtime event (finding
         // 10) — realtime/debounced pulls are the normal path, this is just
         // the fallback.
-        .refreshable { await syncEngine?.pullHome() }
+        .refreshable { await refreshFromPull() }
     }
 
     private var planNewTripRow: some View {
@@ -402,7 +430,7 @@ struct HomeView: View {
         }
         // A just-invited user staring at an empty Home needs the same pull
         // escape hatch as the populated list (finding 10).
-        .refreshable { await syncEngine?.pullHome() }
+        .refreshable { await refreshFromPull() }
     }
 
     private func valueRow(_ icon: String, _ text: String) -> some View {
@@ -440,7 +468,7 @@ struct HomeView: View {
             .padding(Spacing.xl)
             .containerRelativeFrame(.vertical)
         }
-        .refreshable { await syncEngine?.pullHome() }
+        .refreshable { await refreshFromPull() }
     }
 
     /// First-pull loading placeholder (finding 2) — shown while a
@@ -471,7 +499,7 @@ struct HomeView: View {
             .padding(Spacing.xl)
             .containerRelativeFrame(.vertical)
         }
-        .refreshable { await syncEngine?.pullHome() }
+        .refreshable { await refreshFromPull() }
     }
 
     /// First-launch-while-offline placeholder (finding 5) — distinct from
@@ -506,7 +534,7 @@ struct HomeView: View {
             .padding(Spacing.xl)
             .containerRelativeFrame(.vertical)
         }
-        .refreshable { await syncEngine?.pullHome() }
+        .refreshable { await refreshFromPull() }
     }
 
     /// Failed-first/latest-pull placeholder (finding 1) — distinct from
@@ -552,7 +580,7 @@ struct HomeView: View {
             .padding(Spacing.xl)
             .containerRelativeFrame(.vertical)
         }
-        .refreshable { await syncEngine?.pullHome() }
+        .refreshable { await refreshFromPull() }
     }
 
     /// Slim in-progress indicator for an invite claim (finding 6) — shown
