@@ -1,0 +1,698 @@
+import SwiftData
+import SwiftUI
+
+/// Contextual add/edit sheet (BUILD_PLAN.md §4.3; this milestone's brief).
+/// One category selector drives four very different field sets — kept as
+/// plain per-category `@State` rather than one generic form model, matching
+/// `SyncStore`'s own "eight plain methods are easier to read and debug than
+/// one clever generic one" philosophy at this scale.
+///
+/// Presented twice: `TripView`'s FAB (`editing: nil`) and
+/// `BookingDetailView`'s "Edit" action (`editing: <item>`) — both go through
+/// this one sheet so add and edit share every field/validation/zone-default
+/// rule. Every save is the same "SwiftData write on the main context, then
+/// `SyncEngine.enqueue`" flow `TripFormView` already established.
+struct AddItemSheet: View {
+    let tripId: UUID
+    let tripTitle: String
+    let editing: ItineraryItem?
+    let onToast: (String) -> Void
+    /// The zone a *new* item's pickers should default to — the trip's dominant
+    /// existing-item zone (see `NewItemZoneDefault`), so a Lisbon trip doesn't
+    /// offer the traveler's home clock. `.current` when adding to an empty trip
+    /// or when editing (edit reads zones off the item instead).
+    let defaultZone: TimeZone
+
+    @Query var tripProfiles: [TripProfile]
+    @Query private var members: [TripMember]
+    /// `ItemAssignee`s for the item being edited — filtered to a sentinel
+    /// (never-matching) id when adding, since there's no item yet to have
+    /// any. Seeds `selectedAssigneeProfileIds` once via `.task` below
+    /// (`@Query` results aren't available synchronously in `init`, unlike
+    /// `editing`'s other fields).
+    @Query private var existingAssignees: [ItemAssignee]
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.syncEngine) private var syncEngine
+    @Environment(AuthManager.self) private var authManager
+    @Environment(SyncStatus.self) private var syncStatus
+    @Environment(\.dismiss) private var dismiss
+
+    @State var category: ItemCategory
+
+    // Family (M4 §3): "Who's this for?" + kid-aware tags — apply across
+    // every category, unlike the fields above.
+    @State var selectedTags: Set<String> = []
+    @State var selectedAssigneeProfileIds: Set<UUID> = []
+    @State private var originalAssigneeProfileIds: Set<UUID> = []
+    @State private var hasLoadedAssignees = false
+
+    // Flight
+    @State var airline = ""
+    @State var flightNo = ""
+    @State var fromIATA = ""
+    @State var toIATA = ""
+    @State var flightDate = Date()
+    @State var departsTime = Date()
+    @State var departureZone: TimeZone = .current
+    @State var arrivesTime = Date()
+    @State var arrivalZone: TimeZone = .current
+    /// `nil` = follow `ItemTimeCombining.suggestedArrivalDayOffset`'s
+    /// auto-detect; `true`/`false` once the user taps the "+1 day" chip.
+    @State var arrivalDayOffsetOverride: Bool?
+    @State var seat = ""
+    @State var terminal = ""
+    @State var gate = ""
+
+    // Stay
+    @State var stayName = ""
+    @State var checkInDate = Date()
+    @State var checkInTime = Date()
+    @State var checkOutDate = Date()
+    @State var checkOutTime = Date()
+    @State var stayZone: TimeZone = .current
+    @State var room = ""
+
+    // Activity
+    @State var activityTitle = ""
+    @State var activityDate = Date()
+    @State var activityTime = Date()
+    @State var activityZone: TimeZone = .current
+    @State var ticketRef = ""
+
+    // Food
+    @State var foodName = ""
+    @State var foodDate = Date()
+    @State var foodTime = Date()
+    @State var foodZone: TimeZone = .current
+    @State var partySize = ""
+    @State var reservationName = ""
+
+    // Transport (rental car / train / ferry / transfer) — pickup A → drop-off B,
+    // structurally a flight. Pickup location reuses the shared `locationText`;
+    // `dropoffText` is the drop-off place; `arrivalDayOffsetOverride` (shared
+    // with flight) drives the "+1 day" chip.
+    @State var transportTitle = ""
+    @State var provider = ""
+    @State var transportDate = Date()
+    @State var pickupTime = Date()
+    @State var pickupZone: TimeZone = .current
+    @State var dropoffText = ""
+    @State var dropoffDate = Date()
+    @State var dropoffTime = Date()
+    @State var dropoffZone: TimeZone = .current
+    /// Off by default: a same-city rental drops off in the pickup zone, so the
+    /// form shows one zone, not two (persona dry-run). On reveals a separate
+    /// drop-off zone picker for a zone-crossing train/ferry.
+    @State var transportDropoffDiffZone = false
+
+    // Shared across non-flight categories
+    @State var confirmation = ""
+    @State var locationText = ""
+    @State var locationLat: Double?
+    @State var locationLng: Double?
+    @State var address: String?
+
+    private static let lastDepartureTZKey = "lastDepartureTZ"
+    private static func lastArrivalTZKey(_ tripId: UUID) -> String { "lastArrivalTZ.\(tripId.uuidString)" }
+
+    init(tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current, tripStartDate: Date = .now, onToast: @escaping (String) -> Void) {
+        self.tripId = tripId
+        self.tripTitle = tripTitle
+        self.editing = editing
+        self.onToast = onToast
+        self.defaultZone = defaultZone
+
+        _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
+        _members = Query(filter: #Predicate<TripMember> { $0.tripId == tripId })
+        let existingAssigneesItemId = editing?.id ?? UUID()
+        _existingAssignees = Query(filter: #Predicate<ItemAssignee> { $0.itemId == existingAssigneesItemId })
+
+        if let editing {
+            let details = editing.details
+            _category = State(initialValue: editing.category)
+            _confirmation = State(initialValue: editing.confirmation ?? "")
+            _locationText = State(initialValue: editing.locationName)
+            _locationLat = State(initialValue: editing.locationLat)
+            _locationLng = State(initialValue: editing.locationLng)
+            _address = State(initialValue: details.address)
+            _selectedTags = State(initialValue: Set(details.tags))
+
+            switch editing.category {
+            case .flight:
+                _airline = State(initialValue: details.airline ?? "")
+                _flightNo = State(initialValue: details.flightNo ?? "")
+                _fromIATA = State(initialValue: details.fromIATA ?? "")
+                _toIATA = State(initialValue: details.toIATA ?? "")
+                _flightDate = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _departsTime = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _departureZone = State(initialValue: editing.primaryTz)
+                let arrivalTz = details.arrivalTz.flatMap(TimeZone.init(identifier:)) ?? editing.primaryTz
+                _arrivalZone = State(initialValue: arrivalTz)
+                let endsAt = editing.endsAt ?? editing.startsAt
+                _arrivesTime = State(initialValue: Self.pickerDate(from: endsAt, in: arrivalTz))
+                if editing.endsAt != nil {
+                    let startDay = ItineraryTimeZone.localDay(of: editing.startsAt, in: editing.primaryTz)
+                    let endDay = ItineraryTimeZone.localDay(of: endsAt, in: arrivalTz)
+                    _arrivalDayOffsetOverride = State(initialValue: endDay > startDay)
+                }
+                _seat = State(initialValue: details.seat ?? "")
+                _terminal = State(initialValue: details.terminal ?? "")
+                _gate = State(initialValue: details.gate ?? "")
+            case .hotel:
+                _stayName = State(initialValue: editing.title)
+                _checkInDate = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _checkInTime = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                let endsAt = editing.endsAt ?? editing.startsAt
+                _checkOutDate = State(initialValue: Self.pickerDate(from: endsAt, in: editing.primaryTz))
+                _checkOutTime = State(initialValue: Self.pickerDate(from: endsAt, in: editing.primaryTz))
+                _stayZone = State(initialValue: editing.primaryTz)
+                _room = State(initialValue: details.room ?? "")
+            case .activity:
+                _activityTitle = State(initialValue: editing.title)
+                _activityDate = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _activityTime = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _activityZone = State(initialValue: editing.primaryTz)
+                _ticketRef = State(initialValue: details.ticketRef ?? "")
+            case .food:
+                _foodName = State(initialValue: editing.title)
+                _foodDate = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _foodTime = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _foodZone = State(initialValue: editing.primaryTz)
+                _partySize = State(initialValue: details.partySize.map(String.init) ?? "")
+                _reservationName = State(initialValue: details.reservationName ?? "")
+            case .transport:
+                _transportTitle = State(initialValue: editing.title)
+                _provider = State(initialValue: details.provider ?? "")
+                _transportDate = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _pickupTime = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _pickupZone = State(initialValue: editing.primaryTz)
+                _dropoffText = State(initialValue: details.dropoffLocation ?? "")
+                let dropTz = details.arrivalTz.flatMap(TimeZone.init(identifier:)) ?? editing.primaryTz
+                _dropoffZone = State(initialValue: dropTz)
+                _transportDropoffDiffZone = State(initialValue: dropTz.identifier != editing.primaryTz.identifier)
+                let endsAt = editing.endsAt ?? editing.startsAt
+                _dropoffDate = State(initialValue: Self.pickerDate(from: endsAt, in: dropTz))
+                _dropoffTime = State(initialValue: Self.pickerDate(from: endsAt, in: dropTz))
+            }
+        } else {
+            _category = State(initialValue: .flight)
+            let lastDeparture = UserDefaults.standard.string(forKey: Self.lastDepartureTZKey)
+                .flatMap(TimeZone.init(identifier:))
+            let lastArrival = UserDefaults.standard.string(forKey: Self.lastArrivalTZKey(tripId))
+                .flatMap(TimeZone.init(identifier:))
+            // New items default to the trip's own zone rather than the device
+            // clock ("Hong Kong time on a Lisbon trip"). A flight keeps any
+            // remembered per-trip zones, and arrival no longer silently mirrors
+            // departure — it too starts from the trip zone until an airport code
+            // resolves it.
+            let departureDefault = lastDeparture ?? defaultZone
+            _departureZone = State(initialValue: departureDefault)
+            _arrivalZone = State(initialValue: lastArrival ?? defaultZone)
+            _stayZone = State(initialValue: defaultZone)
+            _activityZone = State(initialValue: defaultZone)
+            _foodZone = State(initialValue: defaultZone)
+            _pickupZone = State(initialValue: defaultZone)
+            _dropoffZone = State(initialValue: defaultZone)
+            // Lean new-item dates toward the trip's start (a May trip shouldn't
+            // default every item to today), and give arrival a 2h head start so
+            // the form never opens on a zero-length item with a stray "+1 day"
+            // (persona dry-run).
+            let dateDefault = tripStartDate > Date() ? tripStartDate : Date()
+            _flightDate = State(initialValue: dateDefault)
+            _activityDate = State(initialValue: dateDefault)
+            _foodDate = State(initialValue: dateDefault)
+            _transportDate = State(initialValue: dateDefault)
+            _dropoffDate = State(initialValue: dateDefault)
+            _arrivesTime = State(initialValue: Date().addingTimeInterval(2 * 3600))
+            _checkInDate = State(initialValue: dateDefault)
+            _checkInTime = State(initialValue: Self.timeOfDay(hour: 15, minute: 0))
+            _checkOutTime = State(initialValue: Self.timeOfDay(hour: 11, minute: 0))
+            _checkOutDate = State(initialValue: Calendar.current.date(byAdding: .day, value: 1, to: dateDefault) ?? dateDefault)
+        }
+    }
+
+    private var isEditing: Bool { editing != nil }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                header
+                Rectangle().fill(Palette.mist).frame(height: 1)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.lg) {
+                        if !isEditing {
+                            categorySelector
+                        }
+
+                        Group {
+                            switch category {
+                            case .flight: flightSection
+                            case .hotel: staySection
+                            case .activity: activitySection
+                            case .food: foodSection
+                            case .transport: transportSection
+                            }
+                        }
+
+                        familySection
+
+                        saveButton
+                            .padding(.top, Spacing.xs)
+                    }
+                    .padding(Spacing.xl)
+                }
+                .scrollDismissesKeyboard(.interactively)
+            }
+            .background(Palette.paper)
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .task { seedAssigneesIfNeeded() }
+        .onAppear {
+            #if DEBUG
+            // Verify-drill autopilot: preselect the Transport category so the
+            // drop-off-date form can be screenshotted without GUI tap automation.
+            if editing == nil, ProcessInfo.processInfo.arguments.contains("-uitestAddTransport") {
+                category = .transport
+            }
+            #endif
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Button("Cancel") { dismiss() }
+                .font(Typo.body(weight: .semibold))
+                .foregroundStyle(Palette.slate)
+            Spacer()
+            Text(isEditing ? "Edit \(category.displayName.lowercased())" : "Add to \(tripTitle)")
+                .font(Typo.body(weight: .bold))
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1)
+            Spacer()
+            Text("Cancel").font(Typo.body(weight: .semibold)).opacity(0) // balances the leading button
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.top, Spacing.md)
+        .padding(.bottom, Spacing.sm)
+    }
+
+    private var categorySelector: some View {
+        HStack(spacing: Spacing.sm) {
+            ForEach(ItemCategory.allCases, id: \.self) { cat in
+                categoryTile(cat)
+            }
+        }
+    }
+
+    private func categoryTile(_ cat: ItemCategory) -> some View {
+        let isOn = category == cat
+        return Button {
+            category = cat
+        } label: {
+            VStack(spacing: Spacing.xs) {
+                Image(systemName: cat.symbolName)
+                    .font(.system(size: 18, weight: .medium))
+                Text(cat.displayName)
+                    .font(Typo.body(11.5, weight: .semibold))
+            }
+            .foregroundStyle(isOn ? cat.colorPair.fg : Palette.slate)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.sm + 2)
+            .background(isOn ? cat.colorPair.soft : Palette.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(isOn ? cat.colorPair.fg : Palette.mist, lineWidth: 1.5)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
+    private var saveButton: some View {
+        Button {
+            save()
+        } label: {
+            Text(isEditing ? "Save changes" : "Add \(category.displayName.lowercased()) to itinerary")
+                .font(Typo.body(weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(Palette.onAmber)
+                .padding(.vertical, Spacing.md)
+                .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isValid)
+        .opacity(isValid ? 1 : 0.5)
+    }
+
+    // MARK: - Validation
+
+    var isValid: Bool {
+        switch category {
+        case .flight:
+            return !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
+                && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
+        case .hotel:
+            guard !stayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            let start = ItemTimeCombining.combine(date: checkInDate, timeOfDay: checkInTime, targetTz: stayZone)
+            let end = ItemTimeCombining.combine(date: checkOutDate, timeOfDay: checkOutTime, targetTz: stayZone)
+            return end > start
+        case .activity:
+            return !activityTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .food:
+            return !foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .transport:
+            return transportHasName && transportEndAfterStart
+        }
+    }
+
+    // MARK: - Save
+
+    private func save() {
+        guard isValid, let userId = authManager.userId else { return }
+        let now = Date()
+        var fields = composedFields()
+        fields.details.tags = Array(selectedTags)
+
+        if let editing {
+            editing.category = category
+            editing.title = fields.title
+            editing.startsAt = fields.startsAt
+            editing.endsAt = fields.endsAt
+            editing.tz = fields.tz
+            editing.locationName = fields.locationName
+            editing.locationLat = fields.locationLat
+            editing.locationLng = fields.locationLng
+            editing.confirmation = fields.confirmation
+            editing.details = fields.details
+            editing.updatedAt = now
+            editing.updatedBy = userId
+            try? modelContext.save()
+            let dto = editing.toDTO()
+            let rowId = editing.id
+            Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
+            reconcileAssignees(itemId: rowId)
+            onToast(toastMessage("updated"))
+        } else {
+            let item = ItineraryItem(
+                id: UUID(), tripId: tripId, categoryRaw: category.rawValue, title: fields.title,
+                startsAt: fields.startsAt, endsAt: fields.endsAt, tz: fields.tz,
+                locationName: fields.locationName, locationLat: fields.locationLat, locationLng: fields.locationLng,
+                confirmation: fields.confirmation, notes: nil, detailsJSON: "{}",
+                statusRaw: ItemStatus.confirmed.rawValue, createdBy: userId,
+                createdAt: now, updatedAt: now, updatedBy: nil
+            )
+            item.details = fields.details
+            modelContext.insert(item)
+            try? modelContext.save()
+            let dto = item.toDTO()
+            let rowId = item.id
+            Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
+            reconcileAssignees(itemId: rowId)
+            onToast(toastMessage("added"))
+        }
+
+        persistZoneDefaults()
+        dismiss()
+    }
+
+    /// "Flight added", or "Flight added — will sync when you're back" when
+    /// offline, so an edit made on the plane visibly reassures it isn't lost.
+    private func toastMessage(_ verb: String) -> String {
+        let base = "\(category.displayName) \(verb)"
+        return syncStatus.isOffline ? "\(base) \u{2014} will sync when you\u{2019}re back" : base
+    }
+
+    // MARK: - Family: assignees + tags (this milestone's brief §3)
+
+    private var myRole: TripRole? {
+        guard let userId = authManager.userId else { return nil }
+        return members.first { $0.userId == userId }?.role
+    }
+
+    /// Gates the "Who's this for?" section — the exact `item_assignees`
+    /// RLS rule (confirmed live): organizer may assign on any item; a
+    /// companion only on one they created. A brand-new item
+    /// (`editing == nil`) has no `createdBy` yet — whoever can add it at
+    /// all becomes its creator, so `ItemPermissions.canAdd` is the
+    /// equivalent gate for that case.
+    var canManageAssignees: Bool {
+        if let editing {
+            return ItemPermissions.canEdit(item: editing, role: myRole, userId: authManager.userId)
+        }
+        return ItemPermissions.canAdd(role: myRole)
+    }
+
+    /// Seeds the multi-select from `existingAssignees` exactly once —
+    /// `@Query` results aren't available synchronously in `init` (unlike
+    /// `editing`'s other fields), so this runs from `.task` on first
+    /// appearance instead. Guarded by `hasLoadedAssignees` so a later
+    /// re-fire (e.g. an unrelated pull touching this trip) never clobbers
+    /// selections the user is mid-edit on.
+    private func seedAssigneesIfNeeded() {
+        guard !hasLoadedAssignees else { return }
+        hasLoadedAssignees = true
+        let ids = Set(existingAssignees.map(\.profileId))
+        selectedAssigneeProfileIds = ids
+        originalAssigneeProfileIds = ids
+    }
+
+    /// Diffs `selectedAssigneeProfileIds` against the snapshot captured at
+    /// seed time and applies exactly the additions/removals — not a
+    /// wholesale delete-then-reinsert, so an unrelated field save doesn't
+    /// churn rows nobody actually changed.
+    private func reconcileAssignees(itemId: UUID) {
+        let toAdd = selectedAssigneeProfileIds.subtracting(originalAssigneeProfileIds)
+        let toRemove = originalAssigneeProfileIds.subtracting(selectedAssigneeProfileIds)
+
+        for profileId in toAdd {
+            let assignee = ItemAssignee(itemId: itemId, profileId: profileId)
+            modelContext.insert(assignee)
+            try? modelContext.save()
+            let dto = assignee.toDTO()
+            let rowId = assignee.id
+            Task { await syncEngine?.enqueueUpsert(table: .itemAssignees, rowId: rowId, tripId: tripId, payload: dto) }
+        }
+
+        for profileId in toRemove {
+            let compositeId = ItemAssignee.compositeId(itemId: itemId, profileId: profileId)
+            if let existing = existingAssignees.first(where: { $0.id == compositeId }) {
+                modelContext.delete(existing)
+                try? modelContext.save()
+            }
+            Task { await syncEngine?.enqueueDeleteItemAssignee(itemId: itemId, profileId: profileId, tripId: tripId) }
+        }
+
+        originalAssigneeProfileIds = selectedAssigneeProfileIds
+    }
+
+    private func persistZoneDefaults() {
+        guard category == .flight else { return }
+        UserDefaults.standard.set(departureZone.identifier, forKey: Self.lastDepartureTZKey)
+        UserDefaults.standard.set(arrivalZone.identifier, forKey: Self.lastArrivalTZKey(tripId))
+    }
+
+    // MARK: - Field composition (one row per category → ItineraryItem's shape)
+
+    struct ComposedFields {
+        var title: String
+        var startsAt: Date
+        var endsAt: Date?
+        var tz: String
+        var details: ItemDetails
+        var confirmation: String?
+        var locationName: String
+        var locationLat: Double?
+        var locationLng: Double?
+    }
+
+    func composedFields() -> ComposedFields {
+        switch category {
+        case .flight: return flightFields()
+        case .hotel: return stayFields()
+        case .activity: return activityFields()
+        case .food: return foodFields()
+        case .transport: return transportFields()
+        }
+    }
+
+    /// The "+1 day" chip state — flight only. Transport no longer uses a
+    /// next-day toggle; it has an explicit drop-off date picker instead.
+    var effectiveNextDay: Bool { effectiveArrivalIsNextDay }
+
+    /// A transport item is named by either its title or its provider — a rental
+    /// is often just "Hertz" with no distinct title, so requiring both was
+    /// redundant (persona dry-run).
+    var transportHasName: Bool {
+        !transportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The zone actually applied to the drop-off: the pickup zone unless the
+    /// user opted into a different one.
+    var effectiveDropoffZone: TimeZone { transportDropoffDiffZone ? dropoffZone : pickupZone }
+
+    /// Whether a transport item's drop-off is strictly after its pickup — the
+    /// same "end after start" rule Stay enforces, so a rental can't save with a
+    /// zero or negative duration. Drives both `isValid` and the form's hint.
+    var transportEndAfterStart: Bool {
+        let (start, end) = Self.transportInstants(
+            pickupDate: transportDate, pickupTime: pickupTime, pickupTz: pickupZone,
+            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: effectiveDropoffZone
+        )
+        return end > start
+    }
+
+    /// Composes a transport item's start (pickup) and end (drop-off) instants
+    /// from two independent date pickers, so a multi-night rental (pick up
+    /// Thursday, return Saturday) is expressible — unlike the old pickup-date +
+    /// 0/1-day-offset shape. Pure; exposed for tests.
+    static func transportInstants(
+        pickupDate: Date, pickupTime: Date, pickupTz: TimeZone,
+        dropoffDate: Date, dropoffTime: Date, dropoffTz: TimeZone,
+        readingCalendar: Calendar = .current
+    ) -> (start: Date, end: Date) {
+        let start = ItemTimeCombining.combine(date: pickupDate, timeOfDay: pickupTime, targetTz: pickupTz, readingCalendar: readingCalendar)
+        let end = ItemTimeCombining.combine(date: dropoffDate, timeOfDay: dropoffTime, targetTz: dropoffTz, readingCalendar: readingCalendar)
+        return (start, end)
+    }
+
+    private func transportFields() -> ComposedFields {
+        let (start, end) = Self.transportInstants(
+            pickupDate: transportDate, pickupTime: pickupTime, pickupTz: pickupZone,
+            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: effectiveDropoffZone
+        )
+        var details = ItemDetails.empty
+        details.provider = Self.trimmedOrNil(provider)
+        details.dropoffLocation = Self.trimmedOrNil(dropoffText)
+        // Always recorded (as for flights) so `effectiveTz` is well-defined even
+        // for a same-zone rental, and the tz-shift chip works for a zone-crossing
+        // train/ferry.
+        details.arrivalTz = effectiveDropoffZone.identifier
+
+        return ComposedFields(
+            title: Self.trimmedOrNil(transportTitle) ?? Self.trimmedOrNil(provider) ?? "Transport",
+            startsAt: start, endsAt: end, tz: pickupZone.identifier,
+            details: details, confirmation: Self.trimmedOrNil(confirmation),
+            locationName: locationText, locationLat: locationLat, locationLng: locationLng
+        )
+    }
+
+    /// Whether the arrival lands on the calendar day after departure — the
+    /// "+1 day" chip's effective state (this milestone's brief: "arrival
+    /// wall < departure wall → +1 day, toggleable").
+    var effectiveArrivalIsNextDay: Bool {
+        arrivalDayOffsetOverride ?? (
+            ItemTimeCombining.suggestedArrivalDayOffset(departsTimeOfDay: departsTime, arrivesTimeOfDay: arrivesTime) == 1
+        )
+    }
+
+    private func flightFields() -> ComposedFields {
+        let from = fromIATA.trimmingCharacters(in: .whitespaces).uppercased()
+        let to = toIATA.trimmingCharacters(in: .whitespaces).uppercased()
+        let start = ItemTimeCombining.combine(date: flightDate, timeOfDay: departsTime, targetTz: departureZone)
+        let end = ItemTimeCombining.combine(
+            date: flightDate, timeOfDay: arrivesTime,
+            dayOffset: effectiveArrivalIsNextDay ? 1 : 0, targetTz: arrivalZone
+        )
+        let title = [
+            airline.trimmingCharacters(in: .whitespacesAndNewlines),
+            flightNo.trimmingCharacters(in: .whitespacesAndNewlines),
+        ].filter { !$0.isEmpty }.joined(separator: " ")
+
+        var details = ItemDetails.empty
+        details.airline = Self.trimmedOrNil(airline)
+        details.flightNo = Self.trimmedOrNil(flightNo)
+        details.fromIATA = from.isEmpty ? nil : from
+        details.toIATA = to.isEmpty ? nil : to
+        details.seat = Self.trimmedOrNil(seat)
+        details.terminal = Self.trimmedOrNil(terminal)
+        details.gate = Self.trimmedOrNil(gate)
+        // Always recorded, even when it matches the departure zone — keeps
+        // `effectiveTz` well-defined for a same-zone domestic flight too.
+        details.arrivalTz = arrivalZone.identifier
+
+        return ComposedFields(
+            title: title.isEmpty ? "Flight" : title,
+            startsAt: start, endsAt: end, tz: departureZone.identifier,
+            details: details, confirmation: Self.trimmedOrNil(confirmation),
+            locationName: from, locationLat: nil, locationLng: nil
+        )
+    }
+
+    private func stayFields() -> ComposedFields {
+        let start = ItemTimeCombining.combine(date: checkInDate, timeOfDay: checkInTime, targetTz: stayZone)
+        let end = ItemTimeCombining.combine(date: checkOutDate, timeOfDay: checkOutTime, targetTz: stayZone)
+        var details = ItemDetails.empty
+        details.room = Self.trimmedOrNil(room)
+
+        return ComposedFields(
+            title: Self.trimmedOrNil(stayName) ?? "Stay",
+            startsAt: start, endsAt: end, tz: stayZone.identifier,
+            details: details, confirmation: Self.trimmedOrNil(confirmation),
+            locationName: locationText, locationLat: locationLat, locationLng: locationLng
+        )
+    }
+
+    private func activityFields() -> ComposedFields {
+        let start = ItemTimeCombining.combine(date: activityDate, timeOfDay: activityTime, targetTz: activityZone)
+        var details = ItemDetails.empty
+        details.ticketRef = Self.trimmedOrNil(ticketRef)
+        details.address = address
+
+        return ComposedFields(
+            title: Self.trimmedOrNil(activityTitle) ?? "Activity",
+            startsAt: start, endsAt: nil, tz: activityZone.identifier,
+            details: details,
+            // BUILD_PLAN.md §3.3: an activity's `details.ticket_ref` IS its
+            // booking/confirmation code — mirrored onto the top-level
+            // `confirmation` column so the ticket glyph, Bookings tab, and
+            // boarding-pass grid (all keyed on `item.confirmation`) work
+            // uniformly across every category.
+            confirmation: Self.trimmedOrNil(ticketRef),
+            locationName: locationText, locationLat: locationLat, locationLng: locationLng
+        )
+    }
+
+    private func foodFields() -> ComposedFields {
+        let start = ItemTimeCombining.combine(date: foodDate, timeOfDay: foodTime, targetTz: foodZone)
+        var details = ItemDetails.empty
+        details.partySize = Int(partySize.trimmingCharacters(in: .whitespaces))
+        details.reservationName = Self.trimmedOrNil(reservationName)
+        details.address = address
+
+        return ComposedFields(
+            title: Self.trimmedOrNil(foodName) ?? "Food",
+            startsAt: start, endsAt: nil, tz: foodZone.identifier,
+            details: details, confirmation: nil,
+            locationName: locationText, locationLat: locationLat, locationLng: locationLng
+        )
+    }
+
+    static func trimmedOrNil(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Re-anchors the wall-clock components of `instant` (as read in `tz`)
+    /// onto the device's own calendar, so a `DatePicker` — which always
+    /// renders using `.current` — displays "08:20" for an 08:20-New-York
+    /// instant regardless of what zone the device itself is in. The save
+    /// path's `ItemTimeCombining.combine(readingCalendar: .current)` is the
+    /// exact inverse of this, so the round trip lands back on the same
+    /// instant as long as the target zone is unchanged.
+    static func pickerDate(from instant: Date, in tz: TimeZone) -> Date {
+        var source = Calendar(identifier: .gregorian)
+        source.timeZone = tz
+        let components = source.dateComponents([.year, .month, .day, .hour, .minute, .second], from: instant)
+
+        var device = Calendar(identifier: .gregorian)
+        device.timeZone = .current
+        return device.date(from: components) ?? instant
+    }
+
+    static func timeOfDay(hour: Int, minute: Int) -> Date {
+        Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
+    }
+}

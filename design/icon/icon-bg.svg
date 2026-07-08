@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="dusk" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#EA9A60"/>
+      <stop offset="0.52" stop-color="#C96B5B"/>
+      <stop offset="1" stop-color="#232544"/>
+    </linearGradient>
+    <radialGradient id="light" cx="320" cy="250" r="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F7CCA0" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#F7CCA0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#dusk)"/>
+  <rect width="1024" height="1024" fill="url(#light)"/>
+  <!-- amber "departure light" underline: echoes the tab-underline + timeline rail -->
+  <rect x="417" y="742" width="190" height="26" rx="13" fill="#E8955A"/>
+</svg>

@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tripto-share",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-07",
+  "routes": [
+    { "pattern": "tripto.navbytes.io", "custom_domain": true }
+  ],
+  "vars": {
+    "SUPABASE_URL": "https://qgtveaqukvbtyunupzhn.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_4x21OrhJWtnB1tDrhD9ueA_79p98yN-",
+    // Apple Developer Team ID (public, safe to commit) — enables the AASA file
+    // for universal links. The app-side half (an associated-domains entitlement
+    // + a pinned signing team in project.yml) still needs the owner's Xcode
+    // signing setup; until then this AASA is served but simply unused.
+    "APPLE_TEAM_ID": "59J9RQXYYP"
+  },
+  // Daily keep-alive so the free-tier Supabase project doesn't pause after ~7
+  // idle days (which would break share links + app sync between trips). See the
+  // `scheduled` handler in src/index.ts.
+  "triggers": {
+    "crons": ["0 9 * * *"]
+  }
+}
