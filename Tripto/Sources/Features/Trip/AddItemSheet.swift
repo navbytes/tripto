@@ -237,8 +237,10 @@ struct AddItemSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                header
-                Rectangle().fill(Palette.mist).frame(height: 1)
+                SheetHeader(
+                    title: isEditing ? "Edit \(category.displayName.lowercased())" : "Add to \(tripTitle)",
+                    onCancel: { dismiss() }
+                )
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
                         if !isEditing {
@@ -277,24 +279,6 @@ struct AddItemSheet: View {
             }
             #endif
         }
-    }
-
-    private var header: some View {
-        HStack {
-            Button("Cancel") { dismiss() }
-                .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.slate)
-            Spacer()
-            Text(isEditing ? "Edit \(category.displayName.lowercased())" : "Add to \(tripTitle)")
-                .font(Typo.body(weight: .bold))
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1)
-            Spacer()
-            Text("Cancel").font(Typo.body(weight: .semibold)).opacity(0) // balances the leading button
-        }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.top, Spacing.md)
-        .padding(.bottom, Spacing.sm)
     }
 
     private var categorySelector: some View {

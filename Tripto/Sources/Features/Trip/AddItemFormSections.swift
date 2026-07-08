@@ -345,6 +345,9 @@ struct LabeledDatePicker: View {
     let label: String
     @Binding var date: Date
     var displayedComponents: DatePickerComponents = .date
+    /// Lower bound for the picker (F8) — e.g. a trip's end date can't be
+    /// dragged before its start date. `nil` keeps the picker unbounded.
+    var minDate: Date? = nil
 
     var body: some View {
         HStack {
@@ -352,8 +355,15 @@ struct LabeledDatePicker: View {
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.slate)
             Spacer(minLength: Spacing.sm)
-            DatePicker("", selection: $date, displayedComponents: displayedComponents)
-                .labelsHidden()
+            Group {
+                if let minDate {
+                    DatePicker("", selection: $date, in: minDate..., displayedComponents: displayedComponents)
+                } else {
+                    DatePicker("", selection: $date, displayedComponents: displayedComponents)
+                }
+            }
+            .labelsHidden()
+            .tint(Palette.amber)
         }
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.sm)
