@@ -10,6 +10,15 @@ import SwiftUI
 /// every other mutation in the app uses.
 struct PackingListView: View {
     let tripId: UUID
+    /// The trip's `createdBy` — the signed-out user IS the local trip
+    /// creator (see `TripView.canAddItems`'s doc comment), so this is
+    /// their own uid from when they created the trip; the later push will
+    /// satisfy RLS once they sign back in, same story as
+    /// `AddItemSheet.tripCreatedBy`.
+    let tripCreatedBy: UUID
+    /// Finding 2: true while this trip's first pull this session hasn't
+    /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
+    var isAwaitingFirstSync: Bool = false
 
     @Query private var packingItems: [PackingItem]
     @Query private var tripProfiles: [TripProfile]
@@ -23,8 +32,10 @@ struct PackingListView: View {
     @State private var toast: String?
     @State private var reassigningItem: PackingItem?
 
-    init(tripId: UUID) {
+    init(tripId: UUID, tripCreatedBy: UUID, isAwaitingFirstSync: Bool = false) {
         self.tripId = tripId
+        self.tripCreatedBy = tripCreatedBy
+        self.isAwaitingFirstSync = isAwaitingFirstSync
         _packingItems = Query(filter: #Predicate<PackingItem> { $0.tripId == tripId })
         _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
         _members = Query(filter: #Predicate<TripMember> { $0.tripId == tripId })
@@ -37,7 +48,20 @@ struct PackingListView: View {
 
     /// Role gate for add/toggle/reassign (`PackingPermissions.canManage`) —
     /// convenience only (CLAUDE.md); RLS enforces the real boundary.
-    private var canManage: Bool { PackingPermissions.canManage(role: myRole) }
+    ///
+    /// Finding 1: adopts the exact "signed out ⇒ legitimately-permitted
+    /// local creator" rule `TripView.canAddItems` already codifies (see its
+    /// doc comment) — `PackingPermissions.canManage` alone reads `nil`
+    /// `myRole` as "can't manage," which was demoting a signed-out local
+    /// creator to read-only on their own trip's packing list.
+    /// `PackingPermissions` itself is intentionally left untouched: it
+    /// mirrors the live RLS policies, and "signed out" is a client-session
+    /// concept RLS has no notion of — so the override lives here, at the
+    /// view layer, not in that model.
+    private var canManage: Bool {
+        guard authManager.userId != nil else { return true }
+        return PackingPermissions.canManage(role: myRole)
+    }
 
     private var summary: PackingProgress.Summary { PackingProgress.summary(for: packingItems) }
     private var groups: [(key: PackingGroupKey, items: [PackingItem])] { PackingGrouping.groups(for: packingItems) }
@@ -194,7 +218,11 @@ struct PackingListView: View {
         }
         .opacity(item.isDone ? 0.65 : 1)
         .swipeActions(edge: .trailing) {
-            if PackingPermissions.canDelete(item: item, role: myRole, userId: authManager.userId) {
+            // Finding 1: same signed-out-creator override as `canManage` —
+            // without it, a signed-out creator could add/toggle/reassign an
+            // item but not delete it, recreating the same inconsistency one
+            // level down.
+            if authManager.userId == nil || PackingPermissions.canDelete(item: item, role: myRole, userId: authManager.userId) {
                 Button("Delete", role: .destructive) { delete(item) }
             }
         }
@@ -248,36 +276,50 @@ struct PackingListView: View {
     private var emptyState: some View {
         VStack(spacing: Spacing.lg) {
             Spacer()
-            Image(systemName: "bag.badge.plus")
-                .font(.system(size: 36))
-                .foregroundStyle(Palette.slate)
-            VStack(spacing: Spacing.xs) {
-                Text("Start the family packing list")
-                    .font(Typo.display(Typo.Size.title))
-                    .foregroundStyle(Palette.ink)
+            if isAwaitingFirstSync {
+                // Finding 2: a freshly-claimed (or just-opened) trip's
+                // packing list can't yet be told apart from a genuinely
+                // empty one while its first pull is still in flight — this
+                // neutral placeholder (no CTA, no claim either way) mirrors
+                // `HomeView.initialLoadState`'s "Checking for your trips…"
+                // instead of asserting "start the list" before the answer
+                // is known.
+                ProgressView()
+                Text("Checking the packing list\u{2026}")
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+            } else {
+                Image(systemName: "bag.badge.plus")
+                    .font(.system(size: 36))
+                    .foregroundStyle(Palette.slate)
+                VStack(spacing: Spacing.xs) {
+                    Text("Start the family packing list")
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(Palette.ink)
+                        .multilineTextAlignment(.center)
+                    Text(
+                        canManage
+                            ? "Passports, the car seat, chargers everyone forgets \u{2014} add what this trip needs."
+                            : "The organizer hasn\u{2019}t added anything yet."
+                    )
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
                     .multilineTextAlignment(.center)
-                Text(
-                    canManage
-                        ? "Passports, the car seat, chargers everyone forgets \u{2014} add what this trip needs."
-                        : "The organizer hasn\u{2019}t added anything yet."
-                )
-                .font(Typo.body())
-                .foregroundStyle(Palette.slate)
-                .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, Spacing.xl)
-            if canManage {
-                Button {
-                    isPresentingAdd = true
-                } label: {
-                    Text("Add an item")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Palette.onAmber)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.vertical, Spacing.md)
-                        .background(Palette.amber, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, Spacing.xl)
+                if canManage {
+                    Button {
+                        isPresentingAdd = true
+                    } label: {
+                        Text("Add an item")
+                            .font(Typo.body(weight: .semibold))
+                            .foregroundStyle(Palette.onAmber)
+                            .padding(.horizontal, Spacing.xl)
+                            .padding(.vertical, Spacing.md)
+                            .background(Palette.amber, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             Spacer()
             Spacer()
@@ -317,18 +359,27 @@ struct PackingListView: View {
         enqueue(item)
     }
 
+    /// Finding 1: dropped the `authManager.userId` hard guard — it made
+    /// this silently no-op for a signed-out local creator (`canManage`
+    /// already grants them the add). `createdBy` falls back to
+    /// `tripCreatedBy` (the signed-out creator's own uid) when there's no
+    /// signed-in session, and the toast is qualified so the fact that it
+    /// hasn't synced anywhere yet is honest, not silent.
     private func addItem(label: String, groupKey: PackingGroupKey, assigneeProfileId: UUID?) {
-        guard canManage, let userId = authManager.userId, !label.isEmpty else { return }
+        guard canManage, !label.isEmpty else { return }
         let now = Date()
+        let creatorId = authManager.userId ?? tripCreatedBy
         let item = PackingItem(
             id: UUID(), tripId: tripId, label: label, groupKeyRaw: groupKey.rawValue,
-            assigneeProfileId: assigneeProfileId, isDone: false, createdBy: userId,
+            assigneeProfileId: assigneeProfileId, isDone: false, createdBy: creatorId,
             createdAt: now, updatedAt: now, updatedBy: nil
         )
         modelContext.insert(item)
         try? modelContext.save()
         enqueue(item)
-        toast = "Added to packing list"
+        toast = authManager.userId == nil
+            ? "Added to packing list \u{2014} you\u{2019}re signed out, so it won\u{2019}t sync until you sign back in."
+            : "Added to packing list"
     }
 
     private func delete(_ item: PackingItem) {

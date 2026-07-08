@@ -43,6 +43,18 @@ struct ToastOverlay: ViewModifier {
                         }
                     }
                     .accessibilityAddTraits(.updatesFrequently)
+                    // Finding 3: no way to dismiss a toast early before this
+                    // — a reader who's already done with a long message had
+                    // to wait out the full timer. Tap-to-dismiss, same
+                    // `easeOut` the auto-dismiss timer above uses.
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: reduceMotion ? 0 : 0.2)) {
+                            self.message = nil
+                        }
+                    }
+                    .accessibilityAction(named: "Dismiss") {
+                        self.message = nil
+                    }
             }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.3), value: message)
@@ -51,11 +63,14 @@ struct ToastOverlay: ViewModifier {
     /// UX audit finding 3: a flat two-second timer clips longer toasts (the
     /// 33-character refresh-failure message) before a reader gets through
     /// them, while padding out a short one ("Flight added"). Scales with
-    /// message length instead — 2.0s floor for short toasts, ~4.0s cap so a
-    /// pathological message can't linger indefinitely. Pure/static so it's
-    /// directly unit-testable without standing up a view hierarchy.
+    /// message length instead — 2.0s floor for short toasts. Cap raised
+    /// 4.0 -> 8.0s (finding 3, round 2): the app's own longest shipped
+    /// message — the ~110-character signed-out edit toast — computed to
+    /// ~7.25s and was getting clipped by the old cap; 8.0s still bounds
+    /// genuinely pathological input. Pure/static so it's directly
+    /// unit-testable without standing up a view hierarchy.
     static func displayDuration(for message: String) -> TimeInterval {
-        min(max(2.0, 1.2 + 0.055 * Double(message.count)), 4.0)
+        min(max(2.0, 1.2 + 0.055 * Double(message.count)), 8.0)
     }
 }
 

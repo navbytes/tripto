@@ -27,6 +27,13 @@ final class SyncStatus {
     /// "couldn't check for trips" placeholder (with a retry) instead of
     /// misreading the failure as a genuinely-empty account (finding 1).
     private(set) var lastHomePullFailed = false
+    /// Per-trip mirror of `hasCompletedInitialHomePull` (finding 2):
+    /// `TripId`s for which `pullTrip(_:)` has completed an attempt (success
+    /// or failure) this session — `TripView`'s signal to show a neutral
+    /// "Checking…" placeholder instead of a tab's real empty state while a
+    /// freshly-claimed (or just-opened) trip's first pull is still in
+    /// flight.
+    private(set) var completedInitialTripPulls: Set<UUID> = []
 
     func setOffline(_ offline: Bool) {
         isOffline = offline
@@ -53,12 +60,18 @@ final class SyncStatus {
         lastHomePullFailed = failed
     }
 
+    func markInitialTripPullCompleted(_ tripId: UUID) {
+        completedInitialTripPulls.insert(tripId)
+    }
+
     /// Sign-out wipe: the next sign-in (potentially a different account)
     /// re-enters the first-pull loading state instead of reading an empty
     /// wiped cache as "you have zero trips," and doesn't carry a stale
-    /// failure flag into the next account's session.
+    /// failure flag (or a previous account's completed-trip set) into the
+    /// next account's session.
     func resetInitialPullState() {
         hasCompletedInitialHomePull = false
         lastHomePullFailed = false
+        completedInitialTripPulls = []
     }
 }

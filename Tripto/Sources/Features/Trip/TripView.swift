@@ -131,6 +131,19 @@ struct TripView: View {
         return myRole == .organizer
     }
 
+    /// Finding 2: mirrors `SyncStatus.hasCompletedInitialHomePull`'s
+    /// loading-vs-empty distinction, scoped to this one trip
+    /// (`completedInitialTripPulls`) — a freshly-claimed or just-opened
+    /// trip's genuinely-empty tabs can't yet be told apart from "haven't
+    /// heard from the server yet." Signed-out is excluded: no pull ever
+    /// runs for a signed-out session (their data is local-only), so there's
+    /// nothing to "await." Offline is excluded too: `SyncBanner` already
+    /// explains the state, and the underlying flag can never be set while
+    /// offline (`pullTrip`'s own early-return guard).
+    private var awaitingFirstTripPull: Bool {
+        authManager.userId != nil && !syncStatus.isOffline && !syncStatus.completedInitialTripPulls.contains(tripId)
+    }
+
     var body: some View {
         ZStack {
             Palette.paper.ignoresSafeArea()
@@ -257,12 +270,21 @@ struct TripView: View {
                         canEdit: canAddItems,
                         assigneesByItem: assigneesByItem,
                         filteredPersonName: selectedProfileFirstName,
-                        toast: $toast
+                        toast: $toast,
+                        isAwaitingFirstSync: awaitingFirstTripPull
                     )
                 case .bookings:
-                    BookingsTabView(items: items, onAdd: canAddItems ? { isPresentingAdd = true } : nil)
+                    BookingsTabView(
+                        items: items,
+                        onAdd: canAddItems ? { isPresentingAdd = true } : nil,
+                        isAwaitingFirstSync: awaitingFirstTripPull
+                    )
                 case .packing:
-                    PackingListView(tripId: trip.id)
+                    PackingListView(
+                        tripId: trip.id,
+                        tripCreatedBy: trip.createdBy,
+                        isAwaitingFirstSync: awaitingFirstTripPull
+                    )
                 }
 
                 // UX audit finding 5: FAB shows on Itinerary and Bookings —
@@ -279,7 +301,7 @@ struct TripView: View {
             AddItemSheet(
                 tripId: trip.id, tripTitle: trip.title, editing: nil,
                 defaultZone: NewItemZoneDefault.zone(forExistingItemTzIdentifiers: items.map(\.tz)),
-                tripStartDate: trip.startDate
+                tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy
             ) { message in
                 toast = message
             }
@@ -402,7 +424,14 @@ struct TripView: View {
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xxs)
                 .background(Palette.coverPillFill, in: Capsule())
-                .frame(minHeight: 44)
+                // Finding 4: the visual capsule (a `.background`, so it
+                // doesn't grow with the frame) was rendering under 44pt
+                // wide — `minWidth` added alongside the existing
+                // `minHeight` so the hit target meets the 44pt floor on
+                // both axes; `.contentShape(Rectangle())` below already
+                // extends hit-testing to the enlarged frame, which only
+                // borders non-interactive text.
+                .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("\(max(tripProfiles.count, 1)) traveler\(max(tripProfiles.count, 1) == 1 ? "" : "s")")
@@ -417,19 +446,18 @@ struct TripView: View {
             .accessibilityHidden(true)
     }
 
+    /// Finding 5: delegates to `TripDateRangeFormat` so a trip outside the
+    /// current year (or spanning two) shows a year instead of the old
+    /// always-year-less "Mar 14 – Mar 20."
     private func dateRangeText(for trip: Trip) -> String {
-        let start = trip.startDate.formatted(.dateTime.month(.abbreviated).day())
-        let end = trip.endDate.formatted(.dateTime.month(.abbreviated).day())
-        return "\(start) – \(end)"
+        TripDateRangeFormat.text(start: trip.startDate, end: trip.endDate)
     }
 
-    /// Same formatters as `dateRangeText`, joined with a spoken "to" instead
-    /// of the visual en-dash — VoiceOver reads punctuation like "–" and "·"
+    /// Same rules as `dateRangeText`, joined with a spoken "to" instead of
+    /// the visual en-dash — VoiceOver reads punctuation like "–" and "·"
     /// as literal fragments, not implied connectors (finding 9b).
     private func accessibleDateRangeText(for trip: Trip) -> String {
-        let start = trip.startDate.formatted(.dateTime.month(.abbreviated).day())
-        let end = trip.endDate.formatted(.dateTime.month(.abbreviated).day())
-        return "\(start) to \(end)"
+        TripDateRangeFormat.spokenText(start: trip.startDate, end: trip.endDate)
     }
 
     // MARK: - Sub-tabs (Itinerary · Bookings only — Map/$ Split hidden, §9.4)

@@ -22,6 +22,15 @@ struct AddItemSheet: View {
     /// offer the traveler's home clock. `.current` when adding to an empty trip
     /// or when editing (edit reads zones off the item instead).
     let defaultZone: TimeZone
+    /// Finding 1 (companion fix, same bug class as `PackingListView`'s
+    /// `tripCreatedBy`): the id to stamp a *new* item's `createdBy` with
+    /// when adding while signed out — the signed-out user IS the local
+    /// trip creator (see `TripView.canAddItems`'s doc comment), so this is
+    /// their own uid from when they created the trip; the later push will
+    /// satisfy RLS once they sign back in. `nil` for edit-mode call sites
+    /// (`BookingDetailView`) that never need it — `save()`'s create branch
+    /// is the only place this is read.
+    var tripCreatedBy: UUID? = nil
 
     @Query var tripProfiles: [TripProfile]
     @Query private var members: [TripMember]
@@ -116,12 +125,16 @@ struct AddItemSheet: View {
     private static let lastDepartureTZKey = "lastDepartureTZ"
     private static func lastArrivalTZKey(_ tripId: UUID) -> String { "lastArrivalTZ.\(tripId.uuidString)" }
 
-    init(tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current, tripStartDate: Date = .now, onToast: @escaping (String) -> Void) {
+    init(
+        tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current,
+        tripStartDate: Date = .now, tripCreatedBy: UUID? = nil, onToast: @escaping (String) -> Void
+    ) {
         self.tripId = tripId
         self.tripTitle = tripTitle
         self.editing = editing
         self.onToast = onToast
         self.defaultZone = defaultZone
+        self.tripCreatedBy = tripCreatedBy
 
         _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
         _members = Query(filter: #Predicate<TripMember> { $0.tripId == tripId })
@@ -354,8 +367,16 @@ struct AddItemSheet: View {
 
     // MARK: - Save
 
+    /// Finding 1: used to hard-guard on `authManager.userId`, which made
+    /// Save silently no-op (the sheet didn't even dismiss) for a signed-out
+    /// local trip creator — the exact persona `TripView.canAddItems`
+    /// legitimately grants write access to. Guards on `isValid` alone now;
+    /// the create branch falls back to `tripCreatedBy` (the signed-out
+    /// creator's own uid) when `authManager.userId` is `nil`, matching
+    /// `TripView.canAddItems`'s "signed out ⇒ legitimately-permitted local
+    /// creator" rule.
     private func save() {
-        guard isValid, let userId = authManager.userId else { return }
+        guard isValid else { return }
         let now = Date()
         var fields = composedFields()
         fields.details.tags = Array(selectedTags)
@@ -372,7 +393,9 @@ struct AddItemSheet: View {
             editing.confirmation = fields.confirmation
             editing.details = fields.details
             editing.updatedAt = now
-            editing.updatedBy = userId
+            // `nil` while signed out — honest: this device's edit hasn't
+            // been attributed to a signed-in account yet.
+            editing.updatedBy = authManager.userId
             try? modelContext.save()
             let dto = editing.toDTO()
             let rowId = editing.id
@@ -380,12 +403,13 @@ struct AddItemSheet: View {
             reconcileAssignees(itemId: rowId)
             onToast(toastMessage("updated"))
         } else {
+            guard let creatorId = authManager.userId ?? tripCreatedBy else { return }
             let item = ItineraryItem(
                 id: UUID(), tripId: tripId, categoryRaw: category.rawValue, title: fields.title,
                 startsAt: fields.startsAt, endsAt: fields.endsAt, tz: fields.tz,
                 locationName: fields.locationName, locationLat: fields.locationLat, locationLng: fields.locationLng,
                 confirmation: fields.confirmation, notes: nil, detailsJSON: "{}",
-                statusRaw: ItemStatus.confirmed.rawValue, createdBy: userId,
+                statusRaw: ItemStatus.confirmed.rawValue, createdBy: creatorId,
                 createdAt: now, updatedAt: now, updatedBy: nil
             )
             item.details = fields.details
@@ -402,10 +426,17 @@ struct AddItemSheet: View {
         dismiss()
     }
 
-    /// "Flight added", or "Flight added — will sync when you're back" when
-    /// offline, so an edit made on the plane visibly reassures it isn't lost.
+    /// "Flight added", "Flight added — will sync when you're back" when
+    /// offline (so an edit made on the plane visibly reassures it isn't
+    /// lost), or the signed-out variant (finding 1) when there's no signed-
+    /// in session to attribute the write to — takes precedence over the
+    /// offline variant since "signed out" is the more specific, more
+    /// actionable fact (the offline case still applies once they sign in).
     private func toastMessage(_ verb: String) -> String {
         let base = "\(category.displayName) \(verb)"
+        if authManager.userId == nil {
+            return "\(base) \u{2014} you\u{2019}re signed out, so it won\u{2019}t sync until you sign back in."
+        }
         return syncStatus.isOffline ? "\(base) \u{2014} will sync when you\u{2019}re back" : base
     }
 

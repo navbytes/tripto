@@ -125,6 +125,15 @@ extension SyncEngine {
         } catch {
             logDebug("pullTrip(\(tripId)) failed: \(error)")
         }
+        // Attempt-completion, not just the success path above — same
+        // rationale as `pullHome`'s `markInitialHomePullCompleted` call
+        // (finding 2): a failed first pull should degrade to this trip's
+        // normal empty states, not strand `TripView` on an infinite
+        // "Checking…" placeholder. The early-return guards above
+        // (already pulling this trip, offline) deliberately skip this, so
+        // the offline case stays governed by `TripView`'s own
+        // `!syncStatus.isOffline` check instead.
+        await status.markInitialTripPullCompleted(tripId)
         await refreshStatusCounts()
     }
 }

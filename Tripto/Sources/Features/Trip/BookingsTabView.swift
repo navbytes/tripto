@@ -13,6 +13,9 @@ struct BookingsTabView: View {
     /// this tab for editors (UX audit finding 5), so this isn't the only
     /// entry point once there's at least one booking on screen.
     var onAdd: (() -> Void)? = nil
+    /// Finding 2: true while this trip's first pull this session hasn't
+    /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
+    var isAwaitingFirstSync: Bool = false
 
     private var groups: [(category: ItemCategory, items: [ItineraryItem])] {
         let withConfirmation = items.filter { !($0.confirmation ?? "").isEmpty }
@@ -64,30 +67,42 @@ struct BookingsTabView: View {
     private var emptyState: some View {
         VStack(spacing: Spacing.md) {
             Spacer()
-            Image(systemName: "ticket")
-                .font(.system(size: 34))
+            if isAwaitingFirstSync {
+                // Finding 2: a freshly-claimed (or just-opened) trip's
+                // bookings can't yet be told apart from genuinely having
+                // none while its first pull is still in flight — "Add your
+                // first booking" would be a claim ("first") we can't make
+                // yet, so the CTA is hidden until the answer is known.
+                ProgressView()
+                Text("Checking this trip\u{2019}s bookings\u{2026}")
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+            } else {
+                Image(systemName: "ticket")
+                    .font(.system(size: 34))
+                    .foregroundStyle(Palette.slate)
+                Text(
+                    onAdd != nil
+                        ? "Add a flight or stay with its confirmation code \u{2014} bookings collect here automatically."
+                        : "Bookings the organizers add will collect here."
+                )
+                .font(Typo.body())
                 .foregroundStyle(Palette.slate)
-            Text(
-                onAdd != nil
-                    ? "Add a flight or stay with its confirmation code \u{2014} bookings collect here automatically."
-                    : "Bookings the organizers add will collect here."
-            )
-            .font(Typo.body())
-            .foregroundStyle(Palette.slate)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, Spacing.xxl)
-            if let onAdd {
-                Button(action: onAdd) {
-                    Text("Add your first booking")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Palette.onAmber)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.vertical, Spacing.md)
-                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                        .contentShape(Capsule())
-                        .background(Palette.amber, in: Capsule())
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Spacing.xxl)
+                if let onAdd {
+                    Button(action: onAdd) {
+                        Text("Add your first booking")
+                            .font(Typo.body(weight: .semibold))
+                            .foregroundStyle(Palette.onAmber)
+                            .padding(.horizontal, Spacing.xl)
+                            .padding(.vertical, Spacing.md)
+                            .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                            .contentShape(Capsule())
+                            .background(Palette.amber, in: Capsule())
+                    }
+                    .padding(.top, Spacing.xs)
                 }
-                .padding(.top, Spacing.xs)
             }
             Spacer()
             Spacer()

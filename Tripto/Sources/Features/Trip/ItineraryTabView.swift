@@ -28,6 +28,9 @@ struct ItineraryTabView: View {
     /// context banner already states the "N of M" count above this view).
     var filteredPersonName: String? = nil
     @Binding var toast: String?
+    /// Finding 2: true while this trip's first pull this session hasn't
+    /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
+    var isAwaitingFirstSync: Bool = false
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
 
@@ -144,6 +147,23 @@ struct ItineraryTabView: View {
             VStack(spacing: Spacing.xl) {
                 if let filteredPersonName {
                     filteredEmptyState(personName: filteredPersonName)
+                } else if isAwaitingFirstSync {
+                    // Finding 2: a freshly-claimed (or just-opened) trip's
+                    // itinerary can't yet be told apart from a genuinely
+                    // empty one while its first pull is still in flight —
+                    // `skeletonRows` reads as "loading" either way, but the
+                    // headline/body below asserted facts ("nothing planned")
+                    // not yet known, and the import teaser is suppressed
+                    // since it's not the moment to pitch a waitlist.
+                    skeletonRows
+                        .padding(.top, Spacing.xl)
+
+                    VStack(spacing: Spacing.xs) {
+                        ProgressView()
+                        Text("Checking this trip\u{2019}s plans\u{2026}")
+                            .font(Typo.body())
+                            .foregroundStyle(Palette.slate)
+                    }
                 } else {
                     skeletonRows
                         .padding(.top, Spacing.xl)
