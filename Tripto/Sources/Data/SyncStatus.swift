@@ -12,6 +12,10 @@ final class SyncStatus {
     private(set) var pendingCount: Int = 0
     private(set) var pendingRowIds: Set<UUID> = []
     private(set) var lastSyncedAt: Date?
+    /// Permanently-failed outbox ops (`SyncEngine+Push.PushOutcome.permanent`)
+    /// the user hasn't dismissed yet — `SyncIssueBanner`/`SyncIssuesSheet`'s
+    /// data source. Newest-first, matching `SyncStore.allIssues()`'s sort.
+    private(set) var syncIssues: [SyncIssueSnapshot] = []
 
     func setOffline(_ offline: Bool) {
         isOffline = offline
@@ -24,5 +28,9 @@ final class SyncStatus {
 
     func markSynced(at date: Date = .now) {
         lastSyncedAt = date
+    }
+
+    func setIssues(_ issues: [SyncIssueSnapshot]) {
+        syncIssues = issues
     }
 }

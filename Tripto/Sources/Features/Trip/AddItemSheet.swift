@@ -353,6 +353,7 @@ struct AddItemSheet: View {
         case .flight:
             return !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
                 && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
+                && flightEndAfterStart
         case .hotel:
             guard !stayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
             let start = ItemTimeCombining.combine(date: checkInDate, timeOfDay: checkInTime, targetTz: stayZone)
@@ -588,13 +589,45 @@ struct AddItemSheet: View {
         )
     }
 
+    /// Whether a flight's arrival instant is strictly after its departure
+    /// instant — the same "end after start" rule Stay/Transport enforce, so
+    /// a same-day arrival clock earlier than departure (with the "+1 day"
+    /// chip off) can't save as a negative-duration flight. Compares the
+    /// *absolute instants* `flightInstants` composes, not wall-clock times:
+    /// a westward cross-zone flight can have an arrival wall-clock earlier
+    /// than departure's yet still land on a later instant, and that is
+    /// valid. Drives both `isValid` and the form's hint.
+    var flightEndAfterStart: Bool {
+        let (start, end) = Self.flightInstants(
+            flightDate: flightDate, departsTime: departsTime, departureZone: departureZone,
+            arrivesTime: arrivesTime, arrivalZone: arrivalZone, nextDay: effectiveArrivalIsNextDay
+        )
+        return end > start
+    }
+
+    /// Composes a flight item's departure and arrival instants — the same
+    /// math `flightFields()` needs to actually save the item, factored out
+    /// (mirroring `transportInstants` above) so validation and the save path
+    /// share one source of truth. Pure; exposed for tests.
+    static func flightInstants(
+        flightDate: Date, departsTime: Date, departureZone: TimeZone,
+        arrivesTime: Date, arrivalZone: TimeZone, nextDay: Bool,
+        readingCalendar: Calendar = .current
+    ) -> (start: Date, end: Date) {
+        let start = ItemTimeCombining.combine(date: flightDate, timeOfDay: departsTime, targetTz: departureZone, readingCalendar: readingCalendar)
+        let end = ItemTimeCombining.combine(
+            date: flightDate, timeOfDay: arrivesTime,
+            dayOffset: nextDay ? 1 : 0, targetTz: arrivalZone, readingCalendar: readingCalendar
+        )
+        return (start, end)
+    }
+
     private func flightFields() -> ComposedFields {
         let from = fromIATA.trimmingCharacters(in: .whitespaces).uppercased()
         let to = toIATA.trimmingCharacters(in: .whitespaces).uppercased()
-        let start = ItemTimeCombining.combine(date: flightDate, timeOfDay: departsTime, targetTz: departureZone)
-        let end = ItemTimeCombining.combine(
-            date: flightDate, timeOfDay: arrivesTime,
-            dayOffset: effectiveArrivalIsNextDay ? 1 : 0, targetTz: arrivalZone
+        let (start, end) = Self.flightInstants(
+            flightDate: flightDate, departsTime: departsTime, departureZone: departureZone,
+            arrivesTime: arrivesTime, arrivalZone: arrivalZone, nextDay: effectiveArrivalIsNextDay
         )
         let title = [
             airline.trimmingCharacters(in: .whitespacesAndNewlines),

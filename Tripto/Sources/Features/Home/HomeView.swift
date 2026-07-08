@@ -41,6 +41,9 @@ struct HomeView: View {
                     if syncStatus.isOffline {
                         SyncBanner()
                     }
+                    if !syncStatus.syncIssues.isEmpty {
+                        SyncIssueBanner()
+                    }
 
                     header
                         .padding(.horizontal, Spacing.xl)

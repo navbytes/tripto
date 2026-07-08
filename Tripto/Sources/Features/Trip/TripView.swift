@@ -181,6 +181,9 @@ struct TripView: View {
             if syncStatus.isOffline {
                 SyncBanner()
             }
+            if !syncStatus.syncIssues.isEmpty {
+                SyncIssueBanner()
+            }
 
             tabBar()
 
