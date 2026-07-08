@@ -40,4 +40,15 @@ public extension Palette {
             ? UIColor(hex: "#E8955A")
             : UIColor(hex: "#A25A24")
     })
+
+    /// `TripCard`'s glass pill fill (status pill, "Waiting to sync") — the
+    /// mockup's `.white.opacity(0.22)` measured under WCAG AA on the
+    /// lightest cover gradient stop (UX audit finding 3). Composited over
+    /// dusk's lightest stop (#E8955A) this black-38% yields ~#905C38, ~5.5:1
+    /// against the pill's white caption text (passes the 4.5:1 bar); moss's
+    /// stop (#6E9E7E) composites to ~6.8:1 and the dark indigo/plum ends to
+    /// ~16:1 — every gradient clears AA with the same single fill. Fixed
+    /// (not theme-adaptive) because the cover gradients themselves don't
+    /// change between light and dark, same rationale as `onAmber` above.
+    static let coverPillFill = Color.black.opacity(0.38)
 }

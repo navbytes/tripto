@@ -55,6 +55,14 @@ extension SyncEngine {
         } catch {
             logDebug("pullHome failed: \(error)")
         }
+        // Deliberately on attempt-completion, not just the success path
+        // above (`markSynced` only fires there) — a failed first pull
+        // should degrade to the honest empty state, not strand `HomeView`
+        // on an infinite "Checking for your trips…" spinner (finding 2).
+        // The early-return guards above (already pulling, offline) skip
+        // this on purpose: an offline launch leaves the flag false so
+        // `HomeView`'s `!isOffline` condition — not this one — governs it.
+        await status.markInitialHomePullCompleted()
         await refreshStatusCounts()
     }
 

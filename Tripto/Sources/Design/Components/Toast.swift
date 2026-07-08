@@ -23,6 +23,11 @@ struct ToastOverlay: ViewModifier {
                     .padding(.bottom, Spacing.xxl)
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .task(id: message) {
+                        // `.updatesFrequently` alone announces nothing —
+                        // VoiceOver needs an explicit announcement to speak
+                        // a toast that appears and vanishes on its own
+                        // (finding 6 rider, benefits every toast surface).
+                        AccessibilityNotification.Announcement(message).post()
                         try? await Task.sleep(nanoseconds: 2_000_000_000)
                         guard !Task.isCancelled else { return }
                         withAnimation(.easeOut(duration: reduceMotion ? 0 : 0.2)) {

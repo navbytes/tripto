@@ -25,6 +25,7 @@ struct SegmentedControl: View {
                         .foregroundStyle(option == selection ? Palette.ink : Palette.slate)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.sm)
+                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 8)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

@@ -60,6 +60,7 @@ struct TripView: View {
 
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
+    @State private var isEditingTrip = false
     @State private var toast: String?
     /// "Just mine" selection (BUILD_PLAN.md §5.4) — `nil` is "Everyone."
     @State private var selectedProfileFilter: UUID?
@@ -233,6 +234,9 @@ struct TripView: View {
                 toast = message
             }
         }
+        .sheet(isPresented: $isEditingTrip) {
+            TripFormView(mode: .edit(trip))
+        }
     }
 
     // MARK: - Hero (§4.2: gradient, glass back/share, city, meta)
@@ -244,6 +248,14 @@ struct TripView: View {
                     dismiss()
                 }
                 Spacer()
+                // Discoverable organizer edit entry point (finding 4): the
+                // Home context menu's "Edit trip" is a shortcut, not the
+                // sole route (HIG). Gated on the same `myRole` the FAB uses.
+                if myRole == .organizer {
+                    GlassCircleButton(systemImage: "pencil", accessibilityLabel: "Edit trip") {
+                        isEditingTrip = true
+                    }
+                }
                 // A `NavigationLink(value:)`, not a `GlassCircleButton`
                 // action closure: `TripView` doesn't own the shared
                 // `NavigationPath` (`HomeView` does), but a value-based
@@ -268,7 +280,7 @@ struct TripView: View {
             HStack(spacing: Spacing.sm) {
                 Text(dateRangeText(for: trip))
                 metaDot
-                Text("\(trip.durationInDays()) days")
+                Text("\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")")
                 metaDot
                 HStack(spacing: Spacing.xxs) {
                     Image(systemName: "person.2.fill").font(.system(size: 10))

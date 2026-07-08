@@ -16,6 +16,12 @@ final class SyncStatus {
     /// the user hasn't dismissed yet — `SyncIssueBanner`/`SyncIssuesSheet`'s
     /// data source. Newest-first, matching `SyncStore.allIssues()`'s sort.
     private(set) var syncIssues: [SyncIssueSnapshot] = []
+    /// True once `pullHome()` has completed an attempt (success or failure)
+    /// this session — `HomeView`'s signal to show a neutral "Checking for
+    /// your trips…" placeholder instead of the "Plan your first trip" empty
+    /// state while a genuinely-empty account can't yet be told apart from
+    /// "haven't heard from the server yet" (finding 2).
+    private(set) var hasCompletedInitialHomePull = false
 
     func setOffline(_ offline: Bool) {
         isOffline = offline
@@ -32,5 +38,16 @@ final class SyncStatus {
 
     func setIssues(_ issues: [SyncIssueSnapshot]) {
         syncIssues = issues
+    }
+
+    func markInitialHomePullCompleted() {
+        hasCompletedInitialHomePull = true
+    }
+
+    /// Sign-out wipe: the next sign-in (potentially a different account)
+    /// re-enters the first-pull loading state instead of reading an empty
+    /// wiped cache as "you have zero trips."
+    func resetInitialPullState() {
+        hasCompletedInitialHomePull = false
     }
 }

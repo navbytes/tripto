@@ -10,7 +10,24 @@ struct TripCard: View {
     let isPending: Bool
     var today: Date = .now
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     private var bucket: TripBucket { trip.bucket(asOf: today) }
+
+    private var durationText: String {
+        let days = trip.durationInDays()
+        return "\(days) day\(days == 1 ? "" : "s")"
+    }
+
+    /// Meta row layout (finding 5): an `HStack` truncates unreadably at
+    /// accessibility sizes, so this switches to a `VStack` there — same
+    /// `AnyLayout` swap pattern the mockup's `TripApp.jsx` has no equivalent
+    /// for (it has no Dynamic Type concept), so this is app-original.
+    private var metaLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading))
+            : AnyLayout(HStackLayout(spacing: Spacing.xs))
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -32,14 +49,14 @@ struct TripCard: View {
                     Text(trip.title)
                         .font(Typo.display(Typo.Size.display))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
 
-                    HStack(spacing: Spacing.xs) {
+                    metaLayout {
                         metaItem(icon: "mappin.circle.fill", text: countryDisplayName)
-                        dot
+                        if !dynamicTypeSize.isAccessibilitySize { dot }
                         metaItem(icon: "calendar", text: startDateText)
-                        dot
-                        Text("\(trip.durationInDays()) days")
+                        if !dynamicTypeSize.isAccessibilitySize { dot }
+                        Text(durationText)
                     }
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(.white.opacity(0.92))
@@ -47,7 +64,7 @@ struct TripCard: View {
             }
             .padding(Spacing.lg)
         }
-        .frame(height: 178)
+        .frame(minHeight: 178)
         .clipShape(RoundedRectangle(cornerRadius: Radii.cover, style: .continuous))
         .shadow(color: Palette.ink.opacity(0.22), radius: 16, y: 10)
         // One VoiceOver element: the gradient/pills/avatars are decorative
@@ -62,16 +79,23 @@ struct TripCard: View {
         var parts = [trip.title, countryDisplayName]
         switch bucket {
         case .inProgress: parts.append("in progress")
-        case .upcoming: parts.append("in \(trip.daysUntilStart(asOf: today)) days")
+        case .upcoming: parts.append("in \(daysUntilStartText)")
         case .past: parts.append("completed")
         }
         parts.append("starts \(startDateText)")
-        parts.append("\(trip.durationInDays()) days")
+        parts.append(durationText)
         if !people.isEmpty {
             parts.append("\(people.count) traveler\(people.count == 1 ? "" : "s")")
         }
         if isPending { parts.append("waiting to sync") }
         return parts.joined(separator: ", ")
+    }
+
+    /// Shared with `accessibilityLabel` so the spoken and on-screen pill
+    /// text pluralize identically.
+    private var daysUntilStartText: String {
+        let days = trip.daysUntilStart(asOf: today)
+        return "\(days) day\(days == 1 ? "" : "s")"
     }
 
     @ViewBuilder
@@ -80,7 +104,7 @@ struct TripCard: View {
         case .inProgress:
             glassPill(text: "In progress", icon: nil)
         case .upcoming:
-            glassPill(text: "in \(trip.daysUntilStart(asOf: today)) days", icon: nil)
+            glassPill(text: "in \(daysUntilStartText)", icon: nil)
         case .past:
             glassPill(text: "Completed", icon: nil)
         }
@@ -97,7 +121,7 @@ struct TripCard: View {
         .foregroundStyle(.white)
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
-        .background(.white.opacity(0.22), in: Capsule())
+        .background(Palette.coverPillFill, in: Capsule())
     }
 
     private func metaItem(icon: String, text: String) -> some View {

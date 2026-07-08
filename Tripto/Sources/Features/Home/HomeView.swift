@@ -22,8 +22,10 @@ struct HomeView: View {
     @State private var editingTrip: Trip?
     @State private var tripPendingDeletion: Trip?
     /// M3: surfaces `AppRouter.errorToast` (an expired/revoked invite link)
-    /// — nothing else on Home toasts today.
-    @State private var toast: String?
+    /// as a persistent `.alert` rather than a toast (finding 6) — a
+    /// two-second auto-dismissing toast can be missed entirely, and this is
+    /// the one Home error worth blocking on. Nothing else on Home toasts.
+    @State private var inviteErrorMessage: String?
     /// The app's one `NavigationPath` (`TripView.swift`'s doc comment: "the
     /// one `NavigationStack` rooted in `HomeView`") — pushing `TripRoute`/
     /// `ItemRoute` values onto this, rather than wrapping each row in a
@@ -44,18 +46,37 @@ struct HomeView: View {
                     if !syncStatus.syncIssues.isEmpty {
                         SyncIssueBanner()
                     }
+                    // The empty-trips case is covered by `initialLoadState`
+                    // below, so this only needs to fire once there's
+                    // already a list to sit above (finding 6).
+                    if appRouter.isJoiningTrip && !trips.isEmpty {
+                        joiningTripBanner
+                    }
 
                     header
                         .padding(.horizontal, Spacing.xl)
                         .padding(.top, Spacing.md)
                         .padding(.bottom, Spacing.sm)
 
-                    SegmentedControl(options: ["Upcoming", "Past"], selection: $selectedTab)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.bottom, Spacing.xs)
+                    // Hidden while trips is empty (finding 9) — an inert
+                    // Upcoming/Past toggle over a single empty/loading
+                    // message isn't a real choice yet.
+                    if !trips.isEmpty {
+                        SegmentedControl(options: ["Upcoming", "Past"], selection: $selectedTab)
+                            .padding(.horizontal, Spacing.xl)
+                            .padding(.bottom, Spacing.xs)
+                    }
 
                     if trips.isEmpty {
-                        emptyState
+                        // First-pull loading vs. genuinely-empty account
+                        // (finding 2): `hasCompletedInitialHomePull` is the
+                        // only way to tell them apart the first time Home
+                        // ever mounts this session.
+                        if appRouter.isJoiningTrip || (!syncStatus.hasCompletedInitialHomePull && !syncStatus.isOffline) {
+                            initialLoadState
+                        } else {
+                            emptyState
+                        }
                     } else if visibleTrips.isEmpty {
                         emptyTabState
                     } else {
@@ -146,10 +167,20 @@ struct HomeView: View {
             }
             .onChange(of: appRouter.errorToast) { _, message in
                 guard let message else { return }
-                toast = message
+                inviteErrorMessage = message
                 appRouter.clearErrorToast()
             }
-            .toastOverlay($toast)
+            .alert(
+                "Couldn\u{2019}t join trip",
+                isPresented: Binding(
+                    get: { inviteErrorMessage != nil },
+                    set: { isPresented in if !isPresented { inviteErrorMessage = nil } }
+                )
+            ) {
+                Button("OK") {}
+            } message: {
+                Text(inviteErrorMessage ?? "")
+            }
         }
     }
 
@@ -225,6 +256,10 @@ struct HomeView: View {
                             .font(Typo.display(16))
                             .foregroundStyle(.white)
                     }
+                    // 44pt hit target (§6.5) around the 42pt visual circle —
+                    // finding 8.
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("Settings")
         }
@@ -275,8 +310,8 @@ struct HomeView: View {
                     }
                 }
                 .contextMenu {
-                    Button("Edit trip") { editingTrip = trip }
                     if isOrganizer(of: trip) {
+                        Button("Edit trip") { editingTrip = trip }
                         Button("Delete trip", role: .destructive) {
                             tripPendingDeletion = trip
                         }
@@ -291,6 +326,10 @@ struct HomeView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        // User-initiated escape hatch for a missed realtime event (finding
+        // 10) — realtime/debounced pulls are the normal path, this is just
+        // the fallback.
+        .refreshable { await syncEngine?.pullHome() }
     }
 
     private var planNewTripRow: some View {
@@ -315,33 +354,38 @@ struct HomeView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.lg) {
-            Spacer()
-            Image(systemName: "airplane.departure")
-                .font(.system(size: 40))
-                .foregroundStyle(Palette.amber)
-            VStack(spacing: Spacing.xs) {
-                Text("Plan your first trip")
-                    .font(Typo.display(Typo.Size.title))
-                    .foregroundStyle(Palette.ink)
-                Text("Everyone\u{2019}s bookings in one shared, at-a-glance itinerary.")
-                    .font(Typo.body())
-                    .foregroundStyle(Palette.slate)
-                    .multilineTextAlignment(.center)
-            }
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                valueRow("clock", "Every flight and plan in its own local time")
-                valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
-                valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
-            }
-            .padding(.top, Spacing.xs)
-            planNewTripCTA
+        ScrollView {
+            VStack(spacing: Spacing.lg) {
+                Spacer()
+                Image(systemName: "airplane.departure")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Palette.amber)
+                VStack(spacing: Spacing.xs) {
+                    Text("Plan your first trip")
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(Palette.ink)
+                    Text("Everyone\u{2019}s bookings in one shared, at-a-glance itinerary.")
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                }
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    valueRow("clock", "Every flight and plan in its own local time")
+                    valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
+                    valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
+                }
                 .padding(.top, Spacing.xs)
-            Spacer()
-            Spacer()
+                planNewTripCTA
+                    .padding(.top, Spacing.xs)
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
         }
-        .padding(Spacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // A just-invited user staring at an empty Home needs the same pull
+        // escape hatch as the populated list (finding 10).
+        .refreshable { await syncEngine?.pullHome() }
     }
 
     private func valueRow(_ icon: String, _ text: String) -> some View {
@@ -359,26 +403,66 @@ struct HomeView: View {
     /// Shown when the *selected tab* is empty but the other tab has trips —
     /// avoids a near-blank screen with only a lone dashed button.
     private var emptyTabState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Text(selectedTab == "Upcoming" ? "No upcoming trips" : "No past trips yet")
-                .font(Typo.display(Typo.Size.title))
-                .foregroundStyle(Palette.ink)
-            Text(selectedTab == "Upcoming"
-                 ? "Plan the next one \u{2014} everyone\u{2019}s bookings in one shared itinerary."
-                 : "Trips you\u{2019}ve wrapped up will show up here.")
-                .font(Typo.body())
-                .foregroundStyle(Palette.slate)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Spacing.xl)
-            if selectedTab == "Upcoming" {
-                planNewTripCTA.padding(.top, Spacing.xs)
+        ScrollView {
+            VStack(spacing: Spacing.md) {
+                Spacer()
+                Text(selectedTab == "Upcoming" ? "No upcoming trips" : "No past trips yet")
+                    .font(Typo.display(Typo.Size.title))
+                    .foregroundStyle(Palette.ink)
+                Text(selectedTab == "Upcoming"
+                     ? "Plan the next one \u{2014} everyone\u{2019}s bookings in one shared itinerary."
+                     : "Trips you\u{2019}ve wrapped up will show up here.")
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Spacing.xl)
+                if selectedTab == "Upcoming" {
+                    planNewTripCTA.padding(.top, Spacing.xs)
+                }
+                Spacer()
+                Spacer()
             }
-            Spacer()
-            Spacer()
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
         }
-        .padding(Spacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await syncEngine?.pullHome() }
+    }
+
+    /// First-pull loading placeholder (finding 2) — shown while a
+    /// genuinely-empty account can't yet be told apart from "haven't heard
+    /// from the server yet," and while an invite claim is in flight for a
+    /// brand-new account (finding 6's empty-trips case).
+    private var initialLoadState: some View {
+        ScrollView {
+            VStack(spacing: Spacing.md) {
+                Spacer()
+                ProgressView()
+                Text(appRouter.isJoiningTrip ? "Joining trip\u{2026}" : "Checking for your trips\u{2026}")
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
+        }
+        .refreshable { await syncEngine?.pullHome() }
+    }
+
+    /// Slim in-progress indicator for an invite claim (finding 6) — shown
+    /// only once there's already a list to sit above; the empty-trips case
+    /// is covered by `initialLoadState`.
+    private var joiningTripBanner: some View {
+        HStack(spacing: Spacing.sm) {
+            ProgressView()
+            Text("Joining trip\u{2026}")
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+        .background(Palette.amberSoft)
     }
 
     private var planNewTripCTA: some View {

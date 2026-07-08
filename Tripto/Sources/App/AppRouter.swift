@@ -49,8 +49,17 @@ final class AppRouter {
     private(set) var tripToOpen: UUID?
 
     /// Set when a claim fails for a reason worth telling the user about —
-    /// `HomeView` surfaces this as a toast and clears it via `clearErrorToast()`.
+    /// `HomeView` surfaces this as a persistent alert and clears it via
+    /// `clearErrorToast()`.
     private(set) var errorToast: String?
+
+    /// True for the span of a `claim(token:)` call — `HomeView`'s "Joining
+    /// trip…" indicator (finding 6), so an invited user isn't staring at a
+    /// static empty/loaded screen while the claim RPC is in flight. Ended by
+    /// the two existing terminal calls below (`clearTripToOpen`/
+    /// `clearErrorToast`), which already run at exactly claim's success and
+    /// failure ends — no new choreography needed.
+    private(set) var isJoiningTrip = false
 
     /// Entry point for `.onOpenURL`. Not an invite link (including the
     /// `/t/` share path) → no-op. Signed in → claim immediately. Signed out
@@ -98,8 +107,15 @@ final class AppRouter {
         await claim(token: token)
     }
 
-    func clearTripToOpen() { tripToOpen = nil }
-    func clearErrorToast() { errorToast = nil }
+    func clearTripToOpen() {
+        tripToOpen = nil
+        isJoiningTrip = false
+    }
+
+    func clearErrorToast() {
+        errorToast = nil
+        isJoiningTrip = false
+    }
 
     /// `WelcomeView`'s "Try again" on the `.unavailable` invite-preview
     /// card. Guarded to `.unavailable` (with a token still stashed) so a
@@ -117,6 +133,7 @@ final class AppRouter {
     #endif
 
     private func claim(token: String) async {
+        isJoiningTrip = true
         do {
             let tripId: UUID = try await Supa.rpc("claim_invite", params: ClaimInviteParams(inviteToken: token))
             // Guard (M3 brief): claiming an invite for a trip you're already
@@ -125,9 +142,11 @@ final class AppRouter {
             // exactly like a fresh join, with no error path to special-case.
             tripToOpen = tripId
         } catch {
+            // §6.6 "what happened + how to fix it" — upgraded from the old
+            // bare "try the link again" (finding 6).
             errorToast = Self.isInvalidInvite(error)
-                ? "That invite link has expired or been revoked."
-                : "Couldn\u{2019}t join that trip \u{2014} try the link again."
+                ? "That invite link has expired or been revoked. Ask the trip organizer to send a new link."
+                : "We couldn\u{2019}t join the trip \u{2014} check your connection, then open the link again."
         }
     }
 
