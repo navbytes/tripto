@@ -7,9 +7,17 @@ enum SyncEngineError: Error {
 
 /// How a failed push should be handled — SYNC_DESIGN.md: "RLS-denied
 /// (401/403) or check-violation → drop op, mark ... ; never retry forever
-/// (max 8 attempts, exponential backoff, jitter)."
+/// (max 8 attempts, exponential backoff, jitter)." `.permanent` is further
+/// split by `retriable`, FIX #1's "tell the user, and let them act" design:
+/// - `retriable: false` ("rejected") — RLS denied it or it violates a
+///   constraint; sending the exact same payload again can never succeed.
+/// - `retriable: true` ("exhausted") — an otherwise-transient failure that
+///   burned through the retry budget; the network may come back, so a
+///   later manual "Try again" can still succeed.
+/// `SyncIssue.retriable` carries this through to the UI (`SyncIssueBanner`/
+/// `SyncIssuesSheet`), which only offers "Try again" in the `true` case.
 enum PushOutcome {
-    case permanent(String)
+    case permanent(message: String, retriable: Bool)
     case transient(String)
 }
 
@@ -37,7 +45,7 @@ enum PushErrorClassifier {
 
         if let postgrestError = error as? PostgrestError {
             if let code = postgrestError.code, Self.permanentPostgrestCodes.contains(code) {
-                return .permanent("\(postgrestError.message) (code \(code))")
+                return .permanent(message: "\(postgrestError.message) (code \(code))", retriable: false)
             }
             // An unrecognized PostgrestError (e.g. a transient 5xx PostgREST
             // still wraps as JSON) falls through to the attempt-budget check
@@ -48,7 +56,7 @@ enum PushErrorClassifier {
         if let httpError = error as? HTTPError {
             let status = httpError.response.statusCode
             if [401, 403, 422].contains(status) {
-                return .permanent("HTTP \(status)")
+                return .permanent(message: "HTTP \(status)", retriable: false)
             }
             return outcomeRespectingBudget(attemptsSoFar: attemptsSoFar, maxAttempts: maxAttempts, message: "HTTP \(status)")
         }
@@ -58,9 +66,14 @@ enum PushErrorClassifier {
         return outcomeRespectingBudget(attemptsSoFar: attemptsSoFar, maxAttempts: maxAttempts, message: describedError)
     }
 
+    /// The budget-exhausted case is always `retriable: true` — unlike an
+    /// outright rejection, nothing here says the *write itself* is invalid,
+    /// only that this device ran out of patience; the network (or whatever
+    /// transient condition this was) may be fine again by the time the user
+    /// taps "Try again."
     private static func outcomeRespectingBudget(attemptsSoFar: Int, maxAttempts: Int, message: String) -> PushOutcome {
         if attemptsSoFar + 1 >= maxAttempts {
-            return .permanent("gave up after \(attemptsSoFar + 1) attempts: \(message)")
+            return .permanent(message: "gave up after \(attemptsSoFar + 1) attempts: \(message)", retriable: true)
         }
         return .transient(message)
     }
@@ -230,10 +243,10 @@ extension SyncEngine {
             error, attemptsSoFar: op.attempts, maxAttempts: Self.maxPushAttempts
         )
         switch outcome {
-        case .permanent(let message):
+        case .permanent(let message, let retriable):
             logDebug("push gave up for \(op.table.rawValue)/\(op.rowId): \(message)")
             try? await store.markPermanentFailure(
-                opId: op.id, rowId: op.rowId, table: op.table, message: message
+                opId: op.id, rowId: op.rowId, table: op.table, message: message, retriable: retriable
             )
         case .transient(let message):
             logDebug("push retrying \(op.table.rawValue)/\(op.rowId) (attempt \(op.attempts + 1)): \(message)")

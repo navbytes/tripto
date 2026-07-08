@@ -109,7 +109,9 @@ actor SyncEngine {
     func refreshStatusCounts() async {
         let count = (try? await store.pendingCount()) ?? 0
         let rowIds = (try? await store.allPendingRowIds()) ?? []
+        let issues = (try? await store.allIssues()) ?? []
         await status.setPending(count: count, rowIds: rowIds)
+        await status.setIssues(issues)
     }
 
     // MARK: - Enqueue (SYNC_DESIGN.md "Local store" coalescing rules)

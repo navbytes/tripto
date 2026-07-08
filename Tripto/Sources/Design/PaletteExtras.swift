@@ -9,4 +9,22 @@ public extension Palette {
     /// Fixed (not theme-adaptive) because the amber fill is the same in both
     /// light and dark, so its foreground must be too.
     static let onAmber = Color(hex: "#241505")
+
+    /// Warning/rejection treatment — `SyncIssueBanner`'s "couldn't save"
+    /// notice (FIX #1). Deliberately a different hue from `amber`/`amberSoft`
+    /// (the "offline, will retry on its own" banner) so a permanently-failed
+    /// write reads as more urgent than a temporary connectivity blip.
+    /// Adaptive like the generated palette's own `dynamicColor` helper in
+    /// Tokens.swift — recreated locally since that helper is file-private
+    /// there, not exported for hand-written companions to reuse.
+    static let rose = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(hex: "#E28A78")
+            : UIColor(hex: "#B23B2E")
+    })
+    static let roseSoft = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(hex: "#B23B2E", alpha: 0.22)
+            : UIColor(hex: "#F6E1DE")
+    })
 }

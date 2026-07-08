@@ -144,12 +144,13 @@ extension SyncStore {
 
     /// Permanent failure (RLS denial, check violation, or retry budget
     /// exhausted): drop the op so it never retries forever, and leave a
-    /// trace for the UI to surface non-destructively.
-    func markPermanentFailure(opId: UUID, rowId: UUID, table: SyncTable, message: String) throws {
+    /// trace (with whether it's worth offering "Try again" on) for the UI
+    /// to surface non-destructively — see `SyncIssueBanner`/`SyncIssuesSheet`.
+    func markPermanentFailure(opId: UUID, rowId: UUID, table: SyncTable, message: String, retriable: Bool) throws {
         if let op = try fetchOp(id: opId) {
             modelContext.delete(op)
         }
-        modelContext.insert(SyncIssue(rowId: rowId, tableRaw: table.rawValue, message: message))
+        modelContext.insert(SyncIssue(rowId: rowId, tableRaw: table.rawValue, message: message, retriable: retriable))
         try modelContext.save()
     }
 
@@ -161,6 +162,101 @@ extension SyncStore {
 
     private func fetchOp(rowId: UUID) throws -> OutboxOp? {
         var descriptor = FetchDescriptor<OutboxOp>(predicate: #Predicate { $0.rowId == rowId })
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+}
+
+// MARK: - Sync issues (FIX #1: surfacing a permanently-failed write)
+
+extension SyncStore {
+    /// Every outstanding `SyncIssue`, newest first — `SyncEngine.refreshStatusCounts()`
+    /// republishes this onto `SyncStatus.syncIssues` after every mutation/flush/
+    /// failure, same as `pendingCount`/`allPendingRowIds` above.
+    func allIssues() throws -> [SyncIssueSnapshot] {
+        let descriptor = FetchDescriptor<SyncIssue>(sortBy: [SortDescriptor(\.at, order: .reverse)])
+        return try modelContext.fetch(descriptor).map { issue in
+            SyncIssueSnapshot(
+                id: issue.id, rowId: issue.rowId, tableRaw: issue.tableRaw,
+                message: issue.message, at: issue.at, retriable: issue.retriable
+            )
+        }
+    }
+
+    /// "Dismiss" on a single issue — the doomed local edit itself is left
+    /// alone here (it reverts to server truth on the next pull once nothing
+    /// protects it; see `SyncEngine.dismissIssue`'s doc comment), this just
+    /// clears the notice.
+    func dismissIssue(id: UUID) throws {
+        if let issue = try fetchIssue(id: id) {
+            modelContext.delete(issue)
+            try modelContext.save()
+        }
+    }
+
+    /// "Dismiss all" in `SyncIssuesSheet`.
+    func dismissAllIssues() throws {
+        try modelContext.delete(model: SyncIssue.self)
+        try modelContext.save()
+    }
+
+    /// Rebuilds and (re-)queues an upsert straight from the row's current
+    /// local state — the "Try again" action on a retriable sync issue
+    /// (`SyncEngine.retryIssue`). Reuses `enqueueUpsert`'s own coalescing
+    /// path above rather than inserting an `OutboxOp` directly, so a retry
+    /// behaves exactly like any other edit to that row.
+    ///
+    /// Only the four plain-`id`-keyed, DTO-backed tables are retriable this
+    /// way; `.itemAssignees` has no single `id` to look a row up by
+    /// (composite key — see `ItemAssignee`'s doc comment), and any row
+    /// that's since vanished locally (its trip was deleted, or it was
+    /// edited away in the meantime by a pull) has nothing left to re-send.
+    /// Both cases return `false` — the caller (`SyncEngine.retryIssue`)
+    /// still dismisses the issue either way, it just doesn't get a retry.
+    @discardableResult
+    func reenqueueUpsertFromLocalRow(rowId: UUID, table: SyncTable) throws -> Bool {
+        switch table {
+        case .itineraryItems:
+            guard let model = try fetchOne(ItineraryItem.self, predicate: #Predicate { $0.id == rowId }) else { return false }
+            try enqueueDTOUpsert(model.toDTO(), table: table, rowId: rowId, tripId: model.tripId)
+        case .packingItems:
+            guard let model = try fetchOne(PackingItem.self, predicate: #Predicate { $0.id == rowId }) else { return false }
+            try enqueueDTOUpsert(model.toDTO(), table: table, rowId: rowId, tripId: model.tripId)
+        case .trips:
+            guard let model = try fetchOne(Trip.self, predicate: #Predicate { $0.id == rowId }) else { return false }
+            try enqueueDTOUpsert(model.toDTO(), table: table, rowId: rowId, tripId: model.id)
+        case .tripProfiles:
+            guard let model = try fetchOne(TripProfile.self, predicate: #Predicate { $0.id == rowId }) else { return false }
+            try enqueueDTOUpsert(model.toDTO(), table: table, rowId: rowId, tripId: model.tripId)
+        case .profiles, .tripMembers, .shareLinks, .invites, .itemAssignees:
+            return false
+        }
+        return true
+    }
+
+    /// Shared JSON-encode step for `reenqueueUpsertFromLocalRow`'s four
+    /// branches above — the same `JSONCoding.encoder` a live
+    /// `SyncEngine.enqueueUpsert` call already uses for this payload shape.
+    private func enqueueDTOUpsert(_ dto: some Encodable, table: SyncTable, rowId: UUID, tripId: UUID?) throws {
+        let data = try JSONCoding.encoder.encode(dto)
+        let json = String(data: data, encoding: .utf8) ?? "{}"
+        try enqueueUpsert(table: table, rowId: rowId, tripId: tripId, payloadJSON: json)
+    }
+
+    /// One-off fetch-by-id helper for `reenqueueUpsertFromLocalRow`'s four
+    /// branches — a thin wrapper, not a generalized replacement for this
+    /// file's usual concrete-per-table shape (`#Predicate` needs a concrete
+    /// model type at each call site anyway, so each branch still builds its
+    /// own `$0.id == rowId` predicate; this just avoids repeating the
+    /// descriptor/fetchLimit boilerplate four times).
+    private func fetchOne<T: PersistentModel>(_ type: T.Type, predicate: Predicate<T>) throws -> T? {
+        var descriptor = FetchDescriptor<T>(predicate: predicate)
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    private func fetchIssue(id: UUID) throws -> SyncIssue? {
+        var descriptor = FetchDescriptor<SyncIssue>(predicate: #Predicate { $0.id == id })
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
     }
