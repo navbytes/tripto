@@ -151,6 +151,22 @@ enum ItemTag: String, CaseIterable, Sendable {
         case .kidsMenu: nil
         }
     }
+
+    /// Which item categories this tag is meaningful for — a flight has no
+    /// "kids' menu," a hotel stay has no "nap window." Keeps the add form from
+    /// offering nonsense tags (persona dry-run: "Kids' menu on a flight").
+    var categories: Set<ItemCategory> {
+        switch self {
+        case .kidsMenu: return [.food]
+        case .nap: return [.flight, .activity, .food, .transport]
+        case .strollerOk: return [.activity, .food, .transport]
+        }
+    }
+
+    /// The tags worth offering for a given category, preserving `allCases` order.
+    static func allowed(for category: ItemCategory) -> [ItemTag] {
+        allCases.filter { $0.categories.contains(category) }
+    }
 }
 
 extension ItineraryItem {

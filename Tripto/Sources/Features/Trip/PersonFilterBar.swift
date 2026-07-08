@@ -103,18 +103,19 @@ struct PersonFilterBar: View {
     }
 }
 
-/// "Just Meera's plans — 4 of 12 items" (this milestone's brief; the
-/// mockup's amber Sparkles banner) — `TripView` shows this only while a
-/// specific person is selected.
+/// The filter banner, shown only while a specific person is selected. Wording
+/// is honest about the "unassigned = shared with everyone" model: it never
+/// claims "just X's plans" when what's on screen is actually the whole group's
+/// shared plans (persona dry-run: the old "Just Meera's plans — 43 of 43" read
+/// as a lie).
 struct PersonFilterBanner: View {
     let personFirstName: String
-    let visibleCount: Int
-    let totalCount: Int
+    let summary: PersonFilter.FilterSummary
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "sparkles").foregroundStyle(Palette.amber)
-            Text("Just \(personFirstName)\u{2019}s plans \u{2014} \(visibleCount) of \(totalCount) item\(totalCount == 1 ? "" : "s")")
+            Text(message)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.ink)
             Spacer(minLength: 0)
@@ -124,5 +125,18 @@ struct PersonFilterBanner: View {
         .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
         .padding(.horizontal, Spacing.xl)
         .padding(.top, Spacing.sm)
+    }
+
+    private var message: String {
+        let name = personFirstName
+        if summary.assignedToPerson == 0 {
+            guard summary.shared > 0 else { return "Nothing is assigned to \(name) yet." }
+            let s = summary.shared
+            return "Nothing just for \(name) yet \u{2014} showing \(s) plan\(s == 1 ? "" : "s") shared with everyone."
+        }
+        var parts = "\(summary.assignedToPerson) for \(name)"
+        if summary.shared > 0 { parts += " \u{00B7} \(summary.shared) shared" }
+        if summary.hiddenForOthers > 0 { parts += " \u{00B7} \(summary.hiddenForOthers) hidden" }
+        return parts
     }
 }

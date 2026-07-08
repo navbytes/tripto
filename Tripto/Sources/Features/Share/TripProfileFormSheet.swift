@@ -182,7 +182,7 @@ struct TripProfileFormSheet: View {
             Text(isEditing ? "Save changes" : "Add to trip")
                 .font(Typo.body(weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .foregroundStyle(.white)
+                .foregroundStyle(Palette.onAmber)
                 .padding(.vertical, Spacing.md)
                 .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
         }

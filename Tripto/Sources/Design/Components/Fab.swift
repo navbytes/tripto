@@ -10,7 +10,7 @@ struct Fab: View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Palette.onAmber)
                 .frame(width: 58, height: 58)
                 .background(Palette.amber, in: Circle())
                 .shadow(color: Palette.amber.opacity(0.55), radius: 12, y: 7)

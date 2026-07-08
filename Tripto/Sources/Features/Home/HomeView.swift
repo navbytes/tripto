@@ -53,6 +53,8 @@ struct HomeView: View {
 
                     if trips.isEmpty {
                         emptyState
+                    } else if visibleTrips.isEmpty {
+                        emptyTabState
                     } else {
                         tripList
                     }
@@ -312,31 +314,79 @@ struct HomeView: View {
             Spacer()
             Image(systemName: "airplane.departure")
                 .font(.system(size: 40))
-                .foregroundStyle(Palette.slate)
+                .foregroundStyle(Palette.amber)
             VStack(spacing: Spacing.xs) {
                 Text("Plan your first trip")
                     .font(Typo.display(Typo.Size.title))
                     .foregroundStyle(Palette.ink)
-                Text("Everyone's plans, one shared itinerary.")
+                Text("Everyone\u{2019}s bookings in one shared, at-a-glance itinerary.")
                     .font(Typo.body())
                     .foregroundStyle(Palette.slate)
                     .multilineTextAlignment(.center)
             }
-            Button {
-                isPresentingCreate = true
-            } label: {
-                Text("Plan a new trip")
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.md)
-                    .background(Palette.amber, in: Capsule())
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                valueRow("clock", "Every flight and plan in its own local time")
+                valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
+                valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
+            }
+            .padding(.top, Spacing.xs)
+            planNewTripCTA
+                .padding(.top, Spacing.xs)
+            Spacer()
+            Spacer()
+        }
+        .padding(Spacing.xl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func valueRow(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Palette.amber)
+                .frame(width: 20)
+            Text(text)
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+        }
+    }
+
+    /// Shown when the *selected tab* is empty but the other tab has trips —
+    /// avoids a near-blank screen with only a lone dashed button.
+    private var emptyTabState: some View {
+        VStack(spacing: Spacing.md) {
+            Spacer()
+            Text(selectedTab == "Upcoming" ? "No upcoming trips" : "No past trips yet")
+                .font(Typo.display(Typo.Size.title))
+                .foregroundStyle(Palette.ink)
+            Text(selectedTab == "Upcoming"
+                 ? "Plan the next one \u{2014} everyone\u{2019}s bookings in one shared itinerary."
+                 : "Trips you\u{2019}ve wrapped up will show up here.")
+                .font(Typo.body())
+                .foregroundStyle(Palette.slate)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Spacing.xl)
+            if selectedTab == "Upcoming" {
+                planNewTripCTA.padding(.top, Spacing.xs)
             }
             Spacer()
             Spacer()
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var planNewTripCTA: some View {
+        Button {
+            isPresentingCreate = true
+        } label: {
+            Text("Plan a new trip")
+                .font(Typo.body(weight: .semibold))
+                .foregroundStyle(Palette.onAmber)
+                .padding(.horizontal, Spacing.xl)
+                .padding(.vertical, Spacing.md)
+                .background(Palette.amber, in: Capsule())
+        }
     }
 
     // MARK: - Derived data

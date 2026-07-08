@@ -32,7 +32,14 @@ struct SegmentedControl: View {
                     if option == selection {
                         RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous)
                             .fill(Palette.elevated)
-                            .shadow(color: Palette.ink.opacity(0.12), radius: 3, y: 1)
+                            // A hairline keeps the selected pill legible in dark
+                            // mode, where the elevated fill sits close to the
+                            // mist track (persona dry-run).
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous)
+                                    .stroke(Palette.slate.opacity(0.22), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
                     }
                 }
                 .accessibilityAddTraits(option == selection ? [.isSelected] : [])

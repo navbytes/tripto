@@ -86,4 +86,45 @@ final class PersonFilterTests: XCTestCase {
     func testAssigneeProfileIdsIsEmptyWhenNothingIsAssigned() {
         XCTAssertTrue(PersonFilter.assigneeProfileIds([], itemIds: [UUID()]).isEmpty)
     }
+
+    // MARK: - summary (honest banner breakdown)
+
+    /// The demo case that read as a lie: everything unassigned, so nothing is
+    /// "just for" the person — it's all shared.
+    func testSummaryAllUnassignedAreSharedNoneJustForPerson() {
+        let a = TestFixtures.makeItineraryItem(startsAt: .now)
+        let b = TestFixtures.makeItineraryItem(startsAt: .now)
+        let summary = PersonFilter.summary([a, b], assignees: [], selectedProfileId: UUID())
+        XCTAssertEqual(summary, PersonFilter.FilterSummary(assignedToPerson: 0, shared: 2, hiddenForOthers: 0))
+        XCTAssertEqual(summary.visible, 2)
+        XCTAssertEqual(summary.total, 2)
+    }
+
+    func testSummarySplitsAssignedSharedAndHidden() {
+        let shared = TestFixtures.makeItineraryItem(startsAt: .now)
+        let mine = TestFixtures.makeItineraryItem(startsAt: .now)
+        let theirs = TestFixtures.makeItineraryItem(startsAt: .now)
+        let meera = UUID()
+        let grandma = UUID()
+        let assignees = [
+            ItemAssignee(itemId: mine.id, profileId: meera),
+            ItemAssignee(itemId: theirs.id, profileId: grandma),
+        ]
+        let summary = PersonFilter.summary([shared, mine, theirs], assignees: assignees, selectedProfileId: meera)
+        XCTAssertEqual(summary, PersonFilter.FilterSummary(assignedToPerson: 1, shared: 1, hiddenForOthers: 1))
+        XCTAssertEqual(summary.visible, 2, "assigned-to-me + shared are what the filter shows")
+    }
+
+    func testSummaryItemSharedBetweenPersonAndOtherCountsAsTheirs() {
+        let item = TestFixtures.makeItineraryItem(startsAt: .now)
+        let meera = UUID()
+        let grandma = UUID()
+        let assignees = [
+            ItemAssignee(itemId: item.id, profileId: meera),
+            ItemAssignee(itemId: item.id, profileId: grandma),
+        ]
+        let summary = PersonFilter.summary([item], assignees: assignees, selectedProfileId: meera)
+        XCTAssertEqual(summary.assignedToPerson, 1)
+        XCTAssertEqual(summary.hiddenForOthers, 0)
+    }
 }

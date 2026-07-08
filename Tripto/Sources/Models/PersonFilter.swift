@@ -26,6 +26,45 @@ enum PersonFilter {
         return items.filter { !assignedItemIds.contains($0.id) || mineItemIds.contains($0.id) }
     }
 
+    /// An honest breakdown for the filter banner. The old banner said "Just
+    /// X's plans — 43 of 43," which reads as a lie when every item is actually
+    /// *shared* (unassigned) rather than X's. This splits the visible set into
+    /// "specifically assigned to X" vs "shared with everyone," plus how many are
+    /// hidden because they belong only to other people.
+    struct FilterSummary: Equatable {
+        /// Items with at least one assignee, one of whom is the selected person.
+        let assignedToPerson: Int
+        /// Items with no assignees at all — shared with the whole group.
+        let shared: Int
+        /// Items assigned only to *other* people (excluded from the view).
+        let hiddenForOthers: Int
+
+        var total: Int { assignedToPerson + shared + hiddenForOthers }
+        var visible: Int { assignedToPerson + shared }
+    }
+
+    static func summary(
+        _ items: [ItineraryItem],
+        assignees: [ItemAssignee],
+        selectedProfileId: UUID
+    ) -> FilterSummary {
+        let assignedItemIds = Set(assignees.map(\.itemId))
+        let mineItemIds = Set(assignees.filter { $0.profileId == selectedProfileId }.map(\.itemId))
+        var assignedToPerson = 0
+        var shared = 0
+        var hidden = 0
+        for item in items {
+            if !assignedItemIds.contains(item.id) {
+                shared += 1
+            } else if mineItemIds.contains(item.id) {
+                assignedToPerson += 1
+            } else {
+                hidden += 1
+            }
+        }
+        return FilterSummary(assignedToPerson: assignedToPerson, shared: shared, hiddenForOthers: hidden)
+    }
+
     /// `itemId` -> the `profileId`s assigned to it, restricted to
     /// `itemIds` — the caller's own trip's item ids. `ItemAssignee` carries
     /// no `tripId` of its own (composite PK item_id+profile_id), so scoping

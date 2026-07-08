@@ -272,7 +272,7 @@ struct PackingListView: View {
                 } label: {
                     Text("Add an item")
                         .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Palette.onAmber)
                         .padding(.horizontal, Spacing.xl)
                         .padding(.vertical, Spacing.md)
                         .background(Palette.amber, in: Capsule())
@@ -427,7 +427,7 @@ private struct PackingItemFormSheet: View {
                             Text("Add to packing list")
                                 .font(Typo.body(weight: .semibold))
                                 .frame(maxWidth: .infinity)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Palette.onAmber)
                                 .padding(.vertical, Spacing.md)
                                 .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
                         }

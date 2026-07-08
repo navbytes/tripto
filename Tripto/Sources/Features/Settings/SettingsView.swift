@@ -43,11 +43,17 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, Spacing.xs)
 
-                Button("Save changes") { saveDisplayName() }
-                    .disabled(!isNameChanged)
+                if isNameChanged {
+                    Button("Save changes") { saveDisplayName() }
+                }
             }
 
-            Section {
+            Section("Account") {
+                if let email = authManager.session?.user.email, !email.isEmpty {
+                    LabeledContent("Signed in as", value: email)
+                } else {
+                    LabeledContent("Account", value: "Signed in")
+                }
                 Button("Sign out", role: .destructive) {
                     Task { await authManager.signOut() }
                 }
@@ -133,9 +139,8 @@ struct SettingsView: View {
     }
 
     private var privacyURL: URL {
-        // TODO(v1.1): this page doesn't exist yet (CLAUDE.md/M3 brief) — the
-        // URL is reserved so the link ships pointed at the right place from
-        // day one rather than needing an app update later to add it.
+        // Served live by the share Worker (web/share-worker/src/index.ts:
+        // GET /privacy -> renderPrivacyPage, HTTP 200).
         URL(string: "https://tripto.navbytes.io/privacy")!
     }
 

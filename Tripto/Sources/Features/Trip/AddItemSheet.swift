@@ -318,7 +318,7 @@ struct AddItemSheet: View {
             Text(isEditing ? "Save changes" : "Add \(category.displayName.lowercased()) to itinerary")
                 .font(Typo.body(weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .foregroundStyle(.white)
+                .foregroundStyle(Palette.onAmber)
                 .padding(.vertical, Spacing.md)
                 .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
                 .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)

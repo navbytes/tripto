@@ -188,11 +188,10 @@ struct TripView: View {
 
             if selectedTab == .itinerary, !tripProfiles.isEmpty {
                 PersonFilterBar(chips: personFilterChips, selection: $selectedProfileFilter)
-                if let selectedProfileFirstName {
+                if let selectedProfileFilter, let selectedProfileFirstName {
                     PersonFilterBanner(
                         personFirstName: selectedProfileFirstName,
-                        visibleCount: filteredItems.count,
-                        totalCount: items.count
+                        summary: PersonFilter.summary(items, assignees: itemAssignees, selectedProfileId: selectedProfileFilter)
                     )
                 }
             }

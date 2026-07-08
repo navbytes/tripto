@@ -13,7 +13,7 @@ extension AddItemSheet {
                 FormTextField(label: "Flight no.", text: $flightNo, placeholder: "TP1234", autocapitalization: .characters)
             }
             HStack(spacing: Spacing.md) {
-                FormTextField(label: "From", text: $fromIATA, placeholder: "JFK", autocapitalization: .characters)
+                FormTextField(label: "From", text: $fromIATA, placeholder: "e.g. JFK", autocapitalization: .characters)
                     .onChange(of: fromIATA) { _, newValue in
                         let filtered = String(newValue.uppercased().prefix(3))
                         if filtered != fromIATA { fromIATA = filtered }
@@ -21,7 +21,7 @@ extension AddItemSheet {
                             departureZone = zone
                         }
                     }
-                FormTextField(label: "To", text: $toIATA, placeholder: "LIS", autocapitalization: .characters)
+                FormTextField(label: "To", text: $toIATA, placeholder: "e.g. LIS", autocapitalization: .characters)
                     .onChange(of: toIATA) { _, newValue in
                         let filtered = String(newValue.uppercased().prefix(3))
                         if filtered != toIATA { toIATA = filtered }
@@ -194,15 +194,18 @@ extension AddItemSheet {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Family tags")
-                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                        .foregroundStyle(Palette.slate)
-                    HStack(spacing: Spacing.sm) {
-                        ForEach(ItemTag.allCases, id: \.self) { tag in
-                            tagToggle(tag)
+                let categoryTags = ItemTag.allowed(for: category)
+                if !categoryTags.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Family tags")
+                            .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                            .foregroundStyle(Palette.slate)
+                        HStack(spacing: Spacing.sm) {
+                            ForEach(categoryTags, id: \.self) { tag in
+                                tagToggle(tag)
+                            }
+                            Spacer(minLength: 0)
                         }
-                        Spacer(minLength: 0)
                     }
                 }
             }
