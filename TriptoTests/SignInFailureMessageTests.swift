@@ -4,7 +4,10 @@ import XCTest
 
 /// `WelcomeView.signInFailureMessage`/`urlErrorCode` — the three §6.6
 /// failure-copy buckets (offline / server unreachable / on-our-end), plus
-/// `invitePreviewAnnouncement(for:)`'s resolved-states-only VoiceOver copy.
+/// `invitePreviewAnnouncement(for:)`'s resolved-states-only VoiceOver copy,
+/// `appleSideFailureMessage(for:)`'s Settings-vs-transient split, and a pin
+/// test on `signingInStatusText` so the rendered label and the VoiceOver
+/// announcement can't silently drift.
 /// Mirrors `PushErrorClassifierTests`' pure-function style.
 final class SignInFailureMessageTests: XCTestCase {
     private struct OtherDomainError: Error {}
@@ -89,5 +92,41 @@ final class SignInFailureMessageTests: XCTestCase {
         // against — a code-only check would have suppressed this too.
         let error = NSError(domain: "SomeOtherDomain", code: ASAuthorizationError.canceled.rawValue)
         XCTAssertFalse(WelcomeView.isUserCancelledAppleSignIn(error))
+    }
+
+    // MARK: - appleSideFailureMessage
+
+    func testUnknownCodeReturnsSettingsPointingCopy() {
+        let error = NSError(domain: ASAuthorizationErrorDomain, code: ASAuthorizationError.unknown.rawValue)
+        let message = WelcomeView.appleSideFailureMessage(for: error)
+        XCTAssertTrue(message.contains("Settings"), "expected Settings-pointing copy, got \(message)")
+        XCTAssertFalse(message.contains("try again"), "unknown-code copy shouldn't suggest retrying, got \(message)")
+    }
+
+    func testTransientCodesReturnTryAgainCopy() {
+        let codes: [ASAuthorizationError.Code] = [.failed, .invalidResponse, .notHandled]
+        for code in codes {
+            let error = NSError(domain: ASAuthorizationErrorDomain, code: code.rawValue)
+            let message = WelcomeView.appleSideFailureMessage(for: error)
+            XCTAssertTrue(message.contains("try again"), "expected transient copy for \(code), got \(message)")
+        }
+    }
+
+    func testUnknownCodeInOtherDomainIsNotSuppressed() {
+        // Mirrors `testSameCodeInOtherDomainIsNotSuppressed` — the exact
+        // cross-domain code collision the domain check guards against.
+        let error = NSError(domain: "SomeOtherDomain", code: ASAuthorizationError.unknown.rawValue)
+        let message = WelcomeView.appleSideFailureMessage(for: error)
+        XCTAssertTrue(message.contains("try again"), "expected transient copy, got \(message)")
+        XCTAssertFalse(message.contains("Settings"), "expected transient copy, not Settings copy, got \(message)")
+    }
+
+    // MARK: - signingInStatusText
+
+    func testSigningInStatusTextIsPinned() {
+        // Pins the exact string so the rendered `Text` and the VoiceOver
+        // announcement in `WelcomeView.body` — both sourced from this
+        // constant — can't silently drift.
+        XCTAssertEqual(WelcomeView.signingInStatusText, "Signing you in\u{2026}")
     }
 }

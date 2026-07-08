@@ -1,5 +1,6 @@
 import AuthenticationServices
 import SwiftUI
+import UIKit
 
 /// Auth gate's signed-out state (RootView). Production path is Sign in
 /// with Apple; DEBUG builds add an anonymous test path since the backend
@@ -9,6 +10,7 @@ struct WelcomeView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(AppRouter.self) private var appRouter
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var errorMessage: String?
     @State private var isSigningInAnonymously = false
     @State private var isCompletingAppleSignIn = false
@@ -23,12 +25,37 @@ struct WelcomeView: View {
             // default type sizes (the Spacers still expand to fill
             // `geo.size.height`) while letting it scroll when it doesn't fit.
             GeometryReader { geo in
-                ScrollView {
-                    content
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: geo.size.height)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        content
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: geo.size.height)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    // A sign-in failure needs to reach VoiceOver even though
+                    // the error text renders below the fold at some type
+                    // sizes — it also fires an error haptic and scrolls the
+                    // message into view for sighted users.
+                    .onChange(of: errorMessage) { _, newValue in
+                        if let newValue {
+                            AccessibilityNotification.Announcement(newValue).post()
+                            UINotificationFeedbackGenerator().notificationOccurred(.error)
+                            // The conditional Label doesn't exist in the
+                            // hierarchy yet when .onChange fires — one tick
+                            // lets it get inserted before we scroll to it.
+                            Task { @MainActor in
+                                await Task.yield()
+                                if reduceMotion {
+                                    proxy.scrollTo(Self.signInErrorScrollID, anchor: .bottom)
+                                } else {
+                                    withAnimation {
+                                        proxy.scrollTo(Self.signInErrorScrollID, anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-                .scrollBounceBehavior(.basedOnSize)
             }
         }
         .task {
@@ -50,13 +77,6 @@ struct WelcomeView: View {
                 )
             }
             #endif
-        }
-        // A sign-in failure needs to reach VoiceOver even though the error
-        // text renders below the fold at some type sizes.
-        .onChange(of: errorMessage) { _, newValue in
-            if let newValue {
-                AccessibilityNotification.Announcement(newValue).post()
-            }
         }
         // Announces the invite preview's resolved states only — .idle/
         // .loading stay silent so VoiceOver isn't chattering mid-fetch.
@@ -159,6 +179,7 @@ struct WelcomeView: View {
                         .foregroundStyle(Palette.rose)
                         .multilineTextAlignment(.center)
                         .transition(.opacity)
+                        .id(Self.signInErrorScrollID)
                 }
             }
             .padding(.horizontal, Spacing.xl)
@@ -212,12 +233,15 @@ struct WelcomeView: View {
                             .font(Typo.body(Typo.Size.caption))
                             .foregroundStyle(Palette.slate)
                             .multilineTextAlignment(.center)
-                        Button("Try again") {
+                        Button {
                             appRouter.retryInvitePreview()
+                        } label: {
+                            Text("Try again")
+                                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                                .foregroundStyle(Palette.amberInk)
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
                         }
-                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                        .foregroundStyle(Palette.amberInk)
-                        .frame(minHeight: 44)
                     }
                 }
             }
@@ -333,6 +357,11 @@ struct WelcomeView: View {
     /// Visible label for the in-progress state, pinned to a constant so the
     /// rendered `Text` and the VoiceOver announcement in `body` can't drift.
     static let signingInStatusText = "Signing you in\u{2026}"
+
+    /// `ScrollViewReader` target for the sign-in error `Label`, so a failure
+    /// scrolls into view for sighted users instead of only announcing to
+    /// VoiceOver.
+    private static let signInErrorScrollID = "signInError"
 
     /// Domain-then-code check (mirrors `urlErrorCode`'s type-then-string-
     /// fallback idiom) — a code-only check risks a false positive if some
