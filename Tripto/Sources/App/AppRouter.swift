@@ -21,6 +21,13 @@ final class AppRouter {
     /// WelcomeView, claim after sign-in completes" (M3 brief).
     private(set) var pendingInviteToken: String?
 
+    /// Sanitized preview of the pending invite (inviter, trip, dates, role),
+    /// fetched via `peek_invite` the moment a link arrives while signed out, so
+    /// `WelcomeView` can show what you're joining BEFORE Sign in with Apple
+    /// (usability dry-run: the handshake was otherwise blind). Best-effort —
+    /// stays nil if the fetch is in flight or the link is invalid/expired.
+    private(set) var pendingInvitePreview: InvitePreview?
+
     /// Set once `claim_invite` succeeds — `HomeView` observes this, pulls
     /// home, pushes the trip, and clears it back to nil via `clearTripToOpen()`.
     private(set) var tripToOpen: UUID?
@@ -38,7 +45,15 @@ final class AppRouter {
             Task { await claim(token: token) }
         } else {
             pendingInviteToken = token
+            Task { await fetchInvitePreview(token: token) }
         }
+    }
+
+    /// Best-effort sanitized preview for the WelcomeView. A failure (offline,
+    /// expired/invalid token) simply leaves `pendingInvitePreview` nil and the
+    /// welcome screen falls back to its generic copy.
+    private func fetchInvitePreview(token: String) async {
+        pendingInvitePreview = try? await Supa.rpc("peek_invite", params: PeekInviteParams(inviteToken: token))
     }
 
     /// `HomeView` calls this every time it appears — a cheap no-op when
@@ -47,11 +62,18 @@ final class AppRouter {
     func claimPendingInviteIfNeeded() async {
         guard let token = pendingInviteToken else { return }
         pendingInviteToken = nil
+        pendingInvitePreview = nil
         await claim(token: token)
     }
 
     func clearTripToOpen() { tripToOpen = nil }
     func clearErrorToast() { errorToast = nil }
+
+    #if DEBUG
+    /// Verify-drill only: seed a mock invite preview so the pre-sign-in card can
+    /// be screenshotted without a live two-user invite flow.
+    func debugInjectInvitePreview(_ preview: InvitePreview) { pendingInvitePreview = preview }
+    #endif
 
     private func claim(token: String) async {
         do {
@@ -82,4 +104,20 @@ final class AppRouter {
 
 private struct ClaimInviteParams: Encodable {
     let inviteToken: String
+}
+
+private struct PeekInviteParams: Encodable {
+    let inviteToken: String
+}
+
+/// Sanitized `peek_invite` payload — inviter display name, trip summary, and
+/// role, with no email/token/ids (backend `peek_invite`). Decoded via the
+/// shared `.convertFromSnakeCase` decoder, so these stay camelCase.
+struct InvitePreview: Decodable, Equatable {
+    let role: String
+    let tripTitle: String
+    let startDate: String
+    let endDate: String
+    let coverGradient: String
+    let inviterName: String
 }

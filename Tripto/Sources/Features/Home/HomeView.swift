@@ -165,6 +165,13 @@ struct HomeView: View {
         let arguments = ProcessInfo.processInfo.arguments
         guard authManager.isSignedIn else { return }
 
+        // Verify-drill only: sign out so a launch can reach the (signed-out)
+        // WelcomeView — e.g. to screenshot the pre-sign-in invite preview.
+        if arguments.contains("-uitestSignOut") {
+            await authManager.signOut()
+            return
+        }
+
         // Simulates a real `.onOpenURL` delivery for the verify drill's
         // two-user claim phase (`xcrun simctl openurl` reaches the real
         // `.onOpenURL` directly; this flag exists only for a launch where
