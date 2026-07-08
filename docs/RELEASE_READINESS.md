@@ -28,9 +28,13 @@ that 500 can't hit us; a real device sign-in confirms it.
 ## 0.5 Where we are (2026-07-08 evening) — and your exact next steps
 
 **Done autonomously — nothing needed from you:**
-- Whole app **M0–M5**, committed, **135 tests**. Release-hardened: app icon,
+- Whole app **M0–M5**, committed, **187 tests**. Release-hardened: app icon,
   branded launch screen, version 1.0.0, anon-auth compiled out of Release,
   **Release build verified clean**.
+- **Post-audit hardening (2026-07-09):** a pre-submission completeness audit
+  surfaced two fixes — permanently-failed syncs are now shown to the user (a
+  rose "couldn't save" banner with retry/dismiss; they were silently dropped
+  before) and flights now validate arrival-after-departure. Both TDD, reviewed.
 - Backend live: schema + RLS + RPCs; **Sign in with Apple provider enabled +
   verified**; the fix I flagged is present (GoTrue v2.192.0).
 - Web (all live): share page, **privacy policy**, **root landing page**
@@ -172,7 +176,7 @@ deletion. **Built and deployed** (2026-07-08):
   `admin.deleteUser` (cascades all data). Client secret is an ES256 JWT signed
   with the `.p8` (team `59J9RQXYYP`, key `5YX6JK6K9A`, bundle `io.navbytes.tripto`).
 - **Verified:** `delete-account` live end-to-end (throwaway user → 204 →
-  auth.users + profile rows gone). App builds + 135 tests green.
+  auth.users + profile rows gone). App builds + 187 tests green.
 - **Remaining (device + owner):** set `APPLE_SIWA_PRIVATE_KEY` (the `.p8`) as a
   Supabase secret — *not set yet*; then a real device sign-in exercises the
   code-exchange + the Apple revoke. Deletion (the core requirement) already works
