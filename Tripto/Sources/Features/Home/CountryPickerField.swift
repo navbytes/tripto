@@ -95,6 +95,10 @@ private struct CountryPickerSheet: View {
         TripFormValidation.countries(matching: query)
     }
 
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -104,16 +108,23 @@ private struct CountryPickerSheet: View {
                         label: "Search",
                         text: $query,
                         placeholder: "Country name or code",
+                        autocapitalization: .words,
                         focusBinding: $searchFocused,
                         focusValue: true
                     )
+                    .submitLabel(.done)
+                    .onSubmit { searchFocused = false }
                     .padding(.horizontal, Spacing.xl)
                     .padding(.top, Spacing.lg)
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             if !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 clearRow
-                                Divider().padding(.leading, Spacing.xl)
+                                // No rule into blankness when there are no
+                                // rows below it (empty-results state).
+                                if !results.isEmpty {
+                                    Divider().padding(.leading, Spacing.xl)
+                                }
                             }
                             ForEach(results) { country in
                                 countryRow(country)
@@ -121,9 +132,22 @@ private struct CountryPickerSheet: View {
                                     Divider().padding(.leading, Spacing.xl)
                                 }
                             }
+                            if results.isEmpty {
+                                // Only reachable with a non-blank query — a
+                                // blank query always returns every country.
+                                Text(
+                                    "Nothing matched \u{201C}\(trimmedQuery)\u{201D}. Try the country\u{2019}s " +
+                                        "name \u{2014} cities like \u{201C}Lisbon\u{201D} won\u{2019}t match."
+                                )
+                                .font(Typo.body(Typo.Size.caption))
+                                .foregroundStyle(Palette.slate)
+                                .padding(.horizontal, Spacing.xl)
+                                .padding(.top, Spacing.lg)
+                            }
                         }
                         .padding(.bottom, Spacing.xl)
                     }
+                    .scrollDismissesKeyboard(.interactively)
                 }
             }
             .background(Palette.paper)

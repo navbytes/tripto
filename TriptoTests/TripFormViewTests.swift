@@ -72,12 +72,32 @@ final class TripFormViewTests: XCTestCase {
 
     func testCTAGuidanceSurfacesUnacceptableCountryWhenTitleIsValid() {
         let guidance = TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "PO", isEditing: true)
-        XCTAssertEqual(guidance?.message, "Fix the country code \u{2014} or clear it \u{2014} to save changes.")
+        XCTAssertEqual(
+            guidance?.message,
+            "This trip\u{2019}s saved country isn\u{2019}t recognized. Tap Country and pick one \u{2014} or " +
+                "choose \u{201C}No country\u{201D} \u{2014} to save changes."
+        )
         XCTAssertEqual(guidance?.isError, true)
     }
 
     func testCTAGuidanceNilWhenEverythingIsAcceptable() {
         XCTAssertNil(TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "PT", isEditing: false))
         XCTAssertNil(TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "", isEditing: false))
+    }
+
+    func testCTAGuidancePrefersSaveErrorOverUnacceptableCountryWhenTitleIsValid() {
+        let guidance = TripFormView.ctaGuidance(
+            saveError: "Couldn\u{2019}t save the trip. Try again.", title: "Lisbon", countryCode: "PO", isEditing: true
+        )
+        XCTAssertEqual(guidance?.message, "Couldn\u{2019}t save the trip. Try again.")
+        XCTAssertEqual(guidance?.isError, true)
+    }
+
+    // MARK: - Picker empty-results state: `countries(matching:)` must return
+    // nothing for a city name or a misspelled country, not a spurious match.
+
+    func testCountriesMatchingReturnsEmptyForCityNameOrTypo() {
+        XCTAssertTrue(TripFormValidation.countries(matching: "Lisbon").isEmpty)
+        XCTAssertTrue(TripFormValidation.countries(matching: "Protugal").isEmpty)
     }
 }

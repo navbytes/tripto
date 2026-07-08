@@ -38,8 +38,38 @@ struct TripFormView: View {
 
     /// F6: surfaced above the CTA when `modelContext.save()` throws, instead
     /// of the old silent `try?` — the save simply stops, nothing is
-    /// enqueued or dismissed, and the user can retry.
-    @State private var saveError: String?
+    /// enqueued or dismissed, and the user can retry. Two-case rather than a
+    /// bare `String?` so `.signedOut` (a dead end this sheet can't recover
+    /// from on its own) survives further edits, while `.writeFailed` (a
+    /// transient, retryable write) clears the moment the user touches
+    /// anything, same as before — see `isClearedByEditing`.
+    private enum SaveError: Equatable {
+        case signedOut
+        case writeFailed
+
+        var message: String {
+            switch self {
+            case .signedOut:
+                // Finding 7: names the actual consequence instead of an
+                // unreachable in-sheet fix (§6.6 plain, honest register) —
+                // this sheet has no way to trigger sign-in itself, so
+                // telling the user to "sign in again" here was a dead end.
+                return "You\u{2019}ve been signed out, so this trip can\u{2019}t be created. Cancel and " +
+                    "sign back in \u{2014} what you\u{2019}ve entered here won\u{2019}t be kept."
+            case .writeFailed:
+                return "Couldn\u{2019}t save the trip. Try again."
+            }
+        }
+
+        var isClearedByEditing: Bool {
+            switch self {
+            case .signedOut: return false
+            case .writeFailed: return true
+            }
+        }
+    }
+
+    @State private var saveError: SaveError?
     /// F4: gates the "Discard changes?" confirmation on cancel/swipe-dismiss.
     @State private var showDiscardConfirm = false
 
@@ -193,13 +223,17 @@ struct TripFormView: View {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
-        .onChange(of: currentValues) { _, _ in saveError = nil }
+        .onChange(of: currentValues) { _, _ in
+            if saveError?.isClearedByEditing == true {
+                saveError = nil
+            }
+        }
         // Finding 4: only error-toned CTA guidance is announced — see
         // `ctaGuidance`'s doc comment for why the advisory blank-title copy
         // is deliberately excluded.
         .onChange(of: saveError) { _, newValue in
             if let newValue {
-                AccessibilityNotification.Announcement(newValue).post()
+                AccessibilityNotification.Announcement(newValue.message).post()
             }
         }
         .task {
@@ -308,7 +342,7 @@ struct TripFormView: View {
     private var ctaSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             if let guidance = Self.ctaGuidance(
-                saveError: saveError, title: title, countryCode: countryCode, isEditing: isEditing
+                saveError: saveError?.message, title: title, countryCode: countryCode, isEditing: isEditing
             ) {
                 Text(guidance.message)
                     .font(Typo.body(Typo.Size.caption))
@@ -362,8 +396,14 @@ struct TripFormView: View {
             return ("Enter a trip name to " + (isEditing ? "save changes." : "create the trip."), false)
         }
         if !TripFormValidation.isCountryCodeAcceptable(countryCode) {
+            // Finding 3 follow-up: this only fires for legacy/synced data
+            // that predates the picker (new entries can't produce an
+            // unacceptable code), so the copy names the picker's actual
+            // actions rather than the old "fix the code" instruction, which
+            // no longer describes anything the UI offers.
             return (
-                "Fix the country code \u{2014} or clear it \u{2014} to " + (isEditing ? "save changes." : "create the trip."),
+                "This trip\u{2019}s saved country isn\u{2019}t recognized. Tap Country and pick one \u{2014} " +
+                    "or choose \u{201C}No country\u{201D} \u{2014} to " + (isEditing ? "save changes." : "create the trip."),
                 true
             )
         }
@@ -412,24 +452,22 @@ struct TripFormView: View {
         guard isValid else { return }
         saveError = nil
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Whitespace-only pasted destinations shouldn't persist as visible
+        // padding on the trip card or sync out over the wire.
+        let trimmedDestination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedStart = Calendar.current.startOfDay(for: startDate)
         let normalizedEnd = Calendar.current.startOfDay(for: endDate)
 
         switch mode {
         case .create:
             guard let userId = authManager.userId else {
-                // Finding 7: names the actual consequence instead of an
-                // unreachable in-sheet fix (§6.6 plain, honest register) —
-                // this sheet has no way to trigger sign-in itself, so
-                // telling the user to "sign in again" here was a dead end.
-                saveError = "You\u{2019}ve been signed out, so this trip can\u{2019}t be created. Cancel and " +
-                    "sign back in \u{2014} what you\u{2019}ve entered here won\u{2019}t be kept."
+                saveError = .signedOut
                 return
             }
             let trip = Trip(
                 id: UUID(),
                 title: trimmedTitle,
-                destination: destination,
+                destination: trimmedDestination,
                 countryCode: countryCode,
                 startDate: normalizedStart,
                 endDate: normalizedEnd,
@@ -456,7 +494,7 @@ struct TripFormView: View {
             do {
                 try modelContext.save()
             } catch {
-                saveError = "Couldn\u{2019}t save the trip. Try again."
+                saveError = .writeFailed
                 return
             }
             let dto = trip.toDTO()
@@ -466,7 +504,7 @@ struct TripFormView: View {
 
         case .edit(let trip):
             trip.title = trimmedTitle
-            trip.destination = destination
+            trip.destination = trimmedDestination
             trip.countryCode = countryCode
             trip.startDate = normalizedStart
             trip.endDate = normalizedEnd
@@ -477,7 +515,7 @@ struct TripFormView: View {
             do {
                 try modelContext.save()
             } catch {
-                saveError = "Couldn\u{2019}t save the trip. Try again."
+                saveError = .writeFailed
                 return
             }
             let dto = trip.toDTO()
