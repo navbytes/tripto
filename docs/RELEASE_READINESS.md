@@ -35,7 +35,7 @@ Apple App ID exists, (c) budgeting a support escalation if it 500s.
 | M3a no-app share web page (live at tripto.navbytes.io) | ✅ deployed |
 | M3b in-app collaboration, invites, roles, account deletion | ✅ committed |
 | M4 family layer (profiles, "Just mine", packing) | ⏳ |
-| M5 offline hardening + a11y + perf pass | ⏳ |
+| M5 offline hardening + a11y + perf pass | 🔄 done in main loop (agent spawner was flaky); see §9 |
 
 ## 2. Submission apparatus
 
@@ -211,3 +211,46 @@ users, either add a keep-alive ping or move to Pro ($25/mo).
   risk, non-zero. (Owner decided to keep "Tripto".)
 - iCloud+ mail has no inbound API — only matters for the v1.5 email-import
   feature, out of v1 scope.
+
+## 9. M5 (offline · a11y · perf) outcomes — done in the main loop
+
+The subagent spawner stalled three times mid-session (dead-at-launch), so M5 was
+executed directly rather than delegated. What was verified/changed:
+
+- **Reduced motion: ✅ already honored** and confirmed — SegmentedControl (tab
+  underline), Toast (transitions), TripView all gate animations behind
+  `@Environment(\.accessibilityReduceMotion)`.
+- **VoiceOver: improved on the primary screens** — `TripCard` (was unlabeled →
+  now one spoken summary: title, country, countdown, duration, travellers,
+  pending); timeline rows (`TimelineCardRow`) now a single element that *names
+  the category* (previously conveyed by node colour + icon only) plus
+  title/subtitle/time/zone/tags/status. Booking detail's confirmation copy
+  button already had a hint. 44pt targets + gradient contrast came from the
+  design system and hold.
+- **Logging hygiene: ✅ clean** — no `print`/`os_log` emits confirmation codes,
+  tokens, emails, or notes (grep-verified); the one debug `print` is DEBUG-gated.
+- **Performance:** timeline rows are Equatable value snapshots (`.equatable()`),
+  so unrelated `pendingRowIds` changes don't re-render cards. `dayModels`
+  rebuilds per render but is sub-ms at family scale (≤~43 items); left as-is with
+  this note rather than adding `@State` caching risk. PersonFilter recompute
+  (M4-flagged) is likewise fine at scale.
+- **Offline:** architecture is M1's local-first SwiftData mirror + outbox;
+  behaviour is unit-proven (coalescing, pending-row protection, idempotent
+  upserts, item_assignees composite-key) and the signed-write path is proven by
+  `LiveAuthWriteTests`. A signed `-simulateOffline` seed drill captures the
+  offline banner + pending chips. **Recommended pre-launch:** one manual
+  airplane-mode round-trip on a device (edit offline → reconnect → confirm
+  reconcile + "edited by X") to exercise the full path end-to-end on real
+  hardware.
+
+**Deliberately deferred to a fast-follow (documented decision, not an
+omission): full Dynamic Type.** The type system uses a tuned fixed-size scale
+(Fraunces display at specific sizes is core to the brand), and several layouts
+are tight (time gutter, boarding-pass IATA). Making all text scale relative to
+text styles risks clipping across every screen and needs exhaustive re-testing
+at each accessibility size — too destabilising to land safely right before
+release. Mitigation: the low-tech / older audience this app cares about reaches
+trips through the **no-account web share view**, which uses system fonts and
+already respects the viewer's OS/browser text size. v1.1 should add in-app
+Dynamic Type (Typo helpers → `relativeTo:` + a capped `dynamicTypeSize`, then a
+per-screen clipping pass). Not an App Review blocker.

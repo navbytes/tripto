@@ -31,9 +31,37 @@ struct TimelineCardRow: View, Equatable {
                 railColumn
                 card
             }
+            // One spoken element per row: names the category (conveyed only
+            // by node color + icon tile visually — never color alone, §7.3),
+            // then title/subtitle/time and status. The NavigationLink supplies
+            // the button trait.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(a11yLabel)
         }
         .buttonStyle(.plain)
         .padding(.vertical, Spacing.xs)
+    }
+
+    private var categoryWord: String {
+        switch model.category {
+        case .flight: "Flight"
+        case .hotel: "Stay"
+        case .activity: "Activity"
+        case .food: "Food"
+        }
+    }
+
+    private var a11yLabel: String {
+        var parts = [categoryWord, model.title, model.subtitle]
+        parts.append("at \(model.timeText)\(model.zoneLabel.map { " \($0)" } ?? "")")
+        if !model.assignees.isEmpty {
+            parts.append("for \(model.assignees.count) \(model.assignees.count == 1 ? "person" : "people")")
+        }
+        for tag in model.tags { parts.append(ItemTag(rawValue: tag)?.label ?? tag) }
+        if model.hasTicket { parts.append("has a confirmation") }
+        if model.isPending { parts.append("waiting to sync") }
+        if let editedBy = model.editedBy { parts.append(editedBy) }
+        return parts.joined(separator: ", ")
     }
 
     private var timeGutter: some View {

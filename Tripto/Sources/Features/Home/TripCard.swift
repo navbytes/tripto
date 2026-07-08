@@ -50,6 +50,28 @@ struct TripCard: View {
         .frame(height: 178)
         .clipShape(RoundedRectangle(cornerRadius: Radii.cover, style: .continuous))
         .shadow(color: Palette.ink.opacity(0.22), radius: 16, y: 10)
+        // One VoiceOver element: the gradient/pills/avatars are decorative
+        // fragments individually, but a single spoken summary is what a
+        // traveler needs. HomeView wraps this in the button (the .isButton
+        // trait), so this just supplies the label. (§7.3)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [trip.title, countryDisplayName]
+        switch bucket {
+        case .inProgress: parts.append("in progress")
+        case .upcoming: parts.append("in \(trip.daysUntilStart(asOf: today)) days")
+        case .past: parts.append("completed")
+        }
+        parts.append("starts \(startDateText)")
+        parts.append("\(trip.durationInDays()) days")
+        if !people.isEmpty {
+            parts.append("\(people.count) traveler\(people.count == 1 ? "" : "s")")
+        }
+        if isPending { parts.append("waiting to sync") }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder
