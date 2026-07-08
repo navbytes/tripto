@@ -123,6 +123,7 @@ struct WelcomeView: View {
                     }
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(Palette.slate)
+                    .transition(.opacity)
                 }
 
                 #if DEBUG
@@ -149,10 +150,16 @@ struct WelcomeView: View {
                         .font(Typo.body(Typo.Size.caption))
                         .foregroundStyle(Palette.rose)
                         .multilineTextAlignment(.center)
+                        .transition(.opacity)
                 }
             }
             .padding(.horizontal, Spacing.xl)
             .padding(.bottom, Spacing.xxl)
+            // Opacity-only so it's reduced-motion-safe, matching the invite
+            // card's own treatment — animates the layout shift these rows'
+            // appearance/disappearance causes instead of jumping.
+            .animation(.easeInOut(duration: 0.2), value: isCompletingAppleSignIn)
+            .animation(.easeInOut(duration: 0.2), value: errorMessage)
         }
     }
 
@@ -181,7 +188,7 @@ struct WelcomeView: View {
             case .invalid:
                 invitePreviewChrome(borderColor: Palette.rose.opacity(0.3)) {
                     VStack(spacing: Spacing.xs) {
-                        Text("Invite link expired")
+                        Text("Invite link no longer valid")
                             .font(Typo.body(Typo.Size.caption, weight: .bold))
                             .foregroundStyle(Palette.rose)
                         Text("This invite link has expired or been revoked. Ask for a new link.")
@@ -222,6 +229,9 @@ struct WelcomeView: View {
                     .foregroundStyle(Palette.amberInk)
                     .tracking(0.4)
                     .textCase(.uppercase)
+                    // `.textCase(.uppercase)` risks an all-caps spell-out
+                    // once this is folded into the combined element below.
+                    .accessibilityLabel(Text("You\u{2019}re invited"))
                 Text("\(preview.inviterName) invited you to")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
@@ -254,6 +264,10 @@ struct WelcomeView: View {
                         .padding(.top, Spacing.xxs)
                 }
             }
+            // Groups the whole card into a single VoiceOver stop (eyebrow ->
+            // inviter -> title -> dates -> role, visual order) instead of
+            // five separate swipes.
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -282,7 +296,7 @@ struct WelcomeView: View {
                 let tokenData = credential.identityToken,
                 let idToken = String(data: tokenData, encoding: .utf8)
             else {
-                errorMessage = "Sign in with Apple didn't return a usable credential — try again."
+                errorMessage = "Sign in with Apple didn\u{2019}t return a usable credential \u{2014} try again."
                 return
             }
             // Apple's one-time authorization code (nil if Apple omits it). Used
@@ -300,12 +314,21 @@ struct WelcomeView: View {
                 }
             }
         case .failure(let error):
-            let nsError = error as NSError
             // A user-initiated cancel isn't an error worth surfacing.
-            if nsError.code != ASAuthorizationError.canceled.rawValue {
-                errorMessage = "Sign in with Apple failed — try again."
+            if !Self.isUserCancelledAppleSignIn(error) {
+                errorMessage = "Sign in with Apple failed \u{2014} try again."
             }
         }
+    }
+
+    /// Domain-then-code check (mirrors `urlErrorCode`'s type-then-string-
+    /// fallback idiom) — a code-only check risks a false positive if some
+    /// other `NSError` domain happens to reuse `ASAuthorizationError
+    /// .canceled`'s raw code, which would silently swallow a real failure.
+    static func isUserCancelledAppleSignIn(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == ASAuthorizationErrorDomain
+            && nsError.code == ASAuthorizationError.canceled.rawValue
     }
 
     /// VoiceOver copy for `appRouter.invitePreviewState`'s resolved states

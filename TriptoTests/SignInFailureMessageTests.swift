@@ -1,3 +1,4 @@
+import AuthenticationServices
 import XCTest
 @testable import Tripto
 
@@ -74,5 +75,19 @@ final class SignInFailureMessageTests: XCTestCase {
     func testUnavailableProducesFallbackAnnouncement() {
         let announcement = WelcomeView.invitePreviewAnnouncement(for: .unavailable)
         XCTAssertEqual(announcement, "Couldn\u{2019}t load your invite details \u{2014} you can still sign in to join.")
+    }
+
+    // MARK: - isUserCancelledAppleSignIn
+
+    func testAppleDomainCancelCodeIsSuppressed() {
+        let error = NSError(domain: ASAuthorizationErrorDomain, code: ASAuthorizationError.canceled.rawValue)
+        XCTAssertTrue(WelcomeView.isUserCancelledAppleSignIn(error))
+    }
+
+    func testSameCodeInOtherDomainIsNotSuppressed() {
+        // The exact cross-domain code collision the domain check guards
+        // against — a code-only check would have suppressed this too.
+        let error = NSError(domain: "SomeOtherDomain", code: ASAuthorizationError.canceled.rawValue)
+        XCTAssertFalse(WelcomeView.isUserCancelledAppleSignIn(error))
     }
 }
