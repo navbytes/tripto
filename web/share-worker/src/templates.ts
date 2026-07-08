@@ -42,6 +42,9 @@ const CATEGORY_ICON: Record<ItemCategory, string> = {
 // Georgia stands in for the Fraunces display face, system-ui for body text.
 const SHARED_STYLES = `
 *{box-sizing:border-box}
+/* Comfortable base for the share page's older audience, in rem so the reader's
+   browser text-zoom actually enlarges everything (persona dry-run). */
+html{font-size:112.5%}
 html,body{margin:0;padding:0}
 body{
   background:#FBFAF7;
@@ -63,10 +66,10 @@ a{color:#E8955A}
   margin:0;
   overflow-wrap:anywhere;
 }
-.hero .trip-meta{font-size:13px;opacity:.92;margin-top:6px}
+.hero .trip-meta{font-size:.9rem;opacity:.95;margin-top:6px}
 
 .content{padding:20px 20px 8px;flex:1}
-.day-heading{font-size:13px;font-weight:700;color:#1A1B2E;margin:22px 0 10px}
+.day-heading{font-size:.95rem;font-weight:700;color:#1A1B2E;margin:22px 0 10px}
 .day-heading:first-child{margin-top:2px}
 
 .item-row{
@@ -74,17 +77,17 @@ a{color:#E8955A}
   background:#fff;border:1px solid #EEEDF4;border-radius:14px;
   padding:12px 14px;margin-bottom:10px;
 }
-.item-time{width:58px;flex-shrink:0;font-size:12.5px;font-weight:700;color:#6B6E8F;line-height:1.3}
-.item-time .zone{display:block;font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:.8;margin-top:2px}
-.item-icon{width:34px;height:34px;border-radius:10px;flex-shrink:0;display:grid;place-items:center}
+.item-time{width:66px;flex-shrink:0;font-size:.82rem;font-weight:700;color:#55586F;line-height:1.3}
+.item-time .zone{display:block;font-size:.62rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:1;margin-top:2px}
+.item-icon{width:36px;height:36px;border-radius:10px;flex-shrink:0;display:grid;place-items:center}
 .item-body{min-width:0}
-.item-title{font-size:14.5px;font-weight:600;color:#1A1B2E;overflow-wrap:anywhere}
-.item-sub{font-size:12px;color:#6B6E8F;margin-top:2px;overflow-wrap:anywhere}
+.item-title{font-size:1rem;font-weight:600;color:#1A1B2E;overflow-wrap:anywhere}
+.item-sub{font-size:.85rem;color:#55586F;margin-top:2px;overflow-wrap:anywhere}
 
 .privacy-row{
   display:flex;align-items:center;gap:8px;
   background:#EEEDF4;border-radius:12px;padding:10px 14px;
-  font-size:11.5px;font-weight:600;color:#6B6E8F;
+  font-size:.8rem;font-weight:600;color:#55586F;
   margin:18px 0 4px;
 }
 .privacy-row svg{flex-shrink:0;color:#6B6E8F}
@@ -114,7 +117,7 @@ a{color:#E8955A}
   .hero{padding:28px 18px 24px}
   .content{padding:16px 16px 4px}
   .item-row{padding:10px 12px;gap:10px}
-  .item-time{width:50px;font-size:11.5px}
+  .item-time{width:58px;font-size:.78rem}
   .site-footer{padding:14px 16px}
 }
 `;
@@ -165,6 +168,11 @@ export function renderItineraryPage(payload: PublicTripPayload, token: string): 
 <html lang="en">
 <head>
 ${headTags(`${trip.title} — Tripto`)}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Tripto">
+<meta property="og:title" content="${esc(trip.title)}">
+<meta property="og:description" content="${esc(dateRange)} — a shared trip itinerary">
+<meta name="twitter:card" content="summary">
 </head>
 <body>
 ${ICON_DEFS}
@@ -316,6 +324,11 @@ ${SHARED_STYLES}
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Tripto turns everyone's scattered bookings into one shared, at-a-glance itinerary — built for families and groups.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Tripto">
+<meta property="og:title" content="Tripto — one shared itinerary for the whole group">
+<meta property="og:description" content="Everyone's scattered bookings, one shared at-a-glance itinerary for families and groups.">
+<meta name="twitter:card" content="summary">
 <title>Tripto — one shared itinerary for the whole group</title>
 <style>${style}</style>
 </head>

@@ -65,17 +65,18 @@ export function zoneWord(tz: string): string {
   return last.replace(/_/g, " ");
 }
 
-/** HH:mm in the given IANA tz, 24-hour, zero-padded. */
+/**
+ * Grandparent-friendly 12-hour time in the given IANA tz, e.g. "8:15 PM".
+ * The share page's audience is non-technical family (BUILD_PLAN §5.2); 24-hour
+ * "20:15" reads as a puzzle to many of them (persona dry-run).
+ */
 export function formatTime(isoInstant: string, tz: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(isoInstant));
-  const hour = parts.find((p) => p.type === "hour")?.value ?? "00";
-  const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
-  return `${hour}:${minute}`;
+    hour12: true,
+  }).format(new Date(isoInstant));
 }
 
 /**
