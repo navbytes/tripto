@@ -151,11 +151,15 @@ extension AddItemSheet {
             }
             ZonePicker(title: "Pickup time zone", selection: $pickupZone, referenceDate: pickupTime)
 
-            FormTextField(label: "Drop-off location", text: $dropoffText, placeholder: "Boston Logan")
-            LabeledDatePicker(label: "Drop-off time", date: $dropoffTime, displayedComponents: .hourAndMinute)
-            HStack {
-                Spacer(minLength: 0)
-                nextDayChip
+            FormTextField(label: "Drop-off location", text: $dropoffText, placeholder: "Airport, hotel, depot\u{2026}")
+            HStack(spacing: Spacing.md) {
+                LabeledDatePicker(label: "Drop-off date", date: $dropoffDate, displayedComponents: .date)
+                LabeledDatePicker(label: "Time", date: $dropoffTime, displayedComponents: .hourAndMinute)
+            }
+            if !transportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !transportEndAfterStart {
+                Text("Drop-off must be after pickup.")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(.red)
             }
             ZonePicker(title: "Drop-off time zone", selection: $dropoffZone, referenceDate: dropoffTime)
 

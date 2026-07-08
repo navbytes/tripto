@@ -209,17 +209,40 @@ public enum Typo {
     /// Display type — Fraunces. Used with restraint: city names and
     /// screen titles (BUILD_PLAN.md §6.2). Weights available: 500, 600.
     public static func display(_ size: CGFloat = Size.display, weight: Font.Weight = .semibold) -> Font {
-        variableFont(familyKeyword: displayFamilyKeyword, size: size, weight: weight)
+        Font(resolvedUIFont(familyKeyword: displayFamilyKeyword, size: size, weight: weight, textStyle: .title2))
     }
 
     /// Body/UI type — Sofia Sans. Weights available: 400, 500, 600, 700.
     public static func body(_ size: CGFloat = Size.body, weight: Font.Weight = .regular) -> Font {
-        variableFont(familyKeyword: bodyFamilyKeyword, size: size, weight: weight)
+        Font(resolvedUIFont(familyKeyword: bodyFamilyKeyword, size: size, weight: weight, textStyle: .body))
     }
 
     /// Data/confirmation-code type — system monospace (BUILD_PLAN.md §6.2).
     public static func mono(_ size: CGFloat = Size.body) -> Font {
-        .system(size: size, design: .monospaced)
+        Font(resolvedMonoUIFont(size: size))
+    }
+
+    // MARK: - Dynamic Type-aware resolution (internal; exercised by tests)
+
+    /// Builds the weight-dialed custom `UIFont`, then scales it for the active
+    /// Dynamic Type setting via `UIFontMetrics(forTextStyle:)` so Fraunces and
+    /// Sofia grow with the user's accessibility text size the way the system
+    /// text styles do. `textStyle` picks the scaling curve (display uses a
+    /// title style, body uses `.body`). `traits` is injectable for tests.
+    static func resolvedUIFont(
+        familyKeyword: String, size: CGFloat, weight: Font.Weight,
+        textStyle: UIFont.TextStyle, compatibleWith traits: UITraitCollection? = nil
+    ) -> UIFont {
+        let base = variableBaseUIFont(familyKeyword: familyKeyword, size: size, weight: weight)
+        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: base, compatibleWith: traits)
+    }
+
+    /// Monospaced confirmation-code type, likewise Dynamic Type-aware.
+    static func resolvedMonoUIFont(
+        size: CGFloat, compatibleWith traits: UITraitCollection? = nil
+    ) -> UIFont {
+        let base = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        return UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traits)
     }
 }
 
@@ -236,19 +259,20 @@ private enum VariableFontAxis {
     static let weight = 2003265652
 }
 
-private func variableFont(familyKeyword: String, size: CGFloat, weight: Font.Weight) -> Font {
+private func variableBaseUIFont(familyKeyword: String, size: CGFloat, weight: Font.Weight) -> UIFont {
     guard
         let family = UIFont.familyNames.first(where: { $0.localizedCaseInsensitiveContains(familyKeyword) }),
         let postscriptName = UIFont.fontNames(forFamilyName: family).first
     else {
-        // Font not registered (e.g. a plain SwiftUI preview target) — degrade
-        // to the system font rather than crashing.
-        return .system(size: size, weight: weight)
+        // Font not registered (e.g. a plain SwiftUI preview or test target) —
+        // degrade to the system font rather than crashing. Still scaled for
+        // Dynamic Type by the caller.
+        return UIFont.systemFont(ofSize: size, weight: weight.uiKitWeight)
     }
     let variationAttribute = UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String)
     let descriptor = UIFontDescriptor(name: postscriptName, size: size)
         .addingAttributes([variationAttribute: [VariableFontAxis.weight: weight.variableAxisValue]])
-    return Font(UIFont(descriptor: descriptor, size: size))
+    return UIFont(descriptor: descriptor, size: size)
 }
 
 private extension Font.Weight {
@@ -265,6 +289,23 @@ private extension Font.Weight {
         case .heavy: return 800
         case .black: return 900
         default: return 400
+        }
+    }
+
+    /// The `UIFont.Weight` counterpart, used only for the system-font fallback
+    /// when the bundled variable face isn't registered.
+    var uiKitWeight: UIFont.Weight {
+        switch self {
+        case .ultraLight: return .ultraLight
+        case .thin: return .thin
+        case .light: return .light
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        case .heavy: return .heavy
+        case .black: return .black
+        default: return .regular
         }
     }
 }

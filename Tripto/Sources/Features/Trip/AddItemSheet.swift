@@ -17,6 +17,11 @@ struct AddItemSheet: View {
     let tripTitle: String
     let editing: ItineraryItem?
     let onToast: (String) -> Void
+    /// The zone a *new* item's pickers should default to — the trip's dominant
+    /// existing-item zone (see `NewItemZoneDefault`), so a Lisbon trip doesn't
+    /// offer the traveler's home clock. `.current` when adding to an empty trip
+    /// or when editing (edit reads zones off the item instead).
+    let defaultZone: TimeZone
 
     @Query var tripProfiles: [TripProfile]
     @Query private var members: [TripMember]
@@ -92,6 +97,7 @@ struct AddItemSheet: View {
     @State var pickupTime = Date()
     @State var pickupZone: TimeZone = .current
     @State var dropoffText = ""
+    @State var dropoffDate = Date()
     @State var dropoffTime = Date()
     @State var dropoffZone: TimeZone = .current
 
@@ -105,11 +111,12 @@ struct AddItemSheet: View {
     private static let lastDepartureTZKey = "lastDepartureTZ"
     private static func lastArrivalTZKey(_ tripId: UUID) -> String { "lastArrivalTZ.\(tripId.uuidString)" }
 
-    init(tripId: UUID, tripTitle: String, editing: ItineraryItem?, onToast: @escaping (String) -> Void) {
+    init(tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current, onToast: @escaping (String) -> Void) {
         self.tripId = tripId
         self.tripTitle = tripTitle
         self.editing = editing
         self.onToast = onToast
+        self.defaultZone = defaultZone
 
         _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
         _members = Query(filter: #Predicate<TripMember> { $0.tripId == tripId })
@@ -179,12 +186,8 @@ struct AddItemSheet: View {
                 let dropTz = details.arrivalTz.flatMap(TimeZone.init(identifier:)) ?? editing.primaryTz
                 _dropoffZone = State(initialValue: dropTz)
                 let endsAt = editing.endsAt ?? editing.startsAt
+                _dropoffDate = State(initialValue: Self.pickerDate(from: endsAt, in: dropTz))
                 _dropoffTime = State(initialValue: Self.pickerDate(from: endsAt, in: dropTz))
-                if editing.endsAt != nil {
-                    let startDay = ItineraryTimeZone.localDay(of: editing.startsAt, in: editing.primaryTz)
-                    let endDay = ItineraryTimeZone.localDay(of: endsAt, in: dropTz)
-                    _arrivalDayOffsetOverride = State(initialValue: endDay > startDay)
-                }
             }
         } else {
             _category = State(initialValue: .flight)
@@ -192,9 +195,19 @@ struct AddItemSheet: View {
                 .flatMap(TimeZone.init(identifier:))
             let lastArrival = UserDefaults.standard.string(forKey: Self.lastArrivalTZKey(tripId))
                 .flatMap(TimeZone.init(identifier:))
-            let departureDefault = lastDeparture ?? .current
+            // New items default to the trip's own zone rather than the device
+            // clock ("Hong Kong time on a Lisbon trip"). A flight keeps any
+            // remembered per-trip zones, and arrival no longer silently mirrors
+            // departure — it too starts from the trip zone until an airport code
+            // resolves it.
+            let departureDefault = lastDeparture ?? defaultZone
             _departureZone = State(initialValue: departureDefault)
-            _arrivalZone = State(initialValue: lastArrival ?? departureDefault)
+            _arrivalZone = State(initialValue: lastArrival ?? defaultZone)
+            _stayZone = State(initialValue: defaultZone)
+            _activityZone = State(initialValue: defaultZone)
+            _foodZone = State(initialValue: defaultZone)
+            _pickupZone = State(initialValue: defaultZone)
+            _dropoffZone = State(initialValue: defaultZone)
             _checkInTime = State(initialValue: Self.timeOfDay(hour: 15, minute: 0))
             _checkOutTime = State(initialValue: Self.timeOfDay(hour: 11, minute: 0))
             _checkOutDate = State(initialValue: Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now)
@@ -237,6 +250,15 @@ struct AddItemSheet: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .task { seedAssigneesIfNeeded() }
+        .onAppear {
+            #if DEBUG
+            // Verify-drill autopilot: preselect the Transport category so the
+            // drop-off-date form can be screenshotted without GUI tap automation.
+            if editing == nil, ProcessInfo.processInfo.arguments.contains("-uitestAddTransport") {
+                category = .transport
+            }
+            #endif
+        }
     }
 
     private var header: some View {
@@ -324,6 +346,7 @@ struct AddItemSheet: View {
             return !foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .transport:
             return !transportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && transportEndAfterStart
         }
     }
 
@@ -470,25 +493,39 @@ struct AddItemSheet: View {
         }
     }
 
-    /// Transport's drop-off-next-day, the analogue of `effectiveArrivalIsNextDay`
-    /// but over the pickup/drop-off times.
-    var effectiveTransportNextDay: Bool {
-        arrivalDayOffsetOverride ?? (
-            ItemTimeCombining.suggestedArrivalDayOffset(departsTimeOfDay: pickupTime, arrivesTimeOfDay: dropoffTime) == 1
+    /// The "+1 day" chip state — flight only. Transport no longer uses a
+    /// next-day toggle; it has an explicit drop-off date picker instead.
+    var effectiveNextDay: Bool { effectiveArrivalIsNextDay }
+
+    /// Whether a transport item's drop-off is strictly after its pickup — the
+    /// same "end after start" rule Stay enforces, so a rental can't save with a
+    /// zero or negative duration. Drives both `isValid` and the form's hint.
+    var transportEndAfterStart: Bool {
+        let (start, end) = Self.transportInstants(
+            pickupDate: transportDate, pickupTime: pickupTime, pickupTz: pickupZone,
+            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: dropoffZone
         )
+        return end > start
     }
 
-    /// The "+1 day" chip is shared between flight and transport (both toggle
-    /// `arrivalDayOffsetOverride`); it reads whichever category is active.
-    var effectiveNextDay: Bool {
-        category == .transport ? effectiveTransportNextDay : effectiveArrivalIsNextDay
+    /// Composes a transport item's start (pickup) and end (drop-off) instants
+    /// from two independent date pickers, so a multi-night rental (pick up
+    /// Thursday, return Saturday) is expressible — unlike the old pickup-date +
+    /// 0/1-day-offset shape. Pure; exposed for tests.
+    static func transportInstants(
+        pickupDate: Date, pickupTime: Date, pickupTz: TimeZone,
+        dropoffDate: Date, dropoffTime: Date, dropoffTz: TimeZone,
+        readingCalendar: Calendar = .current
+    ) -> (start: Date, end: Date) {
+        let start = ItemTimeCombining.combine(date: pickupDate, timeOfDay: pickupTime, targetTz: pickupTz, readingCalendar: readingCalendar)
+        let end = ItemTimeCombining.combine(date: dropoffDate, timeOfDay: dropoffTime, targetTz: dropoffTz, readingCalendar: readingCalendar)
+        return (start, end)
     }
 
     private func transportFields() -> ComposedFields {
-        let start = ItemTimeCombining.combine(date: transportDate, timeOfDay: pickupTime, targetTz: pickupZone)
-        let end = ItemTimeCombining.combine(
-            date: transportDate, timeOfDay: dropoffTime,
-            dayOffset: effectiveTransportNextDay ? 1 : 0, targetTz: dropoffZone
+        let (start, end) = Self.transportInstants(
+            pickupDate: transportDate, pickupTime: pickupTime, pickupTz: pickupZone,
+            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: dropoffZone
         )
         var details = ItemDetails.empty
         details.provider = Self.trimmedOrNil(provider)

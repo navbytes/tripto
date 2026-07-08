@@ -223,7 +223,10 @@ struct TripView: View {
             }
         }
         .sheet(isPresented: $isPresentingAdd) {
-            AddItemSheet(tripId: trip.id, tripTitle: trip.title, editing: nil) { message in
+            AddItemSheet(
+                tripId: trip.id, tripTitle: trip.title, editing: nil,
+                defaultZone: NewItemZoneDefault.zone(forExistingItemTzIdentifiers: items.map(\.tz))
+            ) { message in
                 toast = message
             }
         }
