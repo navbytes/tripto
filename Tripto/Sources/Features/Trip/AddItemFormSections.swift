@@ -44,6 +44,13 @@ extension AddItemSheet {
                 Spacer(minLength: 0)
                 nextDayChip
             }
+            if !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
+                && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
+                && !flightEndAfterStart {
+                Text("Arrival must be after departure.")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(.red)
+            }
             ZonePicker(
                 title: "Arrival time zone", selection: $arrivalZone, referenceDate: arrivesTime,
                 hint: isArrivalZoneAutoSet ? "Set by arrival airport" : nil
