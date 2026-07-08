@@ -1,6 +1,6 @@
 import type { Env } from "./types";
 import { SHARE_TOKEN_PATTERN, INVITE_TOKEN_PATTERN } from "./format";
-import { renderItineraryPage, renderMessagePage, renderPrivacyPage } from "./templates";
+import { renderItineraryPage, renderMessagePage, renderPrivacyPage, renderLandingPage } from "./templates";
 import { fetchPublicTrip } from "./supabase";
 
 // Token URLs must never be edge/browser cached, indexed, or leaked via
@@ -143,18 +143,19 @@ export default {
         return handleAasa(env);
       }
 
-      // The App Store "Privacy Policy URL". Unlike token pages this is public,
-      // indexable, and cacheable — so it gets its own headers, not
-      // SECURITY_HEADERS' no-store/noindex.
+      // Public, indexable, cacheable pages (root landing + privacy) — they are
+      // the App Store Marketing / Support / Privacy URLs, so they must resolve
+      // and get their own headers, not SECURITY_HEADERS' no-store/noindex.
+      const publicHeaders = {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "Cache-Control": "public, max-age=3600",
+      };
+      if (path === "/" || path === "") {
+        return new Response(renderLandingPage(), { status: 200, headers: publicHeaders });
+      }
       if (path === "/privacy" || path === "/privacy/") {
-        return new Response(renderPrivacyPage(), {
-          status: 200,
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
-            "Cache-Control": "public, max-age=3600",
-          },
-        });
+        return new Response(renderPrivacyPage(), { status: 200, headers: publicHeaders });
       }
 
       const shareMatch = path.match(/^\/t\/([^/]+)\/?$/);
@@ -175,6 +176,21 @@ export default {
       // platform error page for a public-facing surface. Deliberately no
       // console.log here either -- request URLs can carry tokens.
       return serverErrorPage();
+    }
+  },
+
+  // Cron keep-alive (see wrangler.jsonc "triggers"). A free-tier Supabase
+  // project pauses after ~7 idle days, which would silently break share links
+  // and the app's sync during a lull between trips. A daily lightweight read
+  // keeps the database marked active — RLS returns [], all we need is for
+  // Postgres to be touched. Best-effort: a transient failure is harmless.
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    try {
+      await fetch(`${env.SUPABASE_URL}/rest/v1/trips?select=id&limit=1`, {
+        headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY },
+      });
+    } catch {
+      // Ignore — the next daily tick retries.
     }
   },
 } satisfies ExportedHandler<Env>;

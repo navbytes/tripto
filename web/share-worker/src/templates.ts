@@ -292,6 +292,71 @@ ${SHARED_STYLES}
 </html>`;
 }
 
+/** GET / — the root landing page. Doubles as the App Store Marketing URL and
+ * Support URL, so it must resolve (not 404) and carry a contact address.
+ * Public + indexable. */
+export function renderLandingPage(): string {
+  const style = `
+${SHARED_STYLES}
+.landing{max-width:640px;margin:0 auto;padding:26px 22px 48px}
+.landing .lead{font-size:17px;line-height:1.55;color:#1A1B2E;margin:0 0 22px}
+.landing h2{font-family:Georgia,'Times New Roman',serif;font-weight:600;font-size:18px;color:#1A1B2E;margin:26px 0 10px}
+.feature{display:flex;gap:11px;align-items:flex-start;margin:0 0 12px}
+.feature .dot{flex-shrink:0;width:8px;height:8px;border-radius:4px;margin-top:7px;background:#E8955A}
+.feature p{margin:0;font-size:14.5px;line-height:1.5;color:#2D2F52}
+.feature b{color:#1A1B2E}
+.badge{display:inline-block;margin:6px 0 4px;background:#FBEADB;color:#9a5a2a;font-size:12.5px;font-weight:700;border-radius:999px;padding:7px 15px}
+.contact{margin-top:26px;font-size:14px;color:#6B6E8F;line-height:1.6}
+.contact a{color:#E8955A;font-weight:600;text-decoration:none}`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Tripto turns everyone's scattered bookings into one shared, at-a-glance itinerary — built for families and groups.">
+<title>Tripto — one shared itinerary for the whole group</title>
+<style>${style}</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero" style="background:${gradientFor("dusk")}">
+    <p class="trip-title">Tripto</p>
+    <p class="trip-meta">One shared itinerary for the whole group</p>
+  </div>
+  <div class="landing">
+    <p class="lead">Tripto turns everyone's scattered bookings into one shared,
+      at-a-glance itinerary — built for families and groups, not just solo
+      business trips.</p>
+
+    <h2>What it does</h2>
+    <div class="feature"><span class="dot"></span><p>A day-by-day timeline that
+      shows each flight, stay, and plan in <b>its own local time</b>, so a
+      late-night arrival is never misread.</p></div>
+    <div class="feature"><span class="dot"></span><p>Boarding-pass detail cards
+      with confirmation codes — one tap to add to Calendar or get directions.</p></div>
+    <div class="feature"><span class="dot"></span><p>Invite family with a link:
+      companions add plans, viewers just watch, and <b>grandparents open a
+      read-only web link with no app and no account</b>.</p></div>
+    <div class="feature"><span class="dot"></span><p>A shared packing list you
+      can assign to each person, and a "Just mine" filter so everyone sees what
+      <b>they</b> need.</p></div>
+    <div class="feature"><span class="dot"></span><p>Works offline — read the
+      whole trip and make edits on the plane; they sync when you land.</p></div>
+
+    <p class="badge">Coming soon to the App Store</p>
+
+    <p class="contact">Questions or support: <a href="mailto:tripto@navbytes.io">tripto@navbytes.io</a><br>
+      <a href="/privacy">Privacy policy</a></p>
+  </div>
+  <div class="site-footer">
+    <span class="brand">Tripto</span>
+    <span>No ads · no tracking · shared only with people you invite</span>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
 export interface MessagePageOptions {
   pageTitle: string;
   heading: string;
