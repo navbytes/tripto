@@ -241,7 +241,18 @@ struct TripView: View {
             // button — so it needs the same "action keeps its name" close
             // ("Save changes" -> "Changes saved") via this screen's own
             // `$toast`/`.toastOverlay`.
-            TripFormView(mode: .edit(trip)) { _ in toast = "Changes saved" }
+            TripFormView(mode: .edit(trip)) { _, outcome in
+                switch outcome {
+                case .saved:
+                    toast = "Changes saved"
+                case .savedLocallyWhileSignedOut:
+                    // Finding 5: same qualified toast as `HomeView`'s edit
+                    // sheet, so this second entry point (the hero's pencil
+                    // button) gives the identical honest signal.
+                    toast = "Changes saved on this device \u{2014} you\u{2019}re signed out, so they " +
+                        "won\u{2019}t sync until you sign back in."
+                }
+            }
         }
     }
 

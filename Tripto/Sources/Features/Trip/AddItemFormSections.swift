@@ -327,6 +327,12 @@ struct FormTextField<FocusValue: Hashable>: View {
     var focusBinding: FocusState<FocusValue>.Binding?
     var focusValue: FocusValue?
 
+    /// UX audit finding 2: the fallback focus target for the ~24 call sites
+    /// that don't supply their own `focusBinding` — the tap-to-focus gesture
+    /// below still needs *something* to drive when the caller hasn't wired
+    /// one up itself.
+    @FocusState private var fallbackFocus: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(label)
@@ -339,10 +345,24 @@ struct FormTextField<FocusValue: Hashable>: View {
                 .autocorrectionDisabled()
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.sm + 2)
+                .frame(minHeight: 44) // BUILD_PLAN §6.5
                 .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
                         .stroke(Palette.mist, lineWidth: 1)
+                }
+                // Padding/frame alone don't extend a `TextField`'s focusable
+                // hit region, so a tap that lands in the padding (rather
+                // than directly on the UIKit-backed text field) would
+                // otherwise do nothing. Taps on the text itself still reach
+                // it normally for cursor placement.
+                .contentShape(RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                .onTapGesture {
+                    if let focusBinding, let focusValue {
+                        focusBinding.wrappedValue = focusValue
+                    } else {
+                        fallbackFocus = true
+                    }
                 }
         }
     }
@@ -354,6 +374,7 @@ struct FormTextField<FocusValue: Hashable>: View {
                 .focused(focusBinding, equals: focusValue)
         } else {
             TextField(placeholder, text: $text)
+                .focused($fallbackFocus)
         }
     }
 }
@@ -392,14 +413,22 @@ struct LabeledDatePicker: View {
             Text(label)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.slate)
+                // UX audit finding 3: the picker below carries this same
+                // label for VoiceOver (see the `DatePicker(label, ...)`
+                // calls) — hiding this static duplicate keeps it from being
+                // announced a second time as its own element.
+                .accessibilityHidden(true)
             Spacer(minLength: Spacing.sm)
             Group {
                 if let minDate {
-                    DatePicker("", selection: $date, in: minDate..., displayedComponents: displayedComponents)
+                    DatePicker(label, selection: $date, in: minDate..., displayedComponents: displayedComponents)
                 } else {
-                    DatePicker("", selection: $date, displayedComponents: displayedComponents)
+                    DatePicker(label, selection: $date, displayedComponents: displayedComponents)
                 }
             }
+            // `.labelsHidden()` only hides the label visually — it's still
+            // read by VoiceOver, so this becomes "Starts, date picker, May
+            // 14, 2026" instead of just the bare value (finding 3).
             .labelsHidden()
             .tint(Palette.amber)
         }

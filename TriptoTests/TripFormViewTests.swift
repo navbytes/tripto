@@ -52,6 +52,35 @@ final class TripFormViewTests: XCTestCase {
         XCTAssertEqual(TripFormView.canonicalGradientKey(""), "dusk")
     }
 
+    // MARK: - UX audit finding 6: isCoverGradientChanged compares by what a
+    // key canonicalizes to, not the raw stored string.
+
+    func testIsCoverGradientChangedFalseForLegacyDefaultKeyMatchingDusk() {
+        // The finding's exact repro: a trip stored as "default" renders
+        // Dusk-lit, so tapping the already-lit Dusk swatch (which writes
+        // literal "dusk") shouldn't register as a change.
+        XCTAssertFalse(TripFormView.isCoverGradientChanged(current: "dusk", initial: "default"))
+    }
+
+    func testIsCoverGradientChangedTrueForGenuinelyDifferentGradients() {
+        XCTAssertTrue(TripFormView.isCoverGradientChanged(current: "plum", initial: "default"))
+    }
+
+    func testIsCoverGradientChangedFalseWhenKeysAreIdentical() {
+        XCTAssertFalse(TripFormView.isCoverGradientChanged(current: "dusk", initial: "dusk"))
+    }
+
+    func testIsCoverGradientChangedFalseForCaseInsensitiveMatch() {
+        XCTAssertFalse(TripFormView.isCoverGradientChanged(current: "moss", initial: "MOSS"))
+    }
+
+    func testIsCoverGradientChangedFalseForTwoDistinctUnknownLegacyKeys() {
+        // Accepted edge (documented on the helper): two different unknown
+        // legacy keys both canonicalize to "dusk", so this also reads as
+        // clean — consistent with the swatch already rendering as selected.
+        XCTAssertFalse(TripFormView.isCoverGradientChanged(current: "dusk", initial: "sunset"))
+    }
+
     // MARK: - UX audit finding 1: CTA-guidance precedence (save error ->
     // blank title -> unacceptable country), including the CTA-slot fix that
     // surfaces an unacceptable country code even off-screen.

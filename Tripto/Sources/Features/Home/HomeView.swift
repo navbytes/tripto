@@ -155,7 +155,9 @@ struct HomeView: View {
                 // actually files under — `bucket().isPastTab`, not a
                 // hardcoded "Upcoming", so a backdated trip still lands
                 // somewhere visible.
-                TripFormView(mode: .create) { trip in
+                TripFormView(mode: .create) { trip, _ in
+                    // Create-mode always reports `.saved` — it hard-stops on
+                    // a nil `userId` before ever reaching a save.
                     selectedTab = trip.bucket().isPastTab ? "Past" : "Upcoming"
                     toast = "Trip created"
                 }
@@ -163,9 +165,18 @@ struct HomeView: View {
             .sheet(item: $editingTrip) { trip in
                 // Same fix, symmetric case: editing a trip's dates can move
                 // it to the other tab, where it'd otherwise vanish.
-                TripFormView(mode: .edit(trip)) { savedTrip in
+                TripFormView(mode: .edit(trip)) { savedTrip, outcome in
                     selectedTab = savedTrip.bucket().isPastTab ? "Past" : "Upcoming"
-                    toast = "Changes saved"
+                    switch outcome {
+                    case .saved:
+                        toast = "Changes saved"
+                    case .savedLocallyWhileSignedOut:
+                        // Finding 5: the write already happened locally —
+                        // this just makes the toast honest about it not
+                        // syncing yet (§6.6: what happened + how to fix it).
+                        toast = "Changes saved on this device \u{2014} you\u{2019}re signed out, so they " +
+                            "won\u{2019}t sync until you sign back in."
+                    }
                 }
             }
             .confirmationDialog(

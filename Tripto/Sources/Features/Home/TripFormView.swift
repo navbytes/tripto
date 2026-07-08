@@ -16,12 +16,24 @@ struct TripFormView: View {
     }
 
     let mode: Mode
+
+    /// UX audit finding 5: an edit save while signed out still writes
+    /// locally (the trip already exists — blocking here the way create-mode
+    /// does would be worse), but the immediate toast needs to say so rather
+    /// than claiming an unqualified "saved" the sync-issue banner then has
+    /// to silently contradict. Create-mode always reports `.saved` since it
+    /// hard-stops on a nil `userId` before ever reaching a save.
+    enum SaveOutcome {
+        case saved
+        case savedLocallyWhileSignedOut
+    }
+
     /// Fires after a successful save, before `dismiss()` — `HomeView`'s
     /// hook (UX audit finding 2) to switch to whichever tab the saved trip
     /// actually files under, so a trip created/edited into the other tab
-    /// doesn't silently vanish. `nil` by default so `TripView.swift`'s edit
-    /// sheet (which doesn't need this) compiles unchanged.
-    var onSaved: ((Trip) -> Void)?
+    /// doesn't silently vanish. `nil` by default so callers that don't need
+    /// this hook compile unchanged.
+    var onSaved: ((Trip, SaveOutcome) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
@@ -73,6 +85,18 @@ struct TripFormView: View {
     /// F4: gates the "Discard changes?" confirmation on cancel/swipe-dismiss.
     @State private var showDiscardConfirm = false
 
+    /// UX audit finding 4: set whenever `startDate`'s `.onChange` silently
+    /// snapped `endDate` forward to keep the range valid, so a caption can
+    /// surface what just happened instead of leaving the user to notice
+    /// (or not) that Ends quietly moved. Cleared the moment the user takes
+    /// `endDate` back over themselves.
+    @State private var endDateAutoAdjusted = false
+    /// Distinguishes the snap's own programmatic write to `endDate` (in
+    /// `startDate`'s `.onChange`) from a user-driven edit of `endDate` — the
+    /// two land on the same `.onChange(of: endDate)`, and only the second
+    /// should clear `endDateAutoAdjusted`.
+    @State private var suppressEndDateResetOnce = false
+
     /// UX audit finding 5: Trip name -> Destination keyboard flow, so a user
     /// filling the form top-to-bottom never has to reach for the keyboard's
     /// dismiss key or tap the next field by hand. Country dropped out of
@@ -103,7 +127,7 @@ struct TripFormView: View {
     }
     private let initialValues: InitialValues
 
-    init(mode: Mode, onSaved: ((Trip) -> Void)? = nil) {
+    init(mode: Mode, onSaved: ((Trip, SaveOutcome) -> Void)? = nil) {
         self.mode = mode
         self.onSaved = onSaved
         switch mode {
@@ -161,7 +185,7 @@ struct TripFormView: View {
             || calendar.startOfDay(for: startDate) != calendar.startOfDay(for: initialValues.startDate)
             || calendar.startOfDay(for: endDate) != calendar.startOfDay(for: initialValues.endDate)
             || tripType != initialValues.tripType
-            || coverGradientKey != initialValues.coverGradientKey
+            || Self.isCoverGradientChanged(current: coverGradientKey, initial: initialValues.coverGradientKey)
     }
 
     /// F6: the live snapshot `.onChange` diffs against `initialValues`
@@ -292,9 +316,43 @@ struct TripFormView: View {
             sectionHeading("Dates")
             LabeledDatePicker(label: "Starts", date: $startDate, displayedComponents: .date)
                 .onChange(of: startDate) { _, newValue in
-                    if endDate < newValue { endDate = newValue }
+                    if endDate < newValue {
+                        // Finding 4: the snap below is about to fire
+                        // `endDate`'s own `.onChange` — set the guard first
+                        // so that handler knows this write is programmatic,
+                        // not the user editing Ends themselves.
+                        suppressEndDateResetOnce = true
+                        endDate = newValue
+                        endDateAutoAdjusted = true
+                        AccessibilityNotification.Announcement(
+                            "Ends moved to \(endDate.formatted(date: .abbreviated, time: .omitted)) " +
+                                "to match the new start date."
+                        ).post()
+                    } else {
+                        endDateAutoAdjusted = false
+                    }
                 }
             LabeledDatePicker(label: "Ends", date: $endDate, displayedComponents: .date, minDate: startDate)
+                .onChange(of: endDate) { _, _ in
+                    if suppressEndDateResetOnce {
+                        suppressEndDateResetOnce = false
+                    } else {
+                        // The user moved Ends themselves — the earlier snap,
+                        // if any, no longer describes the current state.
+                        endDateAutoAdjusted = false
+                    }
+                }
+            if endDateAutoAdjusted {
+                // Advisory tone (slate, not rose) — nothing is wrong here,
+                // Ends just moved to stay valid.
+                Text(
+                    "Ends moved to \(endDate.formatted(date: .abbreviated, time: .omitted)) " +
+                        "to match the new start date."
+                )
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+                .accessibilityAddTraits(.updatesFrequently)
+            }
             if !isDateRangeValid {
                 Text("End date must be on or after the start date.")
                     .font(Typo.body(Typo.Size.caption))
@@ -419,6 +477,22 @@ struct TripFormView: View {
         return gradientOptions.contains(lowered) ? lowered : "dusk"
     }
 
+    /// UX audit finding 6: `hasChanges` should compare gradients by what
+    /// they *render as*, not their raw stored strings — otherwise a trip
+    /// stored as the legacy `"default"` key (which renders Dusk-lit, same as
+    /// `"dusk"`) reads as dirty the instant the sheet opens, and tapping the
+    /// already-lit Dusk swatch (which writes literal `"dusk"`) spuriously
+    /// triggers "Discard changes?" on Cancel/swipe-down. Accepted edge: two
+    /// distinct unknown legacy keys (e.g. `"default"` and `"sunset"`) both
+    /// canonicalize to `"dusk"`, so re-tapping Dusk on a `"sunset"` trip also
+    /// reads as clean — consistent with the swatch already rendering as
+    /// selected. Stored data is untouched by this; a save for other reasons
+    /// simply writes `"dusk"` over the legacy key, which is a harmless,
+    /// schema-valid normalization.
+    static func isCoverGradientChanged(current: String, initial: String) -> Bool {
+        canonicalGradientKey(current) != canonicalGradientKey(initial)
+    }
+
     private func gradientSwatch(_ key: String) -> some View {
         let isSelected = Self.canonicalGradientKey(coverGradientKey) == key
         return Button {
@@ -500,7 +574,7 @@ struct TripFormView: View {
             let dto = trip.toDTO()
             let tripId = trip.id
             Task { await syncEngine?.enqueueUpsert(table: .trips, rowId: tripId, tripId: tripId, payload: dto) }
-            onSaved?(trip)
+            onSaved?(trip, .saved)
 
         case .edit(let trip):
             trip.title = trimmedTitle
@@ -521,7 +595,13 @@ struct TripFormView: View {
             let dto = trip.toDTO()
             let tripId = trip.id
             Task { await syncEngine?.enqueueUpsert(table: .trips, rowId: tripId, tripId: tripId, payload: dto) }
-            onSaved?(trip)
+            // Finding 5: the write above already happened (local-first edit
+            // — blocking here the way create-mode does would be worse, the
+            // trip already exists), but a signed-out save still needs an
+            // honest toast rather than an unqualified "saved" that the
+            // sync-issue banner then has to silently contradict.
+            let outcome: SaveOutcome = authManager.userId == nil ? .savedLocallyWhileSignedOut : .saved
+            onSaved?(trip, outcome)
         }
 
         dismiss()
