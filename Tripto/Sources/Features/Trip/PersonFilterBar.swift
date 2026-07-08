@@ -76,6 +76,12 @@ struct PersonFilterBar: View {
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
+    /// UX audit finding 2: the selected state used to be white-on-raw-avatar
+    /// -color, which falls under AA contrast for several avatar hues. Now
+    /// ink-on-soft-tint — the same pairing `Today`/`TagChip`/
+    /// `TZShiftChipRow` (ink-on-amberSoft) already use — with the person's
+    /// own hue kept as the selected stroke so selection is still marked by
+    /// more than just background shade.
     private func personChip(_ chip: Chip) -> some View {
         let isOn = selection == chip.id
         let color = AvatarColor.color(named: chip.colorName)
@@ -84,7 +90,7 @@ struct PersonFilterBar: View {
         } label: {
             HStack(spacing: Spacing.xs) {
                 Circle()
-                    .fill(isOn ? .white.opacity(0.28) : color)
+                    .fill(color)
                     .frame(width: 22, height: 22)
                     .overlay {
                         Text(chip.initial)
@@ -94,13 +100,13 @@ struct PersonFilterBar: View {
                     .accessibilityHidden(true)
                 Text(chip.firstName).font(Typo.body(13, weight: .bold))
             }
-            .foregroundStyle(isOn ? .white : Palette.slate)
+            .foregroundStyle(isOn ? Palette.ink : Palette.slate)
             .padding(.leading, 4)
             .padding(.trailing, Spacing.md)
             .padding(.vertical, 4)
-            .background(isOn ? color : Palette.elevated, in: Capsule())
+            .background(isOn ? AvatarColor.softColor(named: chip.colorName) : Palette.elevated, in: Capsule())
             .overlay {
-                Capsule().stroke(isOn ? Color.clear : Palette.mist, lineWidth: 1)
+                Capsule().stroke(isOn ? color : Palette.mist, lineWidth: isOn ? 1.5 : 1)
             }
             // Finding 1b: same 44pt hit band as `everyoneChip` above.
             .frame(minHeight: 44)
@@ -128,6 +134,7 @@ struct PersonFilterBanner: View {
     var body: some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: "sparkles").foregroundStyle(Palette.amber)
+                .accessibilityHidden(true)
             Text(message)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.ink)

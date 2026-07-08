@@ -37,6 +37,12 @@ struct ItineraryTabView: View {
     /// to this trip yet" apart from "everything's just hidden by the
     /// filter" and phrase its guidance accordingly.
     var hasAnyItems: Bool = true
+    /// UX audit finding 1: `TimelineDayModel.id` -> how many of that day's
+    /// items the current "Just mine" filter is hiding — `[:]` for
+    /// "Everyone". Lets `freeDayRow` tell a genuinely free day apart from a
+    /// day that's actually full for someone else (`TripView.hiddenCountByDay`
+    /// via `PersonFilter.hiddenDayCounts`).
+    var hiddenCountByDay: [String: Int] = [:]
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
     /// Finding F1: `tabBar()`'s `isAccessibilitySize` convention
@@ -84,7 +90,7 @@ struct ItineraryTabView: View {
                             ForEach(dayModels) { day in
                                 Section {
                                     if day.isFreeDay {
-                                        freeDayRow(showsAddHint: canEdit && day.id == firstFreeDayId)
+                                        freeDayRow(day, showsAddHint: canEdit && day.id == firstFreeDayId)
                                     } else {
                                         ForEach(day.rows) { row in
                                             rowView(for: row)
@@ -229,9 +235,21 @@ struct ItineraryTabView: View {
     /// (computed once via `firstFreeDayId` below); every other gap day —
     /// and every free day for a viewer, who has no + to tap — gets the
     /// quiet "Free day" label instead.
-    private func freeDayRow(showsAddHint: Bool) -> some View {
-        HStack {
-            Text(showsAddHint ? "Free day \u{2014} tap + to add a plan" : "Free day")
+    ///
+    /// UX audit finding 1: "Free day" is a lie when it's actually full for
+    /// someone the filter is hiding — `hiddenCountByDay` tells the two
+    /// apart. A single `Text` either way, so VoiceOver still reads it as
+    /// one stop.
+    private func freeDayRow(_ day: TimelineDayModel, showsAddHint: Bool) -> some View {
+        let hiddenCount = hiddenCountByDay[day.id, default: 0]
+        let text: String
+        if let filteredPersonName, hiddenCount > 0 {
+            text = "Nothing for \(filteredPersonName) this day \u{2014} \(hiddenCount) plan\(hiddenCount == 1 ? "" : "s") hidden"
+        } else {
+            text = showsAddHint ? "Free day \u{2014} tap + to add a plan" : "Free day"
+        }
+        return HStack {
+            Text(text)
                 .font(Typo.body(Typo.Size.caption))
                 .foregroundStyle(Palette.slate)
             Spacer(minLength: 0)
@@ -242,8 +260,20 @@ struct ItineraryTabView: View {
 
     /// Finding 8: the id of the first free day in `dayModels`, so the "tap +
     /// to add a plan" hint appears exactly once instead of on every gap day.
+    ///
+    /// UX audit finding 1 + 6: only a *genuinely* free day (nothing hidden
+    /// by the filter either) is eligible — hinting "tap + to add a plan" on
+    /// a day that's actually full for someone else would invite a double
+    /// booking. Among genuinely free days, prefers the first on or after
+    /// today (the same sortable `DayDate.stringValue` comparison the
+    /// auto-scroll in `.task` above already relies on) so the hint
+    /// re-anchors to the first actionable day on an in-progress trip,
+    /// falling back to the first overall for trips wholly in the future or
+    /// past.
     private var firstFreeDayId: String? {
-        dayModels.first(where: \.isFreeDay)?.id
+        let genuinelyFree = dayModels.filter { $0.isFreeDay && hiddenCountByDay[$0.id, default: 0] == 0 }
+        let todayId = DayDate.from(.now, calendar: .current).stringValue
+        return genuinelyFree.first(where: { $0.id >= todayId })?.id ?? genuinelyFree.first?.id
     }
 
     // MARK: - Empty state (BUILD_PLAN.md §4.2, §6.6)
@@ -320,6 +350,7 @@ struct ItineraryTabView: View {
                 .font(.system(size: 28))
                 .foregroundStyle(Palette.amber)
                 .padding(.bottom, Spacing.sm)
+                .accessibilityHidden(true)
             Text(filteredEmptyGuidance(personName: personName))
                 .font(Typo.body())
                 .foregroundStyle(Palette.slate)
@@ -420,11 +451,21 @@ struct ItineraryTabView: View {
     /// Finding 9: this used to be one giant `Button` — the icon, the
     /// "coming soon" copy, and the forward-address hint all enrolled in the
     /// waitlist on tap, which reads as an accidental sign-up trap. Now only
-    /// the explicit "Notify me" CTA is a button; the rest of the card is
-    /// static informational content (`.accessibilityElement(children:
-    /// .combine)` so VoiceOver still reads it as one stop). The old
-    /// "already on the list" re-tap toast goes away with the tap surface —
-    /// there's nothing left to accidentally re-tap.
+    /// the explicit CTA is a button; the rest of the card is static
+    /// informational content (`.accessibilityElement(children: .combine)`
+    /// so VoiceOver still reads it as one stop). The old "already on the
+    /// list" re-tap toast goes away with the tap surface — there's nothing
+    /// left to accidentally re-tap.
+    ///
+    /// UX audit finding 3: the copy previously promised a real waitlist
+    /// ("You're on the list — we'll tell you when it's ready"), but the
+    /// mechanism behind it is only a device-local `@AppStorage` tap
+    /// counter — nothing is actually sent anywhere, and no one gets
+    /// notified. The wording below claims only what that counter can
+    /// honestly deliver ("noted interest," not "you'll be notified"); a
+    /// real server-side waitlist capture is deferred to the backend repo.
+    /// The counter, `isOnWaitlist` gate, and persistence semantics are all
+    /// unchanged.
     private var importTeaser: some View {
         HStack(spacing: Spacing.md) {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -434,6 +475,7 @@ struct ItineraryTabView: View {
                     Image(systemName: "envelope.badge")
                         .foregroundStyle(Palette.amber)
                 }
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Email import — coming soon")
                     .font(Typo.body(weight: .semibold))
@@ -448,7 +490,7 @@ struct ItineraryTabView: View {
             if isOnWaitlist {
                 HStack(spacing: Spacing.xxs) {
                     Image(systemName: "checkmark")
-                    Text("You\u{2019}re on the list")
+                    Text("Interest noted \u{2014} thanks!")
                 }
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(.white)
@@ -456,9 +498,9 @@ struct ItineraryTabView: View {
             } else {
                 Button {
                     importWaitlistTaps += 1
-                    toast = "You\u{2019}re on the list \u{2014} we\u{2019}ll tell you when it\u{2019}s ready"
+                    toast = "Thanks \u{2014} we\u{2019}re building email import."
                 } label: {
-                    Text("Notify me")
+                    Text("I want this")
                         .font(Typo.body(Typo.Size.caption, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, Spacing.md)
@@ -471,7 +513,7 @@ struct ItineraryTabView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Adds you to the email import waitlist")
+                .accessibilityHint("Registers your interest in email import")
             }
         }
         .padding(Spacing.md)

@@ -17,4 +17,19 @@ enum AvatarColor {
         default: Palette.slate
         }
     }
+
+    /// UX audit finding 2: the soft-tint counterpart to `color(named:)`,
+    /// for the ink-on-soft-tint pairing (`Today` chip / `TagChip` /
+    /// `TZShiftChipRow` precedent) rather than white-on-raw-hue, which falls
+    /// under AA contrast for several of these colors. Same generated-tokens
+    /// mapping as `color(named:)` above — no hex literals here either.
+    static func softColor(named name: String) -> Color {
+        switch name.lowercased() {
+        case "amber": CategoryColor.hotel.soft
+        case "moss": CategoryColor.activity.soft
+        case "sky": CategoryColor.flight.soft
+        case "plum": CategoryColor.food.soft
+        default: Palette.mist
+        }
+    }
 }

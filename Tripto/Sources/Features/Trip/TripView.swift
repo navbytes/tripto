@@ -277,7 +277,8 @@ struct TripView: View {
                             filteredPersonName: selectedProfileFirstName,
                             toast: $toast,
                             isAwaitingFirstSync: awaitingFirstTripPull,
-                            hasAnyItems: !items.isEmpty
+                            hasAnyItems: !items.isEmpty,
+                            hiddenCountByDay: hiddenCountByDay
                         )
                     }
                     tabContent(.bookings) {
@@ -590,8 +591,26 @@ struct TripView: View {
     /// profile's deletion and that `onChange` firing could otherwise render
     /// a stale-filtered (effectively empty-for-everyone-else) list.
     private var filteredItems: [ItineraryItem] {
-        let reconciled = PersonFilter.reconciledSelection(selectedProfileFilter, profileIds: Set(tripProfiles.map(\.id)))
-        return PersonFilter.filteredItems(items, assignees: itemAssignees, selectedProfileId: reconciled)
+        PersonFilter.filteredItems(items, assignees: itemAssignees, selectedProfileId: reconciledProfileFilter)
+    }
+
+    /// UX audit finding 1: how many items each day's "Just mine" filter is
+    /// currently hiding, keyed by `DayDate.stringValue` (==
+    /// `TimelineDayModel.id`) — lets `ItineraryTabView` tell a genuinely
+    /// free day apart from a day that's actually full for everyone else.
+    private var hiddenCountByDay: [String: Int] {
+        guard let trip else { return [:] }
+        return PersonFilter.hiddenDayCounts(
+            items, assignees: itemAssignees, selectedProfileId: reconciledProfileFilter,
+            tripStart: DayDate.from(trip.startDate, calendar: .current)
+        )
+    }
+
+    /// Finding 5's stale-selection guard, shared by `filteredItems` and
+    /// `hiddenCountByDay` so it's computed once per render pass instead of
+    /// twice.
+    private var reconciledProfileFilter: UUID? {
+        PersonFilter.reconciledSelection(selectedProfileFilter, profileIds: Set(tripProfiles.map(\.id)))
     }
 
     /// `itemId` -> resolved assignee avatars, for `ItineraryTabView`'s

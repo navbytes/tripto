@@ -66,7 +66,16 @@ struct TimelineCardRow: View, Equatable {
     private var categoryWord: String { model.category.displayName }
 
     private var a11yLabel: String {
-        var parts = [categoryWord, model.title, model.subtitle]
+        var parts = [categoryWord, model.title]
+        // UX audit finding 5: several categories' subtitle falls back to
+        // their bare category word ("Flight"/"Activity"/"Food"/"Transport"
+        // — `TimelineBuilder.subtitle`'s empty-details fallback), which
+        // VoiceOver then read twice back to back. Skipping the subtitle
+        // when it's just a repeat of `categoryWord` leaves the visual card
+        // (which still wants a non-empty second line) untouched.
+        if model.subtitle != categoryWord {
+            parts.append(model.subtitle)
+        }
         parts.append("at \(model.timeText)\(model.zoneLabel.map { " \($0)" } ?? "")")
         if !model.assignees.isEmpty {
             parts.append("for \(model.assignees.count) \(model.assignees.count == 1 ? "person" : "people")")

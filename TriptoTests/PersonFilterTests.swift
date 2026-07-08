@@ -128,6 +128,82 @@ final class PersonFilterTests: XCTestCase {
         XCTAssertEqual(summary.hiddenForOthers, 0)
     }
 
+    // MARK: - hiddenDayCounts (UX audit finding 1: filtered Free-day lie)
+
+    private func instant(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int, tz: String = "UTC") -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: tz)!
+        var components = DateComponents()
+        components.year = year; components.month = month; components.day = day
+        components.hour = hour; components.minute = minute
+        return calendar.date(from: components)!
+    }
+
+    func testHiddenDayCountsIsEmptyWhenNoOneIsSelected() {
+        let item = TestFixtures.makeItineraryItem(startsAt: instant(2026, 5, 14, 9, 0))
+        let result = PersonFilter.hiddenDayCounts(
+            [item], assignees: [], selectedProfileId: nil, tripStart: DayDate(year: 2026, month: 5, day: 14)
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testHiddenDayCountsKeysByDayStringValueForAnItemAssignedToSomeoneElse() {
+        let meera = UUID()
+        let grandma = UUID()
+        let day = DayDate(year: 2026, month: 5, day: 14)
+        let item = TestFixtures.makeItineraryItem(startsAt: instant(2026, 5, 14, 9, 0))
+        let assignees = [ItemAssignee(itemId: item.id, profileId: grandma)]
+        let result = PersonFilter.hiddenDayCounts(
+            [item], assignees: assignees, selectedProfileId: meera, tripStart: day
+        )
+        XCTAssertEqual(result, [day.stringValue: 1])
+    }
+
+    func testHiddenDayCountsCountsAMultiDayHotelOnEveryDayItTouches() {
+        let meera = UUID()
+        let grandma = UUID()
+        let tripStart = DayDate(year: 2026, month: 5, day: 14)
+        let hotel = TestFixtures.makeItineraryItem(
+            category: .hotel,
+            startsAt: instant(2026, 5, 14, 15, 0),
+            endsAt: instant(2026, 5, 17, 11, 0)
+        )
+        let assignees = [ItemAssignee(itemId: hotel.id, profileId: grandma)]
+        let result = PersonFilter.hiddenDayCounts(
+            [hotel], assignees: assignees, selectedProfileId: meera, tripStart: tripStart
+        )
+        XCTAssertEqual(result, [
+            DayDate(year: 2026, month: 5, day: 14).stringValue: 1, // check-in
+            DayDate(year: 2026, month: 5, day: 15).stringValue: 1, // staying
+            DayDate(year: 2026, month: 5, day: 16).stringValue: 1, // staying
+            DayDate(year: 2026, month: 5, day: 17).stringValue: 1, // check-out
+        ])
+    }
+
+    func testHiddenDayCountsOnlyCountsTheHiddenItemWhenADayMixesVisibleAndHidden() {
+        let meera = UUID()
+        let grandma = UUID()
+        let day = DayDate(year: 2026, month: 5, day: 14)
+        let shared = TestFixtures.makeItineraryItem(startsAt: instant(2026, 5, 14, 8, 0)) // unassigned = visible
+        let theirs = TestFixtures.makeItineraryItem(startsAt: instant(2026, 5, 14, 9, 0))
+        let assignees = [ItemAssignee(itemId: theirs.id, profileId: grandma)]
+        let result = PersonFilter.hiddenDayCounts(
+            [shared, theirs], assignees: assignees, selectedProfileId: meera, tripStart: day
+        )
+        XCTAssertEqual(result, [day.stringValue: 1])
+    }
+
+    func testHiddenDayCountsExcludesItemsAssignedToTheSelectedPerson() {
+        let meera = UUID()
+        let day = DayDate(year: 2026, month: 5, day: 14)
+        let item = TestFixtures.makeItineraryItem(startsAt: instant(2026, 5, 14, 9, 0))
+        let assignees = [ItemAssignee(itemId: item.id, profileId: meera)]
+        let result = PersonFilter.hiddenDayCounts(
+            [item], assignees: assignees, selectedProfileId: meera, tripStart: day
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
     // MARK: - reconciledSelection (finding 5: stale "Just mine" filter)
 
     func testReconciledSelectionNilStaysNil() {
