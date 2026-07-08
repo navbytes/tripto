@@ -332,9 +332,15 @@ struct ShareTripView: View {
         Button {
             Task { _ = await createInvite(role: role) }
         } label: {
-            HStack {
-                Image(systemName: icon)
-                Text(title).font(Typo.body(weight: .semibold))
+            VStack(spacing: 3) {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: icon)
+                    Text(title).font(Typo.body(weight: .semibold))
+                }
+                Text(role.inviteGrant)
+                    .font(Typo.body(10))
+                    .opacity(0.85)
+                    .multilineTextAlignment(.center)
             }
             .foregroundStyle(color)
             .frame(maxWidth: .infinity)
@@ -367,8 +373,33 @@ struct ShareTripView: View {
 
     // MARK: - People list
 
+    /// A read-only "what you can do" card so any member — especially a
+    /// Companion — can see their own role and its capabilities without needing
+    /// the organizer-only role picker (persona dry-run).
+    @ViewBuilder
+    private var ownRoleCard: some View {
+        if let myRole {
+            let badge = roleBadge(for: myRole)
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: badge.icon).foregroundStyle(badge.color).frame(width: 22)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Your role: \(badge.label)")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Text(myRole.capabilityDescription)
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.md)
+            .background(badge.color.opacity(0.08), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+        }
+    }
+
     private var peopleSection: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
+            ownRoleCard
             Text("On this trip \u{00B7} \(personRows.count)")
                 .font(Typo.body(Typo.Size.caption, weight: .bold))
                 .foregroundStyle(Palette.slate)
@@ -485,7 +516,7 @@ struct ShareTripView: View {
                 Text("No account yet").font(Typo.body(Typo.Size.caption)).foregroundStyle(Palette.slate)
             }
             Spacer(minLength: Spacing.sm)
-            PillLabel(text: "Assignable \u{00B7} no account", tint: .neutral)
+            PillLabel(text: "Can be assigned plans \u{00B7} no app needed", tint: .neutral)
             if isOrganizer {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
@@ -768,9 +799,9 @@ private struct RolePickerSheet: View {
     }
 
     private let options: [Option] = [
-        Option(role: .organizer, icon: "crown.fill", color: Palette.amber, description: "Full control \u{2014} edit everything, manage people."),
-        Option(role: .companion, icon: "pencil", color: CategoryColor.activity.fg, description: "Add plans, suggest, comment, edit their own items."),
-        Option(role: .viewer, icon: "eye.fill", color: CategoryColor.flight.fg, description: "See the itinerary \u{2014} no editing. Great for kids & grandparents."),
+        Option(role: .organizer, icon: "crown.fill", color: Palette.amber, description: TripRole.organizer.capabilityDescription),
+        Option(role: .companion, icon: "pencil", color: CategoryColor.activity.fg, description: TripRole.companion.capabilityDescription),
+        Option(role: .viewer, icon: "eye.fill", color: CategoryColor.flight.fg, description: TripRole.viewer.capabilityDescription),
     ]
 
     var body: some View {

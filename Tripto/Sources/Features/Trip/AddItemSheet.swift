@@ -35,6 +35,7 @@ struct AddItemSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
+    @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.dismiss) private var dismiss
 
     @State var category: ItemCategory
@@ -376,7 +377,7 @@ struct AddItemSheet: View {
             let rowId = editing.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
             reconcileAssignees(itemId: rowId)
-            onToast("\(category.displayName) updated")
+            onToast(toastMessage("updated"))
         } else {
             let item = ItineraryItem(
                 id: UUID(), tripId: tripId, categoryRaw: category.rawValue, title: fields.title,
@@ -393,11 +394,18 @@ struct AddItemSheet: View {
             let rowId = item.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
             reconcileAssignees(itemId: rowId)
-            onToast("\(category.displayName) added")
+            onToast(toastMessage("added"))
         }
 
         persistZoneDefaults()
         dismiss()
+    }
+
+    /// "Flight added", or "Flight added — will sync when you're back" when
+    /// offline, so an edit made on the plane visibly reassures it isn't lost.
+    private func toastMessage(_ verb: String) -> String {
+        let base = "\(category.displayName) \(verb)"
+        return syncStatus.isOffline ? "\(base) \u{2014} will sync when you\u{2019}re back" : base
     }
 
     // MARK: - Family: assignees + tags (this milestone's brief §3)

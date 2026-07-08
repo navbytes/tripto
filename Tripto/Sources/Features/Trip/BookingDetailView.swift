@@ -86,6 +86,16 @@ struct BookingDetailView: View {
                 passCard(for: item)
                 actionRow(for: item)
                 notesBlock(for: item)
+
+                if !canEdit {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "lock.fill").font(.system(size: 11))
+                        Text("Only the person who added this, or an organizer, can change it.")
+                    }
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
+                    .padding(.top, Spacing.xs)
+                }
             }
             .padding(Spacing.xl)
         }
