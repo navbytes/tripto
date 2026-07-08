@@ -234,6 +234,8 @@ struct BookingDetailView: View {
         let endsAt = item.endsAt ?? item.startsAt
         let arrTime = ItineraryTimeZone.timeString(endsAt, in: dropTz)
         let arrZone = ItineraryTimeZone.zoneLabel(for: dropTz, at: endsAt)
+        let depDate = Self.shortDate(item.startsAt, in: item.primaryTz)
+        let arrDate = Self.shortDate(endsAt, in: dropTz)
         let pickup = item.locationName.isEmpty ? "Pickup" : item.locationName
         let dropoff = details.dropoffLocation ?? "Drop-off"
 
@@ -246,8 +248,8 @@ struct BookingDetailView: View {
                     .foregroundStyle(.white.opacity(0.85))
             }
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                transportEndpoint(label: "Pickup", place: pickup, time: "\(depTime) \(depZone)")
-                transportEndpoint(label: "Drop-off", place: dropoff, time: "\(arrTime) \(arrZone)")
+                transportEndpoint(label: "Pickup", place: pickup, time: "\(depDate) \u{00B7} \(depTime) \(depZone)")
+                transportEndpoint(label: "Drop-off", place: dropoff, time: "\(arrDate) \u{00B7} \(arrTime) \(arrZone)")
             }
             .foregroundStyle(.white)
         }
@@ -258,6 +260,16 @@ struct BookingDetailView: View {
                 colors: [CategoryColor.transport.fg, Palette.indigo], startPoint: .topLeading, endPoint: .bottomTrailing
             )
         )
+    }
+
+    /// Short localized "Mon 14"-style date for a boarding-pass endpoint, in the
+    /// endpoint's own zone — a multi-day rental's dates are exactly what you
+    /// open the pass to confirm (persona dry-run).
+    static func shortDate(_ instant: Date, in tz: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.timeZone = tz
+        formatter.setLocalizedDateFormatFromTemplate("EEEMMMd")
+        return formatter.string(from: instant)
     }
 
     private func transportEndpoint(label: String, place: String, time: String) -> some View {

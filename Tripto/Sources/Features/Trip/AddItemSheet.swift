@@ -101,6 +101,10 @@ struct AddItemSheet: View {
     @State var dropoffDate = Date()
     @State var dropoffTime = Date()
     @State var dropoffZone: TimeZone = .current
+    /// Off by default: a same-city rental drops off in the pickup zone, so the
+    /// form shows one zone, not two (persona dry-run). On reveals a separate
+    /// drop-off zone picker for a zone-crossing train/ferry.
+    @State var transportDropoffDiffZone = false
 
     // Shared across non-flight categories
     @State var confirmation = ""
@@ -112,7 +116,7 @@ struct AddItemSheet: View {
     private static let lastDepartureTZKey = "lastDepartureTZ"
     private static func lastArrivalTZKey(_ tripId: UUID) -> String { "lastArrivalTZ.\(tripId.uuidString)" }
 
-    init(tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current, onToast: @escaping (String) -> Void) {
+    init(tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current, tripStartDate: Date = .now, onToast: @escaping (String) -> Void) {
         self.tripId = tripId
         self.tripTitle = tripTitle
         self.editing = editing
@@ -186,6 +190,7 @@ struct AddItemSheet: View {
                 _dropoffText = State(initialValue: details.dropoffLocation ?? "")
                 let dropTz = details.arrivalTz.flatMap(TimeZone.init(identifier:)) ?? editing.primaryTz
                 _dropoffZone = State(initialValue: dropTz)
+                _transportDropoffDiffZone = State(initialValue: dropTz.identifier != editing.primaryTz.identifier)
                 let endsAt = editing.endsAt ?? editing.startsAt
                 _dropoffDate = State(initialValue: Self.pickerDate(from: endsAt, in: dropTz))
                 _dropoffTime = State(initialValue: Self.pickerDate(from: endsAt, in: dropTz))
@@ -209,9 +214,21 @@ struct AddItemSheet: View {
             _foodZone = State(initialValue: defaultZone)
             _pickupZone = State(initialValue: defaultZone)
             _dropoffZone = State(initialValue: defaultZone)
+            // Lean new-item dates toward the trip's start (a May trip shouldn't
+            // default every item to today), and give arrival a 2h head start so
+            // the form never opens on a zero-length item with a stray "+1 day"
+            // (persona dry-run).
+            let dateDefault = tripStartDate > Date() ? tripStartDate : Date()
+            _flightDate = State(initialValue: dateDefault)
+            _activityDate = State(initialValue: dateDefault)
+            _foodDate = State(initialValue: dateDefault)
+            _transportDate = State(initialValue: dateDefault)
+            _dropoffDate = State(initialValue: dateDefault)
+            _arrivesTime = State(initialValue: Date().addingTimeInterval(2 * 3600))
+            _checkInDate = State(initialValue: dateDefault)
             _checkInTime = State(initialValue: Self.timeOfDay(hour: 15, minute: 0))
             _checkOutTime = State(initialValue: Self.timeOfDay(hour: 11, minute: 0))
-            _checkOutDate = State(initialValue: Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now)
+            _checkOutDate = State(initialValue: Calendar.current.date(byAdding: .day, value: 1, to: dateDefault) ?? dateDefault)
         }
     }
 
@@ -346,8 +363,7 @@ struct AddItemSheet: View {
         case .food:
             return !foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .transport:
-            return !transportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && transportEndAfterStart
+            return transportHasName && transportEndAfterStart
         }
     }
 
@@ -505,13 +521,25 @@ struct AddItemSheet: View {
     /// next-day toggle; it has an explicit drop-off date picker instead.
     var effectiveNextDay: Bool { effectiveArrivalIsNextDay }
 
+    /// A transport item is named by either its title or its provider — a rental
+    /// is often just "Hertz" with no distinct title, so requiring both was
+    /// redundant (persona dry-run).
+    var transportHasName: Bool {
+        !transportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The zone actually applied to the drop-off: the pickup zone unless the
+    /// user opted into a different one.
+    var effectiveDropoffZone: TimeZone { transportDropoffDiffZone ? dropoffZone : pickupZone }
+
     /// Whether a transport item's drop-off is strictly after its pickup — the
     /// same "end after start" rule Stay enforces, so a rental can't save with a
     /// zero or negative duration. Drives both `isValid` and the form's hint.
     var transportEndAfterStart: Bool {
         let (start, end) = Self.transportInstants(
             pickupDate: transportDate, pickupTime: pickupTime, pickupTz: pickupZone,
-            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: dropoffZone
+            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: effectiveDropoffZone
         )
         return end > start
     }
@@ -533,7 +561,7 @@ struct AddItemSheet: View {
     private func transportFields() -> ComposedFields {
         let (start, end) = Self.transportInstants(
             pickupDate: transportDate, pickupTime: pickupTime, pickupTz: pickupZone,
-            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: dropoffZone
+            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffTz: effectiveDropoffZone
         )
         var details = ItemDetails.empty
         details.provider = Self.trimmedOrNil(provider)
@@ -541,10 +569,10 @@ struct AddItemSheet: View {
         // Always recorded (as for flights) so `effectiveTz` is well-defined even
         // for a same-zone rental, and the tz-shift chip works for a zone-crossing
         // train/ferry.
-        details.arrivalTz = dropoffZone.identifier
+        details.arrivalTz = effectiveDropoffZone.identifier
 
         return ComposedFields(
-            title: Self.trimmedOrNil(transportTitle) ?? "Transport",
+            title: Self.trimmedOrNil(transportTitle) ?? Self.trimmedOrNil(provider) ?? "Transport",
             startsAt: start, endsAt: end, tz: pickupZone.identifier,
             details: details, confirmation: Self.trimmedOrNil(confirmation),
             locationName: locationText, locationLat: locationLat, locationLng: locationLng

@@ -137,7 +137,7 @@ extension AddItemSheet {
 
     var transportSection: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            FormTextField(label: "Title", text: $transportTitle, placeholder: "Rental car")
+            FormTextField(label: "Title (optional)", text: $transportTitle, placeholder: "Rental car")
             FormTextField(label: "Provider", text: $provider, placeholder: "Hertz")
 
             LocationField(label: "Pickup location", text: $locationText) { coordinate, resolvedAddress in
@@ -151,17 +151,26 @@ extension AddItemSheet {
             }
             ZonePicker(title: "Pickup time zone", selection: $pickupZone, referenceDate: pickupTime)
 
-            FormTextField(label: "Drop-off location", text: $dropoffText, placeholder: "Airport, hotel, depot\u{2026}")
+            LocationField(label: "Drop-off location", text: $dropoffText) { _, _ in }
+            Button("Same as pickup") { dropoffText = locationText }
+                .font(Typo.body(11, weight: .semibold))
+                .foregroundStyle(Palette.amber)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             HStack(spacing: Spacing.md) {
                 LabeledDatePicker(label: "Drop-off date", date: $dropoffDate, displayedComponents: .date)
                 LabeledDatePicker(label: "Time", date: $dropoffTime, displayedComponents: .hourAndMinute)
             }
-            if !transportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !transportEndAfterStart {
+            if transportHasName && !transportEndAfterStart {
                 Text("Drop-off must be after pickup.")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(.red)
             }
-            ZonePicker(title: "Drop-off time zone", selection: $dropoffZone, referenceDate: dropoffTime)
+            Toggle("Returns in a different time zone", isOn: $transportDropoffDiffZone)
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .tint(Palette.amber)
+            if transportDropoffDiffZone {
+                ZonePicker(title: "Drop-off time zone", selection: $dropoffZone, referenceDate: dropoffTime)
+            }
 
             FormTextField(
                 label: "Confirmation code", text: $confirmation, placeholder: "ABC123", autocapitalization: .characters

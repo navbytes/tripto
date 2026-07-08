@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "web/share-worker"],
       "port": 8787
+    },
+    {
+      "name": "share-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8899", "--directory", "/tmp/tripto-ux"],
+      "port": 8899
     }
   ]
 }
