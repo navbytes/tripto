@@ -197,14 +197,17 @@ struct StayingStripRow: View, Equatable {
             // 44pt band, the same pattern `PersonFilterBar`'s chips use.
             .frame(minHeight: 44)
             .contentShape(Rectangle())
+            // Finding F9: one spoken stop for the strip, not two (an icon +
+            // text pair VoiceOver would otherwise announce separately).
+            // Inside the link label — not appended after `.buttonStyle`
+            // below — so the NavigationLink itself supplies the button
+            // trait and activation, matching `TimelineCardRow`.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(model.text)
         }
         .buttonStyle(.plain)
         .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
         .padding(.vertical, Spacing.xxs)
-        // Finding F9: one spoken stop for the strip, not two (an icon +
-        // text pair VoiceOver would otherwise announce separately).
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(model.text)
     }
 }
 
@@ -242,14 +245,16 @@ struct CheckOutRow: View, Equatable {
             // `PersonFilterBar`'s chips (Finding 1b), visuals unchanged.
             .frame(minHeight: 44)
             .contentShape(Rectangle())
+            // Finding F9: one spoken stop — "Check-out · title, at time zone,
+            // waiting to sync" — instead of the gutter/icon/title/pending
+            // chip reading as separate VoiceOver stops. Inside the link
+            // label so the NavigationLink itself supplies the button trait
+            // and activation, matching `TimelineCardRow`.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(a11yLabel)
         }
         .buttonStyle(.plain)
         .padding(.vertical, Spacing.xxs)
-        // Finding F9: one spoken stop — "Check-out · title, at time zone,
-        // waiting to sync" — instead of the gutter/icon/title/pending chip
-        // reading as separate VoiceOver stops.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11yLabel)
     }
 
     private var a11yLabel: String {
@@ -274,9 +279,11 @@ struct CheckOutRow: View, Equatable {
 }
 
 /// Kid-aware tag chip (BUILD_PLAN.md §5.4, this milestone's brief:
-/// "rendered as small moss chips"). `tag` is the raw `details.tags` string;
-/// unrecognized values (a future tag this build doesn't know) still render,
-/// just as plain text with no icon, rather than being dropped.
+/// "rendered as small moss chips" — the moss now lives in the background
+/// tint; see Finding 6 below for the label/icon color). `tag` is the raw
+/// `details.tags` string; unrecognized values (a future tag this build
+/// doesn't know) still render, just as plain text with no icon, rather than
+/// being dropped.
 struct TagChip: View {
     let tag: String
 
@@ -290,7 +297,11 @@ struct TagChip: View {
             Text(itemTag?.label ?? tag)
         }
         .font(Typo.body(10, weight: .bold))
-        .foregroundStyle(CategoryColor.activity.fg)
+        // Finding 6: `CategoryColor.activity.fg` (moss-on-moss-soft) was
+        // under AA contrast at this chip's 10pt size — `Palette.ink` is the
+        // same ink-on-soft-tint pairing `TZShiftChipRow`/`PersonFilterBanner`
+        // already use, and it adapts light/dark like every other label.
+        .foregroundStyle(Palette.ink)
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, 3)
         .background(CategoryColor.activity.soft, in: Capsule())

@@ -262,33 +262,38 @@ struct TripView: View {
             }
 
             ZStack(alignment: .bottomTrailing) {
-                switch selectedTab {
-                case .itinerary:
-                    ItineraryTabView(
-                        trip: trip,
-                        items: filteredItems,
-                        pendingRowIds: syncStatus.pendingRowIds,
-                        myUserId: authManager.userId,
-                        namesById: profileNames,
-                        canEdit: canAddItems,
-                        assigneesByItem: assigneesByItem,
-                        filteredPersonName: selectedProfileFirstName,
-                        toast: $toast,
-                        isAwaitingFirstSync: awaitingFirstTripPull,
-                        hasAnyItems: !items.isEmpty
-                    )
-                case .bookings:
-                    BookingsTabView(
-                        items: items,
-                        onAdd: canAddItems ? { isPresentingAdd = true } : nil,
-                        isAwaitingFirstSync: awaitingFirstTripPull
-                    )
-                case .packing:
-                    PackingListView(
-                        tripId: trip.id,
-                        tripCreatedBy: trip.createdBy,
-                        isAwaitingFirstSync: awaitingFirstTripPull
-                    )
+                // Finding 5: all three tab views stay alive underneath —
+                // see `tabContent(_:content:)`'s doc comment for why.
+                ZStack {
+                    tabContent(.itinerary) {
+                        ItineraryTabView(
+                            trip: trip,
+                            items: filteredItems,
+                            pendingRowIds: syncStatus.pendingRowIds,
+                            myUserId: authManager.userId,
+                            namesById: profileNames,
+                            canEdit: canAddItems,
+                            assigneesByItem: assigneesByItem,
+                            filteredPersonName: selectedProfileFirstName,
+                            toast: $toast,
+                            isAwaitingFirstSync: awaitingFirstTripPull,
+                            hasAnyItems: !items.isEmpty
+                        )
+                    }
+                    tabContent(.bookings) {
+                        BookingsTabView(
+                            items: items,
+                            onAdd: canAddItems ? { isPresentingAdd = true } : nil,
+                            isAwaitingFirstSync: awaitingFirstTripPull
+                        )
+                    }
+                    tabContent(.packing) {
+                        PackingListView(
+                            tripId: trip.id,
+                            tripCreatedBy: trip.createdBy,
+                            isAwaitingFirstSync: awaitingFirstTripPull
+                        )
+                    }
                 }
 
                 // UX audit finding 5: FAB shows on Itinerary and Bookings —
@@ -330,6 +335,24 @@ struct TripView: View {
                 }
             }
         }
+    }
+
+    /// Finding 5: keeps all three tab views mounted underneath the visible
+    /// one instead of the old `switch`-driven teardown, which was
+    /// destroying and recreating `ItineraryTabView` (and its `@State
+    /// hasAutoScrolledToToday`, and the `ScrollView`'s own scroll position)
+    /// on every tab switch — a round trip through Bookings or Packing lost
+    /// the traveler's place on the timeline and, worse, let the one-shot
+    /// auto-scroll-to-today re-fire and yank them back to today on return.
+    /// `.opacity` (not a conditional `if`) is what keeps the hidden views'
+    /// state alive; `.allowsHitTesting`/`.accessibilityHidden` make sure a
+    /// hidden tab's fields and buttons can't be focused or tapped while
+    /// another tab is shown.
+    private func tabContent<Content: View>(_ tab: Tab, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .opacity(selectedTab == tab ? 1 : 0)
+            .allowsHitTesting(selectedTab == tab)
+            .accessibilityHidden(selectedTab != tab)
     }
 
     // MARK: - Hero (§4.2: gradient, glass back/share, city, meta)

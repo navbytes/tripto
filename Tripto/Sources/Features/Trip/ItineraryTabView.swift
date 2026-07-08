@@ -84,7 +84,7 @@ struct ItineraryTabView: View {
                             ForEach(dayModels) { day in
                                 Section {
                                     if day.isFreeDay {
-                                        freeDayRow
+                                        freeDayRow(showsAddHint: canEdit && day.id == firstFreeDayId)
                                     } else {
                                         ForEach(day.rows) { row in
                                             rowView(for: row)
@@ -191,11 +191,14 @@ struct ItineraryTabView: View {
                 .foregroundStyle(Palette.ink)
             // Finding F1: a quiet "today" marker so the current day doesn't
             // require scanning dates to find — paired with the one-shot
-            // auto-scroll in `.task` above.
+            // auto-scroll in `.task` above. Finding 1: `.ink` (not `.amber`,
+            // which was under AA contrast on `amberSoft`) — the same
+            // ink-on-amberSoft pairing `TZShiftChipRow`/`PersonFilterBanner`
+            // already use; keep it that way if this chip is touched again.
             if day.isToday {
                 Text("Today")
                     .font(Typo.body(10, weight: .bold))
-                    .foregroundStyle(Palette.amber)
+                    .foregroundStyle(Palette.ink)
                     .padding(.horizontal, Spacing.sm)
                     .padding(.vertical, 2)
                     .background(Palette.amberSoft, in: Capsule())
@@ -205,6 +208,13 @@ struct ItineraryTabView: View {
         .padding(.top, Spacing.lg)
         .padding(.bottom, Spacing.xs)
         .background(Palette.paper)
+        // Finding 4: one VoiceOver heading per day — merges the "Today"
+        // chip into the date it modifies (instead of a disconnected second
+        // stop) and enables the headings rotor to jump between days on long
+        // trips (§4.2/§7.3).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(day.isToday ? "\(day.title), Today" : day.title)
+        .accessibilityAddTraits(.isHeader)
         .id("day-header-\(day.id)")
     }
 
@@ -212,15 +222,28 @@ struct ItineraryTabView: View {
     /// all) — a quiet, non-interactive row rather than letting the day
     /// vanish from the list; the FAB already floats over this tab, so this
     /// doesn't need to be its own add affordance.
-    private var freeDayRow: some View {
+    ///
+    /// Finding 8: the "tap + to add a plan" hint used to repeat on every
+    /// free day, which reads as nagging on a trip with several gap days.
+    /// `showsAddHint` is `true` only for the first free day an editor sees
+    /// (computed once via `firstFreeDayId` below); every other gap day —
+    /// and every free day for a viewer, who has no + to tap — gets the
+    /// quiet "Free day" label instead.
+    private func freeDayRow(showsAddHint: Bool) -> some View {
         HStack {
-            Text(canEdit ? "Free day \u{2014} tap + to add a plan" : "Free day")
+            Text(showsAddHint ? "Free day \u{2014} tap + to add a plan" : "Free day")
                 .font(Typo.body(Typo.Size.caption))
                 .foregroundStyle(Palette.slate)
             Spacer(minLength: 0)
         }
         .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
         .padding(.vertical, Spacing.sm)
+    }
+
+    /// Finding 8: the id of the first free day in `dayModels`, so the "tap +
+    /// to add a plan" hint appears exactly once instead of on every gap day.
+    private var firstFreeDayId: String? {
+        dayModels.first(where: \.isFreeDay)?.id
     }
 
     // MARK: - Empty state (BUILD_PLAN.md §4.2, §6.6)
@@ -351,6 +374,14 @@ struct ItineraryTabView: View {
     /// `TimelineBuilder.dayTitleText`) with a dashed add-slot under Day 1,
     /// so it reads as "here's your itinerary, start filling it in" rather
     /// than a generic loading placeholder.
+    ///
+    /// Finding 3: the dashed Day-1 slot is an add-affordance, so it's
+    /// `canEdit`-gated — a viewer sees only the three real day headers, no
+    /// add-slot, consistent with them having no + FAB. Finding 7: its
+    /// placeholder text no longer repeats the "add your first flight, stay,
+    /// or plan" invitation already said once in the display-serif headline
+    /// below — a quieter, non-duplicating "Your first plan goes here"
+    /// instead.
     private var daySkeleton: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             ForEach(0..<max(min(3, tripDayCount), 0), id: \.self) { offset in
@@ -358,12 +389,12 @@ struct ItineraryTabView: View {
                     Text("Day \(offset + 1) \u{00B7} \(skeletonDayTitleText(forDayOffset: offset))")
                         .font(Typo.body(13, weight: .bold))
                         .foregroundStyle(Palette.ink)
-                    if offset == 0 {
+                    if offset == 0, canEdit {
                         RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
                             .strokeBorder(Palette.mist, style: StrokeStyle(lineWidth: 1.25, dash: [5, 4]))
                             .frame(height: 54)
                             .overlay {
-                                Text("Add your first flight, stay, or plan")
+                                Text("Your first plan goes here")
                                     .font(Typo.body(Typo.Size.caption))
                                     .foregroundStyle(Palette.slate)
                             }
@@ -385,54 +416,66 @@ struct ItineraryTabView: View {
 
     /// Honest import teaser (this milestone's brief: "never fake parsing").
     /// Routes to a waitlist counter, never a fabricated parse.
+    ///
+    /// Finding 9: this used to be one giant `Button` — the icon, the
+    /// "coming soon" copy, and the forward-address hint all enrolled in the
+    /// waitlist on tap, which reads as an accidental sign-up trap. Now only
+    /// the explicit "Notify me" CTA is a button; the rest of the card is
+    /// static informational content (`.accessibilityElement(children:
+    /// .combine)` so VoiceOver still reads it as one stop). The old
+    /// "already on the list" re-tap toast goes away with the tap surface —
+    /// there's nothing left to accidentally re-tap.
     private var importTeaser: some View {
-        Button {
-            let wasOnWaitlist = isOnWaitlist
-            importWaitlistTaps += 1
-            toast = wasOnWaitlist
-                ? "You\u{2019}re already on the list"
-                : "You\u{2019}re on the list \u{2014} we\u{2019}ll tell you when it\u{2019}s ready"
-        } label: {
-            HStack(spacing: Spacing.md) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.18))
-                    .frame(width: 40, height: 40)
-                    .overlay {
-                        Image(systemName: "envelope.badge")
-                            .foregroundStyle(Palette.amber)
-                    }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Email import — coming soon")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text("Forward confirmations to tripto@navbytes.io once it\u{2019}s live")
-                        .font(Typo.body(11))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: Spacing.md) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.18))
+                .frame(width: 40, height: 40)
+                .overlay {
+                    Image(systemName: "envelope.badge")
+                        .foregroundStyle(Palette.amber)
                 }
-                Spacer(minLength: Spacing.sm)
-                if isOnWaitlist {
-                    HStack(spacing: Spacing.xxs) {
-                        Image(systemName: "checkmark")
-                        Text("You\u{2019}re on the list")
-                    }
-                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Email import — coming soon")
+                    .font(Typo.body(weight: .semibold))
                     .foregroundStyle(.white)
-                } else {
+                Text("Forward confirmations to tripto@navbytes.io once it\u{2019}s live")
+                    .font(Typo.body(11))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: Spacing.sm)
+            if isOnWaitlist {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "checkmark")
+                    Text("You\u{2019}re on the list")
+                }
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(.white)
+                .accessibilityElement(children: .combine)
+            } else {
+                Button {
+                    importWaitlistTaps += 1
+                    toast = "You\u{2019}re on the list \u{2014} we\u{2019}ll tell you when it\u{2019}s ready"
+                } label: {
                     Text("Notify me")
                         .font(Typo.body(Typo.Size.caption, weight: .semibold))
                         .foregroundStyle(.white)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.xs)
+                        .background(Color.white.opacity(0.18), in: Capsule())
+                        // Same 44pt hit-band pattern as `PersonFilterBar`'s
+                        // chips — a smaller visual capsule centered in a
+                        // 44pt hit area.
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint("Adds you to the email import waitlist")
             }
-            .padding(Spacing.md)
-            .background(Palette.indigo, in: RoundedRectangle(cornerRadius: Radii.card + 2, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .padding(Spacing.md)
+        .background(Palette.indigo, in: RoundedRectangle(cornerRadius: Radii.card + 2, style: .continuous))
         .padding(.horizontal, Spacing.xl)
-        .accessibilityHint(
-            isOnWaitlist
-                ? "You\u{2019}re on the email import waitlist"
-                : "Adds you to the email import waitlist"
-        )
     }
 }
