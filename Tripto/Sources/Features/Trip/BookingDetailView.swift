@@ -139,7 +139,7 @@ struct BookingDetailView: View {
         }
         .background(Palette.elevated)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Palette.ink.opacity(0.18), radius: 20, y: 12)
+        .shadow(color: Palette.shadow.opacity(0.18), radius: 20, y: 12)
     }
 
     @ViewBuilder

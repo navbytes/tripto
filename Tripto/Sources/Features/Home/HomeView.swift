@@ -33,6 +33,16 @@ struct HomeView: View {
     /// `HomeRefreshFeedback.shouldToastAfterRefresh` from `refreshFromPull()`
     /// so all six `.refreshable` closures share one gated path.
     @State private var refreshFailedToast: String?
+    /// Finding 1 (silent retry): `pullFailedState`'s "Try again" button
+    /// re-entering an in-flight pull with no feedback and no protection
+    /// against a double-tap. Kept local to `HomeView` rather than widening
+    /// `SyncStatus` with an in-flight flag — this button is the only
+    /// consumer.
+    @State private var isRetryingPull = false
+    /// Set once a manual retry from `pullFailedState` comes back failed
+    /// again (see `HomeRefreshFeedback.shouldNoteRetryFailure`); drives the
+    /// inline "still couldn't reach the server" caption under the button.
+    @State private var retryFailedAgain = false
     /// The app's one `NavigationPath` (`TripView.swift`'s doc comment: "the
     /// one `NavigationStack` rooted in `HomeView`") — pushing `TripRoute`/
     /// `ItemRoute` values onto this, rather than wrapping each row in a
@@ -561,19 +571,67 @@ struct HomeView: View {
                         .multilineTextAlignment(.center)
                 }
                 Button {
-                    Task { await syncEngine?.pullHome() }
+                    // Guards a double-tap from re-entering the pull while
+                    // one's already in flight.
+                    guard !isRetryingPull else { return }
+                    Task {
+                        retryFailedAgain = false
+                        isRetryingPull = true
+                        await syncEngine?.pullHome()
+                        isRetryingPull = false
+                        // Known accepted edge (same one `refreshFromPull()`
+                        // documents above): a debounced pull already in
+                        // flight makes `pullHome()` early-return, and this
+                        // reads whatever `lastHomePullFailed` was left at by
+                        // that earlier attempt rather than this tap's own
+                        // outcome — rare, and the resulting note stays
+                        // truthful either way.
+                        retryFailedAgain = HomeRefreshFeedback.shouldNoteRetryFailure(
+                            lastHomePullFailed: syncStatus.lastHomePullFailed,
+                            isOffline: syncStatus.isOffline
+                        )
+                    }
                 } label: {
-                    Text("Try again")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Palette.ink)
+                    HStack(spacing: Spacing.xs) {
+                        if isRetryingPull {
+                            ProgressView()
+                                .tint(Palette.onAmber)
+                        }
+                        Text(isRetryingPull ? "Trying again\u{2026}" : "Try again")
+                    }
+                    .font(Typo.body(weight: .semibold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.md)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
+                    .contentShape(Capsule())
+                    .background(Palette.amber, in: Capsule())
+                }
+                .disabled(isRetryingPull)
+                .padding(.top, Spacing.xs)
+                if retryFailedAgain {
+                    Text("Still couldn\u{2019}t reach the server. Check your connection and try again.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal, Spacing.xl)
-                        .padding(.vertical, Spacing.md)
-                        .background {
-                            Capsule().strokeBorder(Palette.mist, lineWidth: 1.5)
+                        .accessibilityAddTraits(.updatesFrequently)
+                        .onAppear {
+                            // Mirrors `ToastOverlay`'s announcement — a
+                            // caption that appears on its own next to an
+                            // already-read button needs an explicit nudge
+                            // for VoiceOver to speak it.
+                            AccessibilityNotification.Announcement(
+                                "Still couldn\u{2019}t reach the server. Check your connection and try again."
+                            ).post()
                         }
                 }
-                .padding(.top, Spacing.xs)
-                planNewTripCTA.padding(.top, Spacing.xs)
+                // Finding 4: recovery is the primary action in this one
+                // placeholder, so the emphasis is swapped relative to the
+                // other three states — `planNewTripCTA` (filled amber)
+                // demotes to this outline style here, and "Try again" above
+                // takes the filled treatment instead.
+                planNewTripOutlineButton.padding(.top, Spacing.xs)
                 Spacer()
                 Spacer()
             }
@@ -581,6 +639,32 @@ struct HomeView: View {
             .containerRelativeFrame(.vertical)
         }
         .refreshable { await refreshFromPull() }
+        .onChange(of: syncStatus.lastHomePullFailed) { _, failed in
+            // A later re-entry into this placeholder (e.g. after a
+            // background pull recovers, then fails again) shouldn't carry
+            // over a stale note from a previous attempt.
+            if !failed { retryFailedAgain = false }
+        }
+    }
+
+    /// The style `Try again` had before finding 4's emphasis swap — reused
+    /// here for `Plan a new trip` specifically in `pullFailedState`, where
+    /// the filled treatment is reserved for the recovery action instead.
+    private var planNewTripOutlineButton: some View {
+        Button {
+            isPresentingCreate = true
+        } label: {
+            Text("Plan a new trip")
+                .font(Typo.body(weight: .semibold))
+                .foregroundStyle(Palette.ink)
+                .padding(.horizontal, Spacing.xl)
+                .padding(.vertical, Spacing.md)
+                .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
+                .contentShape(Capsule())
+                .background {
+                    Capsule().strokeBorder(Palette.mist, lineWidth: 1.5)
+                }
+        }
     }
 
     /// Slim in-progress indicator for an invite claim (finding 6) — shown
@@ -608,6 +692,8 @@ struct HomeView: View {
                 .foregroundStyle(Palette.onAmber)
                 .padding(.horizontal, Spacing.xl)
                 .padding(.vertical, Spacing.md)
+                .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
+                .contentShape(Capsule())
                 .background(Palette.amber, in: Capsule())
         }
     }

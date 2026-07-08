@@ -81,7 +81,7 @@ struct TripCard: View {
         }
         .frame(minHeight: 178)
         .clipShape(RoundedRectangle(cornerRadius: Radii.cover, style: .continuous))
-        .shadow(color: Palette.ink.opacity(0.22), radius: 16, y: 10)
+        .shadow(color: Palette.shadow.opacity(0.22), radius: 16, y: 10)
         // One VoiceOver element: the gradient/pills/avatars are decorative
         // fragments individually, but a single spoken summary is what a
         // traveler needs. HomeView wraps this in the button (the .isButton

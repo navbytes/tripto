@@ -21,4 +21,17 @@ enum HomeRefreshFeedback {
     ) -> Bool {
         lastHomePullFailed && !isOffline && hasTrips
     }
+
+    /// Whether `pullFailedState`'s "Try again" button should surface an
+    /// inline note after a repeat failure (UX audit finding 1 — silently
+    /// re-disabling the button with no feedback reads as broken, not
+    /// retrying). `isOffline` is excluded for the same reason
+    /// `shouldToastAfterRefresh` excludes it, but by a different path here:
+    /// `HomeEmptyPlaceholder.resolve` already flips the *whole screen* to
+    /// `offlineFirstLoadState` once offline+failed, so this helper would
+    /// never even be consulted in that case — the guard is kept anyway so
+    /// the two helpers stay symmetric and safe to call defensively.
+    static func shouldNoteRetryFailure(lastHomePullFailed: Bool, isOffline: Bool) -> Bool {
+        lastHomePullFailed && !isOffline
+    }
 }

@@ -43,4 +43,33 @@ final class HomeRefreshFeedbackTests: XCTestCase {
         )
         XCTAssertFalse(result)
     }
+
+    // MARK: - shouldNoteRetryFailure (finding 1's retry-button note)
+
+    func testRetryFailedOnlineNotes() {
+        XCTAssertTrue(
+            HomeRefreshFeedback.shouldNoteRetryFailure(lastHomePullFailed: true, isOffline: false)
+        )
+    }
+
+    func testRetryFailedOfflineSuppressesNote() {
+        // `HomeEmptyPlaceholder.resolve` already flips the whole screen to
+        // `offlineFirstLoadState` in this case — an inline note would
+        // double-signal.
+        XCTAssertFalse(
+            HomeRefreshFeedback.shouldNoteRetryFailure(lastHomePullFailed: true, isOffline: true)
+        )
+    }
+
+    func testRetrySucceededOnlineSuppressesNote() {
+        XCTAssertFalse(
+            HomeRefreshFeedback.shouldNoteRetryFailure(lastHomePullFailed: false, isOffline: false)
+        )
+    }
+
+    func testRetrySucceededOfflineSuppressesNote() {
+        XCTAssertFalse(
+            HomeRefreshFeedback.shouldNoteRetryFailure(lastHomePullFailed: false, isOffline: true)
+        )
+    }
 }

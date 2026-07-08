@@ -51,6 +51,21 @@ public extension Palette {
     /// (not theme-adaptive) because the cover gradients themselves don't
     /// change between light and dark, same rationale as `onAmber` above.
     static let coverPillFill = Color.black.opacity(0.38)
+
+    /// Elevation/depth tint for `.shadow(color:...)` call sites (UX audit
+    /// finding 5) — deliberately distinct from `ink`, which is
+    /// text-semantic and flips to near-white in dark mode; using it as a
+    /// shadow color there rendered card drops as a pale halo instead of a
+    /// dark depth cue. This stays dark in both themes: light mode reuses
+    /// the light-mode `ink` hex (so it renders pixel-identically to the
+    /// pre-fix shadows), dark mode is pure black (a subtle dark drop on
+    /// `Palette.elevated`'s dark paper, rather than a lit-up ink glow).
+    /// Call sites keep supplying their own `.opacity(...)`.
+    static let shadow = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(hex: "#000000")
+            : UIColor(hex: "#1A1B2E")
+    })
 }
 
 // Hand-written companion to the generated `CoverGradient` (Tokens.swift).

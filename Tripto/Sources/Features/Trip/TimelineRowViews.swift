@@ -137,7 +137,7 @@ struct TimelineCardRow: View, Equatable {
                     style: StrokeStyle(lineWidth: 1.25, dash: model.isPending ? [5, 4] : [])
                 )
         }
-        .shadow(color: Palette.ink.opacity(0.08), radius: 6, y: 3)
+        .shadow(color: Palette.shadow.opacity(0.08), radius: 6, y: 3)
         .padding(.leading, Spacing.sm)
     }
 }
