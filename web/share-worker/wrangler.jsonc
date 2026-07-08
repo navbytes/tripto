@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tripto-share",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-07",
+  "routes": [
+    { "pattern": "tripto.navbytes.io", "custom_domain": true }
+  ],
+  "vars": {
+    "SUPABASE_URL": "https://qgtveaqukvbtyunupzhn.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_4x21OrhJWtnB1tDrhD9ueA_79p98yN-"
+    // APPLE_TEAM_ID intentionally omitted -- the owner adds it once they
+    // have their Apple Developer Team ID (see README.md "Universal links").
+    // Until set, GET /.well-known/apple-app-site-association 404s.
+  }
+}

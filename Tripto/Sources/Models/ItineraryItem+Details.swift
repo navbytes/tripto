@@ -1,0 +1,114 @@
+import Foundation
+import Supabase
+
+/// Typed view over `ItineraryItem.detailsJSON` (`itinerary_items.details`
+/// JSONB, BUILD_PLAN.md §3.3). The column is free-form and category-specific
+/// server-side (plain `Json` in `shared/types/tripto.ts` — nothing enforces
+/// its shape in Postgres), so this struct is the *one* place in the app that
+/// knows the field names for each category. Nothing else hand-rolls a
+/// dictionary key against `details`.
+///
+/// All fields are optional regardless of category — a `Stay` never has
+/// `seat`, an in-progress form may not have filled `partySize` yet — callers
+/// read only the fields relevant to `item.category`.
+struct ItemDetails: Equatable, Sendable {
+    // Flight
+    var airline: String?
+    var flightNo: String?
+    var fromIATA: String?
+    var toIATA: String?
+    var seat: String?
+    var terminal: String?
+    var gate: String?
+    /// IANA identifier of the *arrival* zone — `tz` on the row itself stays
+    /// the departure zone (BUILD_PLAN.md §7.4 / this milestone's brief:
+    /// "tz = DEPARTURE zone; the ARRIVAL zone goes in details.arrival_tz").
+    var arrivalTz: String?
+
+    // Hotel
+    var room: String?
+
+    // Activity
+    var ticketRef: String?
+
+    // Food
+    var partySize: Int?
+    var reservationName: String?
+
+    // Activity & food share a free-text address (flight/hotel use the row's
+    // own location_name/lat/lng instead).
+    var address: String?
+
+    static let empty = ItemDetails()
+
+    init(
+        airline: String? = nil, flightNo: String? = nil, fromIATA: String? = nil, toIATA: String? = nil,
+        seat: String? = nil, terminal: String? = nil, gate: String? = nil, arrivalTz: String? = nil,
+        room: String? = nil, ticketRef: String? = nil, partySize: Int? = nil, reservationName: String? = nil,
+        address: String? = nil
+    ) {
+        self.airline = airline
+        self.flightNo = flightNo
+        self.fromIATA = fromIATA
+        self.toIATA = toIATA
+        self.seat = seat
+        self.terminal = terminal
+        self.gate = gate
+        self.arrivalTz = arrivalTz
+        self.room = room
+        self.ticketRef = ticketRef
+        self.partySize = partySize
+        self.reservationName = reservationName
+        self.address = address
+    }
+
+    init(json: AnyJSON) {
+        guard case .object(let object) = json else { return }
+        airline = object["airline"]?.stringValue
+        flightNo = object["flight_no"]?.stringValue
+        fromIATA = object["from_iata"]?.stringValue
+        toIATA = object["to_iata"]?.stringValue
+        seat = object["seat"]?.stringValue
+        terminal = object["terminal"]?.stringValue
+        gate = object["gate"]?.stringValue
+        arrivalTz = object["arrival_tz"]?.stringValue
+        room = object["room"]?.stringValue
+        ticketRef = object["ticket_ref"]?.stringValue
+        partySize = object["party_size"]?.intValue
+        reservationName = object["reservation_name"]?.stringValue
+        address = object["address"]?.stringValue
+    }
+
+    var json: AnyJSON {
+        var object: JSONObject = [:]
+        if let airline { object["airline"] = .string(airline) }
+        if let flightNo { object["flight_no"] = .string(flightNo) }
+        if let fromIATA { object["from_iata"] = .string(fromIATA) }
+        if let toIATA { object["to_iata"] = .string(toIATA) }
+        if let seat { object["seat"] = .string(seat) }
+        if let terminal { object["terminal"] = .string(terminal) }
+        if let gate { object["gate"] = .string(gate) }
+        if let arrivalTz { object["arrival_tz"] = .string(arrivalTz) }
+        if let room { object["room"] = .string(room) }
+        if let ticketRef { object["ticket_ref"] = .string(ticketRef) }
+        if let partySize { object["party_size"] = .integer(partySize) }
+        if let reservationName { object["reservation_name"] = .string(reservationName) }
+        if let address { object["address"] = .string(address) }
+        return .object(object)
+    }
+}
+
+extension ItineraryItem {
+    /// Reads/writes `detailsJSON` through the typed `ItemDetails` view.
+    /// Round-trips via the same passthrough `AnyJSON` mechanism as the
+    /// DTO boundary (`ItineraryItemDTO.details` / `AnyJSON.jsonText`) so an
+    /// unrecognized key some future milestone adds is merely ignored here,
+    /// never dropped from what actually gets persisted... except that a
+    /// `set` *does* rewrite the whole blob from the typed struct's known
+    /// fields, which is fine while `ItemDetails` covers every key this app
+    /// ever writes (v1: nothing else touches `details`).
+    var details: ItemDetails {
+        get { ItemDetails(json: AnyJSON(jsonText: detailsJSON)) }
+        set { detailsJSON = newValue.json.jsonText }
+    }
+}

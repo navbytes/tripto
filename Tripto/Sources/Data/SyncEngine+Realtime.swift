@@ -37,10 +37,8 @@ extension SyncEngine {
     }
 
     /// One channel per *open* trip, filtered to that trip's rows on each of
-    /// its four tables. M2's timeline view calls this from `onAppear` and
-    /// `stopObservingTrip` from `onDisappear` — M1 has no trip detail view
-    /// yet (`TripPlaceholderView`), so nothing calls this today, but the
-    /// mechanism is wired end to end per SYNC_DESIGN.md.
+    /// its four tables. `TripView` (M2) calls this from `onAppear` and
+    /// `stopObservingTrip` from `onDisappear`.
     func observeTrip(_ tripId: UUID) async {
         guard tripChannels[tripId] == nil else { return }
         let channel = Supa.client.channel("trip-\(tripId.uuidString)")

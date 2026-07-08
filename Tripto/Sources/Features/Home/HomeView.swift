@@ -20,9 +20,16 @@ struct HomeView: View {
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
     @State private var tripPendingDeletion: Trip?
+    /// The app's one `NavigationPath` (`TripView.swift`'s doc comment: "the
+    /// one `NavigationStack` rooted in `HomeView`") — pushing `TripRoute`/
+    /// `ItemRoute` values onto this, rather than wrapping each row in a
+    /// `NavigationLink`, is also what keeps a trip card's disclosure
+    /// chevron from appearing: `List` only draws that accessory for a
+    /// `NavigationLink`-shaped row, never for a plain `Button`.
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 Palette.paper.ignoresSafeArea()
 
@@ -48,10 +55,22 @@ struct HomeView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            // The one route-based nav stack (`TripView.swift`'s doc
+            // comment): Home pushes `TripRoute`; `TripView`'s own tabs push
+            // `ItemRoute` onto this same stack to reach `BookingDetailView`.
+            .navigationDestination(for: TripRoute.self) { route in
+                TripView(tripId: route.id)
+            }
+            .navigationDestination(for: ItemRoute.self) { route in
+                BookingDetailView(itemId: route.id)
+            }
             .toolbar {
                 #if DEBUG
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
+                        Button("Seed demo trip") {
+                            Task { await DemoSeeder.seed(modelContext: modelContext, syncEngine: syncEngine, authManager: authManager) }
+                        }
                         Button("Reset local cache (re-pull)") {
                             Task { await syncEngine?.resetLocalStore() }
                         }
@@ -88,7 +107,29 @@ struct HomeView: View {
                     Text("This removes \u{201C}\(trip.title)\u{201D} and everything in it for everyone on the trip.")
                 }
             }
+            .task { await applyUITestAutopilotIfNeeded() }
         }
+    }
+
+    /// M2 verify-drill autopilot (see `WelcomeView`'s matching hook) — seeds
+    /// the demo trip and/or navigates straight into it when launched with
+    /// the matching DEBUG flags, so the screenshot pass doesn't depend on
+    /// GUI tap automation. Idempotent across relaunches of the same
+    /// simulator: seeding only runs `if trips.isEmpty`, so a second launch
+    /// against already-seeded data just navigates.
+    private func applyUITestAutopilotIfNeeded() async {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard authManager.isSignedIn else { return }
+
+        var targetTripId = trips.first?.id
+        if arguments.contains("-uitestSeedIfEmpty"), trips.isEmpty {
+            targetTripId = await DemoSeeder.seed(modelContext: modelContext, syncEngine: syncEngine, authManager: authManager)
+        }
+        if arguments.contains("-uitestOpenFirstTrip"), let targetTripId, path.isEmpty {
+            path.append(TripRoute(id: targetTripId))
+        }
+        #endif
     }
 
     // MARK: - Header
@@ -137,8 +178,8 @@ struct HomeView: View {
     private var tripList: some View {
         List {
             ForEach(visibleTrips) { trip in
-                NavigationLink {
-                    TripPlaceholderView(trip: trip)
+                Button {
+                    path.append(TripRoute(id: trip.id))
                 } label: {
                     TripCard(
                         trip: trip,
@@ -147,6 +188,7 @@ struct HomeView: View {
                     )
                     .padding(.horizontal, Spacing.xl)
                 }
+                .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)

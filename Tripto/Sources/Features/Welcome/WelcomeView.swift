@@ -71,6 +71,18 @@ struct WelcomeView: View {
                 .padding(.bottom, Spacing.xxl)
             }
         }
+        .task {
+            #if DEBUG
+            // M2 verify-drill autopilot (docs/BUILD_PLAN.md milestone
+            // process, not a shipped feature): a plain launch argument, so
+            // the simulator drill can reach a signed-in state with no GUI
+            // tap automation available in this environment. Never fires
+            // without the flag, so normal launches are unaffected.
+            if ProcessInfo.processInfo.arguments.contains("-uitestAutoSignIn") {
+                await signInAnonymously()
+            }
+            #endif
+        }
     }
 
     private func handleAppleCompletion(_ result: Result<ASAuthorization, Error>) {

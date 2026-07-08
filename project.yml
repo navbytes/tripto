@@ -16,6 +16,12 @@ settings:
     TARGETED_DEVICE_FAMILY: "1" # iPhone first (BUILD_PLAN.md §3.1, §9.2) — iPad/Mac are fast-follows, not v1.
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # Xcode's "recommended settings" nudge, pinned here (not via the Xcode UI —
+    # the .xcodeproj is generated & gitignored, so UI edits get wiped on the
+    # next `xcodegen generate`). Sandboxes run-script build phases; a no-op
+    # today (we have none — gen_tokens.py runs out-of-band), and if we add one
+    # later it must declare its inputs/outputs, which is the correct hygiene.
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
 
 packages:
   Supabase:
