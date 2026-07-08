@@ -51,7 +51,7 @@ Apple App ID exists, (c) budgeting a support escalation if it 500s.
 | Permission usage strings | ◑ | Calendar ✅ (`NSCalendarsUsageDescription`); no location/photos/contacts prompts (MKLocalSearchCompleter needs none) |
 | Account deletion (5.1.1(v)) | 🔄 | RPC + UI in M3b; **SiwA token revocation edge function** still owed (§5) |
 | Sign in with Apple entitlement + provider | 🔑/⏳ | entitlement + Supabase Apple provider config; Apple-side is owner (§6) |
-| Screenshots (6.7" + 6.9") | ⏳ | capture from finished screens after M4/M5 |
+| Screenshots (6.9") | ✅ | 1320×2868 set captured (timeline, boarding pass, share) in /tmp/appstore-*.png + milestone captures; owner may reframe/caption |
 | App Store Connect metadata | ⏳ draft | §7 — ready to paste |
 | Distribution archive + upload | 🔑 | needs signing team; §6 |
 
