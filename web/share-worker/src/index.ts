@@ -112,7 +112,12 @@ function handleAasa(env: Env): Response {
       details: [
         {
           appID: `${env.APPLE_TEAM_ID}.io.navbytes.tripto`,
-          paths: ["/t/*", "/join/*"],
+          // ONLY /join/* — invite links open the app to claim. /t/* share
+          // links are deliberately excluded so they always render the sanitized
+          // web view (the no-app audience the share link exists for); the app
+          // has no handler for a share token, so claiming /t/* would open it to
+          // a dead end.
+          paths: ["/join/*"],
         },
       ],
     },
