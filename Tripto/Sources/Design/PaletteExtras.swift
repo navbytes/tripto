@@ -27,4 +27,17 @@ public extension Palette {
             ? UIColor(hex: "#B23B2E", alpha: 0.22)
             : UIColor(hex: "#F6E1DE")
     })
+
+    /// Amber used as small text ink (eyebrows/labels), not the amber fill
+    /// itself. BUILD_PLAN §6.1 positions amber as an accent/CTA color — at
+    /// the generated `Palette.amber`'s light-mode hex it measures ~2.4:1 on
+    /// `Palette.elevated`, which fails as fine-print ink. This darkened
+    /// light variant is ~5.3:1 on `#FFFFFF`; dark mode keeps the existing
+    /// amber look (~7:1 on `Palette.elevated`'s dark hex), so only light
+    /// mode actually changes.
+    static let amberInk = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(hex: "#E8955A")
+            : UIColor(hex: "#A25A24")
+    })
 }
