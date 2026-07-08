@@ -58,6 +58,15 @@ struct WelcomeView: View {
                 AccessibilityNotification.Announcement(newValue).post()
             }
         }
+        // Announces the invite preview's resolved states only — .idle/
+        // .loading stay silent so VoiceOver isn't chattering mid-fetch.
+        // Retry passes through .loading, so a repeat .unavailable
+        // re-announces the same way an identical sign-in failure does.
+        .onChange(of: appRouter.invitePreviewState) { _, newValue in
+            if let announcement = Self.invitePreviewAnnouncement(for: newValue) {
+                AccessibilityNotification.Announcement(announcement).post()
+            }
+        }
     }
 
     private var content: some View {
@@ -86,6 +95,11 @@ struct WelcomeView: View {
                         .foregroundStyle(Palette.slate)
                 }
                 SignInWithAppleButton(.signIn) { request in
+                    // Cleared here (attempt start) rather than only on
+                    // success — this also makes an identical repeat failure
+                    // re-announce to VoiceOver, since it re-crosses the
+                    // nil -> message transition the .onChange below listens for.
+                    errorMessage = nil
                     request.requestedScopes = [.fullName, .email]
                     request.nonce = authManager.hashedNonceForAppleSignIn()
                 } onCompletion: { result in
@@ -178,10 +192,18 @@ struct WelcomeView: View {
                 }
             case .unavailable:
                 invitePreviewChrome(borderColor: Palette.slate.opacity(0.2)) {
-                    Text("Couldn\u{2019}t load your invite details \u{2014} you can still sign in to join.")
-                        .font(Typo.body(Typo.Size.caption))
-                        .foregroundStyle(Palette.slate)
-                        .multilineTextAlignment(.center)
+                    VStack(spacing: Spacing.sm) {
+                        Text("Couldn\u{2019}t load your invite details \u{2014} you can still sign in to join.")
+                            .font(Typo.body(Typo.Size.caption))
+                            .foregroundStyle(Palette.slate)
+                            .multilineTextAlignment(.center)
+                        Button("Try again") {
+                            appRouter.retryInvitePreview()
+                        }
+                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                        .foregroundStyle(Palette.amberInk)
+                        .frame(minHeight: 44)
+                    }
                 }
             }
         }
@@ -203,10 +225,24 @@ struct WelcomeView: View {
                 Text("\(preview.inviterName) invited you to")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
-                Text(preview.tripTitle)
-                    .font(Typo.display(Typo.Size.title))
-                    .foregroundStyle(Palette.ink)
-                    .multilineTextAlignment(.center)
+                // Title-only cover chip — the invite's one moment to show the
+                // trip's actual brand gradient (§6.3) before sign-in. Small
+                // text (inviter/dates/role) stays off the gradient on
+                // `Palette.elevated` rather than risk contrast on the dark
+                // stops; the 0.2 scrim (vs. TripView's 0.08) accounts for
+                // this title sitting centered over the gradient's lighter
+                // region rather than pinned to its dark corner.
+                ZStack {
+                    CoverGradient.from(key: preview.coverGradient)
+                    Color.black.opacity(0.2)
+                    Text(preview.tripTitle)
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.vertical, Spacing.md)
+                        .frame(maxWidth: .infinity)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
                 Text(InvitePreview.formattedDateRange(startDate: preview.startDate, endDate: preview.endDate))
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
@@ -259,7 +295,6 @@ struct WelcomeView: View {
                 defer { isCompletingAppleSignIn = false }
                 do {
                     try await authManager.completeSignInWithApple(idToken: idToken, authorizationCode: authorizationCode)
-                    errorMessage = nil
                 } catch {
                     errorMessage = Self.signInFailureMessage(for: error)
                 }
@@ -273,31 +308,66 @@ struct WelcomeView: View {
         }
     }
 
-    /// Distinguishes "you're offline" from every other failure so the copy
-    /// tells you what happened and how to fix it (BUILD_PLAN §6.6), rather
-    /// than one generic message covering both.
-    private static func signInFailureMessage(for error: Error) -> String {
-        isOffline(error)
-            ? "You\u{2019}re offline \u{2014} connect to the internet and try again."
-            : "Couldn\u{2019}t finish signing in \u{2014} check your connection and try again."
+    /// VoiceOver copy for `appRouter.invitePreviewState`'s resolved states
+    /// — `.idle`/`.loading` return `nil` so the `.onChange` above stays
+    /// silent while nothing's settled yet.
+    static func invitePreviewAnnouncement(for state: AppRouter.InvitePreviewState) -> String? {
+        switch state {
+        case .idle, .loading:
+            return nil
+        case .loaded(let preview):
+            let role = TripRole(rawValue: preview.role)
+            let dateRange = InvitePreview.formattedDateRange(startDate: preview.startDate, endDate: preview.endDate)
+            let roleText = role.map { ". Joining as \($0.rawValue.capitalized)." } ?? "."
+            return "Invite loaded: \(preview.inviterName) invited you to \(preview.tripTitle), \(dateRange)\(roleText)"
+        case .invalid:
+            return "This invite link has expired or been revoked. Ask for a new link."
+        case .unavailable:
+            return "Couldn\u{2019}t load your invite details \u{2014} you can still sign in to join."
+        }
     }
+
+    /// Splits sign-in failures into three §6.6-compliant buckets — offline,
+    /// server unreachable, and an on-our-end auth failure — so the copy
+    /// states what happened rather than one generic message covering all
+    /// three (and never tells you to check your connection when the
+    /// problem was actually server-side).
+    static func signInFailureMessage(for error: Error) -> String {
+        switch urlErrorCode(error) {
+        case .some(let code) where Self.offlineCodes.contains(code):
+            return "You\u{2019}re offline \u{2014} connect to the internet and try again."
+        case .some:
+            return "Couldn\u{2019}t reach the server \u{2014} try again in a moment."
+        case .none:
+            return "Sign-in didn\u{2019}t go through on our end \u{2014} try again in a moment."
+        }
+    }
+
+    private static let offlineCodes: Set<URLError.Code> = [
+        .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff
+    ]
 
     /// Mirrors `AppRouter.isInvalidInvite`'s type-then-string-fallback
     /// idiom: `URLError` is the common case, with the raw `NSURLErrorDomain`
     /// check as a fallback in case an underlying network failure surfaces
-    /// wrapped in a different `Error` type.
-    private static func isOffline(_ error: Error) -> Bool {
-        if error is URLError { return true }
-        return (error as NSError).domain == NSURLErrorDomain
+    /// wrapped in a different `Error` type (e.g. an `NSError` that was
+    /// never bridged to `URLError`).
+    static func urlErrorCode(_ error: Error) -> URLError.Code? {
+        if let urlError = error as? URLError { return urlError.code }
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return nil }
+        return URLError.Code(rawValue: nsError.code)
     }
 
     #if DEBUG
     private func signInAnonymously() async {
+        // Cleared at attempt start (see the SignInWithAppleButton onRequest
+        // closure above for why) rather than only on success.
+        errorMessage = nil
         isSigningInAnonymously = true
         defer { isSigningInAnonymously = false }
         do {
             try await authManager.signInAnonymously()
-            errorMessage = nil
         } catch {
             errorMessage = "Couldn't start a test session — try again."
         }

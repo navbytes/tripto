@@ -101,6 +101,15 @@ final class AppRouter {
     func clearTripToOpen() { tripToOpen = nil }
     func clearErrorToast() { errorToast = nil }
 
+    /// `WelcomeView`'s "Try again" on the `.unavailable` invite-preview
+    /// card. Guarded to `.unavailable` (with a token still stashed) so a
+    /// double-tap or a call from the wrong state is a no-op — the state
+    /// machine's existing `.loading` -> resolved re-render does the rest.
+    func retryInvitePreview() {
+        guard invitePreviewState == .unavailable, let token = pendingInviteToken else { return }
+        Task { await fetchInvitePreview(token: token) }
+    }
+
     #if DEBUG
     /// Verify-drill only: seed a mock invite preview so the pre-sign-in card can
     /// be screenshotted without a live two-user invite flow.
