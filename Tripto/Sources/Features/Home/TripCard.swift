@@ -29,18 +29,32 @@ struct TripCard: View {
             : AnyLayout(HStackLayout(spacing: Spacing.xs))
     }
 
+    /// Top pill row layout (finding 4): same `AnyLayout` swap as
+    /// `metaLayout` — an `HStack` here has no room to wrap the status pill,
+    /// the pending pill, and the avatar stack at accessibility sizes, so
+    /// this stacks them leading-aligned instead. The `Spacer` is HStack-only
+    /// (see below) — inside the VStack variant it would expand vertically
+    /// and blow out the card's height.
+    private var topLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xs))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.sm))
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             CoverGradient.from(key: trip.coverGradient)
             CoverGradient.textScrim
 
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: Spacing.sm) {
+                topLayout {
                     statusPill
                     if isPending {
                         glassPill(text: "Waiting to sync", icon: "clock")
                     }
-                    Spacer(minLength: Spacing.sm)
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Spacer(minLength: Spacing.sm)
+                    }
                     AvatarStack(people: people)
                 }
 
@@ -200,6 +214,19 @@ struct TripCard: View {
     }
     .background(Palette.paper)
     .modelContainer(AppSchema.makeContainer(inMemory: true))
+}
+
+/// Top pill row at an accessibility Dynamic Type size (finding 4) —
+/// `isPending: true` so both the status pill and the "Waiting to sync"
+/// pill render, exercising the wrap.
+#Preview("Accessibility size") {
+    ScrollView {
+        TripCard.previewCard(coverGradient: "dusk")
+            .padding(Spacing.xl)
+    }
+    .background(Palette.paper)
+    .modelContainer(AppSchema.makeContainer(inMemory: true))
+    .environment(\.dynamicTypeSize, .accessibility5)
 }
 
 #Preview("Cover gradients — dark") {

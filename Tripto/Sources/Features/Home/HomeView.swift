@@ -68,15 +68,23 @@ struct HomeView: View {
                     }
 
                     if trips.isEmpty {
-                        // First-pull loading vs. genuinely-empty account
-                        // (finding 2): `hasCompletedInitialHomePull` is the
-                        // only way to tell them apart the first time Home
-                        // ever mounts this session.
-                        if appRouter.isJoiningTrip || (!syncStatus.hasCompletedInitialHomePull && !syncStatus.isOffline) {
+                        // First-pull loading vs. genuinely-empty vs.
+                        // pull-failed account (findings 1/2): the resolver
+                        // is the only place this decision table lives now,
+                        // so the regression tests on it are the safety net.
+                        switch HomeEmptyPlaceholder.resolve(
+                            isJoiningTrip: appRouter.isJoiningTrip,
+                            hasCompletedInitialHomePull: syncStatus.hasCompletedInitialHomePull,
+                            lastHomePullFailed: syncStatus.lastHomePullFailed,
+                            isOffline: syncStatus.isOffline
+                        ) {
+                        case .joining, .initialLoad:
                             initialLoadState
-                        } else if !syncStatus.hasCompletedInitialHomePull && syncStatus.isOffline {
+                        case .offlineFirstLoad:
                             offlineFirstLoadState
-                        } else {
+                        case .pullFailed:
+                            pullFailedState
+                        case .empty:
                             emptyState
                         }
                     } else if visibleTrips.isEmpty {
@@ -122,10 +130,20 @@ struct HomeView: View {
                 #endif
             }
             .sheet(isPresented: $isPresentingCreate) {
-                TripFormView(mode: .create)
+                // Finding 2: switches to whichever tab the saved trip
+                // actually files under — `bucket().isPastTab`, not a
+                // hardcoded "Upcoming", so a backdated trip still lands
+                // somewhere visible.
+                TripFormView(mode: .create) { trip in
+                    selectedTab = trip.bucket().isPastTab ? "Past" : "Upcoming"
+                }
             }
             .sheet(item: $editingTrip) { trip in
-                TripFormView(mode: .edit(trip))
+                // Same fix, symmetric case: editing a trip's dates can move
+                // it to the other tab, where it'd otherwise vanish.
+                TripFormView(mode: .edit(trip)) { savedTrip in
+                    selectedTab = savedTrip.bucket().isPastTab ? "Past" : "Upcoming"
+                }
             }
             .confirmationDialog(
                 "Delete trip",
@@ -437,6 +455,16 @@ struct HomeView: View {
                 Text(appRouter.isJoiningTrip ? "Joining trip\u{2026}" : "Checking for your trips\u{2026}")
                     .font(Typo.body())
                     .foregroundStyle(Palette.slate)
+                // Finding 3: a hanging join while offline has no timeout of
+                // its own — this tells the user why, rather than leaving
+                // them staring at a spinner that may never resolve.
+                if appRouter.isJoiningTrip && syncStatus.isOffline {
+                    Text("You\u{2019}re offline \u{2014} joining needs a connection. If this doesn\u{2019}t finish, open the invite link again when you\u{2019}re back online.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Spacing.xl)
+                }
                 Spacer()
                 Spacer()
             }
@@ -481,13 +509,59 @@ struct HomeView: View {
         .refreshable { await syncEngine?.pullHome() }
     }
 
+    /// Failed-first/latest-pull placeholder (finding 1) — distinct from
+    /// `emptyState` because a failed pull can't tell a genuinely-empty
+    /// account apart from one whose trips just haven't been fetched yet;
+    /// copy per §6.6 (states what happened and how it resolves, no
+    /// apology), mirroring `offlineFirstLoadState`'s structure/tokens.
+    /// `planNewTripCTA` stays present since offline/failed trip creation
+    /// still works via the outbox (§4.1 "always present").
+    private var pullFailedState: some View {
+        ScrollView {
+            VStack(spacing: Spacing.lg) {
+                Spacer()
+                Image(systemName: "exclamationmark.arrow.circlepath")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Palette.slate)
+                VStack(spacing: Spacing.xs) {
+                    Text("Couldn\u{2019}t check for trips")
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(Palette.ink)
+                    Text("The last check didn\u{2019}t reach the server. Trips on your account will appear once a check goes through.")
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                }
+                Button {
+                    Task { await syncEngine?.pullHome() }
+                } label: {
+                    Text("Try again")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.vertical, Spacing.md)
+                        .background {
+                            Capsule().strokeBorder(Palette.mist, lineWidth: 1.5)
+                        }
+                }
+                .padding(.top, Spacing.xs)
+                planNewTripCTA.padding(.top, Spacing.xs)
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
+        }
+        .refreshable { await syncEngine?.pullHome() }
+    }
+
     /// Slim in-progress indicator for an invite claim (finding 6) — shown
     /// only once there's already a list to sit above; the empty-trips case
     /// is covered by `initialLoadState`.
     private var joiningTripBanner: some View {
         HStack(spacing: Spacing.sm) {
             ProgressView()
-            Text("Joining trip\u{2026}")
+            Text(syncStatus.isOffline ? "Joining trip\u{2026} \u{2014} waiting for a connection" : "Joining trip\u{2026}")
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.ink)
             Spacer(minLength: 0)

@@ -11,6 +11,12 @@ struct TripFormView: View {
     }
 
     let mode: Mode
+    /// Fires after a successful save, before `dismiss()` — `HomeView`'s
+    /// hook (UX audit finding 2) to switch to whichever tab the saved trip
+    /// actually files under, so a trip created/edited into the other tab
+    /// doesn't silently vanish. `nil` by default so `TripView.swift`'s edit
+    /// sheet (which doesn't need this) compiles unchanged.
+    var onSaved: ((Trip) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
@@ -30,8 +36,9 @@ struct TripFormView: View {
     /// new trips, matching the schema's own column default.
     private static let gradientOptions = ["dusk", "plum", "moss"]
 
-    init(mode: Mode) {
+    init(mode: Mode, onSaved: ((Trip) -> Void)? = nil) {
         self.mode = mode
+        self.onSaved = onSaved
         switch mode {
         case .create:
             _title = State(initialValue: "")
@@ -191,6 +198,7 @@ struct TripFormView: View {
             let dto = trip.toDTO()
             let tripId = trip.id
             Task { await syncEngine?.enqueueUpsert(table: .trips, rowId: tripId, tripId: tripId, payload: dto) }
+            onSaved?(trip)
 
         case .edit(let trip):
             trip.title = trimmedTitle
@@ -204,6 +212,7 @@ struct TripFormView: View {
             let dto = trip.toDTO()
             let tripId = trip.id
             Task { await syncEngine?.enqueueUpsert(table: .trips, rowId: tripId, tripId: tripId, payload: dto) }
+            onSaved?(trip)
         }
 
         dismiss()

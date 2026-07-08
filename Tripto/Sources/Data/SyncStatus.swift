@@ -22,6 +22,11 @@ final class SyncStatus {
     /// state while a genuinely-empty account can't yet be told apart from
     /// "haven't heard from the server yet" (finding 2).
     private(set) var hasCompletedInitialHomePull = false
+    /// True after a `pullHome()` attempt fails (network/server error), false
+    /// after the next one succeeds — `HomeView`'s signal to show the honest
+    /// "couldn't check for trips" placeholder (with a retry) instead of
+    /// misreading the failure as a genuinely-empty account (finding 1).
+    private(set) var lastHomePullFailed = false
 
     func setOffline(_ offline: Bool) {
         isOffline = offline
@@ -44,10 +49,16 @@ final class SyncStatus {
         hasCompletedInitialHomePull = true
     }
 
+    func setHomePullFailed(_ failed: Bool) {
+        lastHomePullFailed = failed
+    }
+
     /// Sign-out wipe: the next sign-in (potentially a different account)
     /// re-enters the first-pull loading state instead of reading an empty
-    /// wiped cache as "you have zero trips."
+    /// wiped cache as "you have zero trips," and doesn't carry a stale
+    /// failure flag into the next account's session.
     func resetInitialPullState() {
         hasCompletedInitialHomePull = false
+        lastHomePullFailed = false
     }
 }

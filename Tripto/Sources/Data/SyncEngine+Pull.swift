@@ -51,13 +51,15 @@ extension SyncEngine {
             try await store.pruneOrphans()
 
             await status.markSynced()
+            await status.setHomePullFailed(false)
             schedulePush()
         } catch {
             logDebug("pullHome failed: \(error)")
+            await status.setHomePullFailed(true)
         }
         // Deliberately on attempt-completion, not just the success path
         // above (`markSynced` only fires there) — a failed first pull
-        // should degrade to the honest empty state, not strand `HomeView`
+        // should degrade to the pull-failed state, not strand `HomeView`
         // on an infinite "Checking for your trips…" spinner (finding 2).
         // The early-return guards above (already pulling, offline) skip
         // this on purpose: an offline launch leaves the flag false so
