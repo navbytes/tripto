@@ -80,6 +80,7 @@ public enum CategoryColor {
         case hotel
         case activity
         case food
+        case transport
     }
 
     public static let flight = Pair(
@@ -102,6 +103,11 @@ public enum CategoryColor {
         soft: dynamicColor(lightHex: "#EDE5F1", darkHex: "#8B6B9E", darkAlpha: 0.22)
     )
 
+    public static let transport = Pair(
+        fg: dynamicColor(lightHex: "#4F8A87", darkHex: "#4F8A87"),
+        soft: dynamicColor(lightHex: "#E0EBEA", darkHex: "#4F8A87", darkAlpha: 0.22)
+    )
+
     /// Looks up a category pair by key; unknown keys fall back to `flight`
     /// rather than crashing (defensive against future/unknown category
     /// strings arriving from the backend).
@@ -111,6 +117,7 @@ public enum CategoryColor {
         case .hotel: return hotel
         case .activity: return activity
         case .food: return food
+        case .transport: return transport
         }
     }
 }

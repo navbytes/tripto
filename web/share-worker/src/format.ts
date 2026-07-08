@@ -33,6 +33,7 @@ const CATEGORY_COLORS: Record<ItemCategory, { fg: string; soft: string }> = {
   hotel: { fg: "#E8955A", soft: "#FBEADB" },
   activity: { fg: "#6E9E7E", soft: "#E3EEE6" },
   food: { fg: "#8B6B9E", soft: "#EDE5F1" },
+  transport: { fg: "#4F8A87", soft: "#E0EBEA" },
 };
 
 const NEUTRAL_CATEGORY_COLOR = { fg: COLORS.slate, soft: COLORS.mist };

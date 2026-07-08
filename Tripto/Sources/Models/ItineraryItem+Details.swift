@@ -35,6 +35,13 @@ struct ItemDetails: Equatable, Sendable {
     var partySize: Int?
     var reservationName: String?
 
+    // Transport (rental car / train / ferry / transfer). Pickup is the row's
+    // own location_name + starts_at/tz; drop-off is `dropoffLocation` +
+    // ends_at, and reuses `arrivalTz` above for the drop-off zone (so a
+    // zone-crossing train gets the same tz-shift chip a flight does).
+    var provider: String?
+    var dropoffLocation: String?
+
     // Activity & food share a free-text address (flight/hotel use the row's
     // own location_name/lat/lng instead).
     var address: String?
@@ -53,6 +60,7 @@ struct ItemDetails: Equatable, Sendable {
         airline: String? = nil, flightNo: String? = nil, fromIATA: String? = nil, toIATA: String? = nil,
         seat: String? = nil, terminal: String? = nil, gate: String? = nil, arrivalTz: String? = nil,
         room: String? = nil, ticketRef: String? = nil, partySize: Int? = nil, reservationName: String? = nil,
+        provider: String? = nil, dropoffLocation: String? = nil,
         address: String? = nil, tags: [String] = []
     ) {
         self.airline = airline
@@ -67,6 +75,8 @@ struct ItemDetails: Equatable, Sendable {
         self.ticketRef = ticketRef
         self.partySize = partySize
         self.reservationName = reservationName
+        self.provider = provider
+        self.dropoffLocation = dropoffLocation
         self.address = address
         self.tags = tags
     }
@@ -85,6 +95,8 @@ struct ItemDetails: Equatable, Sendable {
         ticketRef = object["ticket_ref"]?.stringValue
         partySize = object["party_size"]?.intValue
         reservationName = object["reservation_name"]?.stringValue
+        provider = object["provider"]?.stringValue
+        dropoffLocation = object["dropoff_location"]?.stringValue
         address = object["address"]?.stringValue
         tags = (object["tags"]?.arrayValue ?? []).compactMap(\.stringValue)
     }
@@ -103,6 +115,8 @@ struct ItemDetails: Equatable, Sendable {
         if let ticketRef { object["ticket_ref"] = .string(ticketRef) }
         if let partySize { object["party_size"] = .integer(partySize) }
         if let reservationName { object["reservation_name"] = .string(reservationName) }
+        if let provider { object["provider"] = .string(provider) }
+        if let dropoffLocation { object["dropoff_location"] = .string(dropoffLocation) }
         if let address { object["address"] = .string(address) }
         if !tags.isEmpty { object["tags"] = .array(tags.map { .string($0) }) }
         return .object(object)

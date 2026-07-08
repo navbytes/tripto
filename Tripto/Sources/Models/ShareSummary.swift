@@ -37,6 +37,15 @@ enum ShareSummary {
                 parts.append(item.locationName)
             }
             return parts.joined(separator: " · ")
+        case .transport:
+            let details = item.details
+            var parts = [details.provider ?? item.title]
+            if !item.locationName.isEmpty, let dropoff = details.dropoffLocation {
+                parts.append("\(item.locationName)\u{2192}\(dropoff)")
+            }
+            parts.append(dayText)
+            parts.append("pickup \(timeText) \(zoneText)")
+            return parts.joined(separator: " · ")
         }
     }
 

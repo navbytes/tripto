@@ -215,6 +215,15 @@ enum TimelineBuilder {
                 parts.append(item.locationName)
             }
             return parts.isEmpty ? "Food" : parts.joined(separator: " · ")
+        case .transport:
+            var parts: [String] = []
+            if let provider = details.provider, !provider.isEmpty { parts.append(provider) }
+            if let dropoff = details.dropoffLocation, !dropoff.isEmpty {
+                parts.append("to \(dropoff)")
+            } else if !item.locationName.isEmpty {
+                parts.append(item.locationName)
+            }
+            return parts.isEmpty ? "Transport" : parts.joined(separator: " · ")
         }
     }
 

@@ -12,6 +12,7 @@ extension ItemCategory {
         case .hotel: CategoryColor.hotel
         case .activity: CategoryColor.activity
         case .food: CategoryColor.food
+        case .transport: CategoryColor.transport
         }
     }
 
@@ -21,6 +22,7 @@ extension ItemCategory {
         case .hotel: "bed.double.fill"
         case .activity: "camera.fill"
         case .food: "fork.knife"
+        case .transport: "car.fill"
         }
     }
 
@@ -31,6 +33,7 @@ extension ItemCategory {
         case .hotel: "Stay"
         case .activity: "Activity"
         case .food: "Food"
+        case .transport: "Transport"
         }
     }
 }

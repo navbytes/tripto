@@ -138,6 +138,7 @@ struct BookingDetailView: View {
         case .flight: flightHeader(for: item)
         case .hotel: hotelHeader(for: item)
         case .activity, .food: simpleHeader(for: item)
+        case .transport: transportHeader(for: item)
         }
     }
 
@@ -210,6 +211,56 @@ struct BookingDetailView: View {
         }
         .frame(width: 46)
         .padding(.top, 10)
+    }
+
+    /// Transport uses a *vertical* pickup → drop-off layout (not the flight's
+    /// side-by-side IATA pair) because locations are free text ("Boston Logan"),
+    /// not 3-letter codes — the flight layout would overflow.
+    private func transportHeader(for item: ItineraryItem) -> some View {
+        let details = item.details
+        let depTime = ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz)
+        let depZone = ItineraryTimeZone.zoneLabel(for: item.primaryTz, at: item.startsAt)
+        let dropTz = item.effectiveTz
+        let endsAt = item.endsAt ?? item.startsAt
+        let arrTime = ItineraryTimeZone.timeString(endsAt, in: dropTz)
+        let arrZone = ItineraryTimeZone.zoneLabel(for: dropTz, at: endsAt)
+        let pickup = item.locationName.isEmpty ? "Pickup" : item.locationName
+        let dropoff = details.dropoffLocation ?? "Drop-off"
+
+        return VStack(alignment: .leading, spacing: Spacing.lg) {
+            HStack {
+                headerIconBadge("car.fill")
+                Spacer()
+                Text(details.provider ?? item.title)
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                transportEndpoint(label: "Pickup", place: pickup, time: "\(depTime) \(depZone)")
+                transportEndpoint(label: "Drop-off", place: dropoff, time: "\(arrTime) \(arrZone)")
+            }
+            .foregroundStyle(.white)
+        }
+        .padding(Spacing.xl)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [CategoryColor.transport.fg, Palette.indigo], startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        )
+    }
+
+    private func transportEndpoint(label: String, place: String, time: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(label.uppercased())
+                .font(Typo.body(9, weight: .bold))
+                .foregroundStyle(.white.opacity(0.7))
+                .frame(width: 64, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(place).font(Typo.display(20)).lineLimit(1)
+                Text(time).font(Typo.body(Typo.Size.caption)).opacity(0.85)
+            }
+        }
     }
 
     private func hotelHeader(for item: ItineraryItem) -> some View {
@@ -355,6 +406,13 @@ struct BookingDetailView: View {
                 ("Time", timeAndZoneText(item)),
                 ("Party size", details.partySize.map(String.init) ?? "—"),
                 ("Reservation", details.reservationName ?? "—"),
+            ]
+        case .transport:
+            return [
+                ("Provider", details.provider ?? "—"),
+                ("Confirmation", item.confirmation ?? "—"),
+                ("Pickup", ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz)),
+                ("Drop-off", ItineraryTimeZone.timeString(item.endsAt ?? item.startsAt, in: item.effectiveTz)),
             ]
         }
     }

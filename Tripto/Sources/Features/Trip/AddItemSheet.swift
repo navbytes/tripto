@@ -82,6 +82,19 @@ struct AddItemSheet: View {
     @State var partySize = ""
     @State var reservationName = ""
 
+    // Transport (rental car / train / ferry / transfer) — pickup A → drop-off B,
+    // structurally a flight. Pickup location reuses the shared `locationText`;
+    // `dropoffText` is the drop-off place; `arrivalDayOffsetOverride` (shared
+    // with flight) drives the "+1 day" chip.
+    @State var transportTitle = ""
+    @State var provider = ""
+    @State var transportDate = Date()
+    @State var pickupTime = Date()
+    @State var pickupZone: TimeZone = .current
+    @State var dropoffText = ""
+    @State var dropoffTime = Date()
+    @State var dropoffZone: TimeZone = .current
+
     // Shared across non-flight categories
     @State var confirmation = ""
     @State var locationText = ""
@@ -156,6 +169,22 @@ struct AddItemSheet: View {
                 _foodZone = State(initialValue: editing.primaryTz)
                 _partySize = State(initialValue: details.partySize.map(String.init) ?? "")
                 _reservationName = State(initialValue: details.reservationName ?? "")
+            case .transport:
+                _transportTitle = State(initialValue: editing.title)
+                _provider = State(initialValue: details.provider ?? "")
+                _transportDate = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _pickupTime = State(initialValue: Self.pickerDate(from: editing.startsAt, in: editing.primaryTz))
+                _pickupZone = State(initialValue: editing.primaryTz)
+                _dropoffText = State(initialValue: details.dropoffLocation ?? "")
+                let dropTz = details.arrivalTz.flatMap(TimeZone.init(identifier:)) ?? editing.primaryTz
+                _dropoffZone = State(initialValue: dropTz)
+                let endsAt = editing.endsAt ?? editing.startsAt
+                _dropoffTime = State(initialValue: Self.pickerDate(from: endsAt, in: dropTz))
+                if editing.endsAt != nil {
+                    let startDay = ItineraryTimeZone.localDay(of: editing.startsAt, in: editing.primaryTz)
+                    let endDay = ItineraryTimeZone.localDay(of: endsAt, in: dropTz)
+                    _arrivalDayOffsetOverride = State(initialValue: endDay > startDay)
+                }
             }
         } else {
             _category = State(initialValue: .flight)
@@ -191,6 +220,7 @@ struct AddItemSheet: View {
                             case .hotel: staySection
                             case .activity: activitySection
                             case .food: foodSection
+                            case .transport: transportSection
                             }
                         }
 
@@ -292,6 +322,8 @@ struct AddItemSheet: View {
             return !activityTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .food:
             return !foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .transport:
+            return !transportTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -434,7 +466,44 @@ struct AddItemSheet: View {
         case .hotel: return stayFields()
         case .activity: return activityFields()
         case .food: return foodFields()
+        case .transport: return transportFields()
         }
+    }
+
+    /// Transport's drop-off-next-day, the analogue of `effectiveArrivalIsNextDay`
+    /// but over the pickup/drop-off times.
+    var effectiveTransportNextDay: Bool {
+        arrivalDayOffsetOverride ?? (
+            ItemTimeCombining.suggestedArrivalDayOffset(departsTimeOfDay: pickupTime, arrivesTimeOfDay: dropoffTime) == 1
+        )
+    }
+
+    /// The "+1 day" chip is shared between flight and transport (both toggle
+    /// `arrivalDayOffsetOverride`); it reads whichever category is active.
+    var effectiveNextDay: Bool {
+        category == .transport ? effectiveTransportNextDay : effectiveArrivalIsNextDay
+    }
+
+    private func transportFields() -> ComposedFields {
+        let start = ItemTimeCombining.combine(date: transportDate, timeOfDay: pickupTime, targetTz: pickupZone)
+        let end = ItemTimeCombining.combine(
+            date: transportDate, timeOfDay: dropoffTime,
+            dayOffset: effectiveTransportNextDay ? 1 : 0, targetTz: dropoffZone
+        )
+        var details = ItemDetails.empty
+        details.provider = Self.trimmedOrNil(provider)
+        details.dropoffLocation = Self.trimmedOrNil(dropoffText)
+        // Always recorded (as for flights) so `effectiveTz` is well-defined even
+        // for a same-zone rental, and the tz-shift chip works for a zone-crossing
+        // train/ferry.
+        details.arrivalTz = dropoffZone.identifier
+
+        return ComposedFields(
+            title: Self.trimmedOrNil(transportTitle) ?? "Transport",
+            startsAt: start, endsAt: end, tz: pickupZone.identifier,
+            details: details, confirmation: Self.trimmedOrNil(confirmation),
+            locationName: locationText, locationLat: locationLat, locationLng: locationLng
+        )
     }
 
     /// Whether the arrival lands on the calendar day after departure — the

@@ -135,6 +135,36 @@ extension AddItemSheet {
         }
     }
 
+    var transportSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            FormTextField(label: "Title", text: $transportTitle, placeholder: "Rental car")
+            FormTextField(label: "Provider", text: $provider, placeholder: "Hertz")
+
+            LocationField(label: "Pickup location", text: $locationText) { coordinate, resolvedAddress in
+                locationLat = coordinate?.latitude
+                locationLng = coordinate?.longitude
+                address = resolvedAddress
+            }
+            HStack(spacing: Spacing.md) {
+                LabeledDatePicker(label: "Pickup date", date: $transportDate, displayedComponents: .date)
+                LabeledDatePicker(label: "Time", date: $pickupTime, displayedComponents: .hourAndMinute)
+            }
+            ZonePicker(title: "Pickup time zone", selection: $pickupZone, referenceDate: pickupTime)
+
+            FormTextField(label: "Drop-off location", text: $dropoffText, placeholder: "Boston Logan")
+            LabeledDatePicker(label: "Drop-off time", date: $dropoffTime, displayedComponents: .hourAndMinute)
+            HStack {
+                Spacer(minLength: 0)
+                nextDayChip
+            }
+            ZonePicker(title: "Drop-off time zone", selection: $dropoffZone, referenceDate: dropoffTime)
+
+            FormTextField(
+                label: "Confirmation code", text: $confirmation, placeholder: "ABC123", autocapitalization: .characters
+            )
+        }
+    }
+
     // MARK: - Family: "Who's this for?" + kid-aware tags (M4 §3), shared
     // across every category — appended once after the category switch.
 
@@ -240,18 +270,18 @@ extension AddItemSheet {
 
     var nextDayChip: some View {
         Button {
-            arrivalDayOffsetOverride = !effectiveArrivalIsNextDay
+            arrivalDayOffsetOverride = !effectiveNextDay
         } label: {
             Text("+1 day")
                 .font(Typo.body(11, weight: .semibold))
-                .foregroundStyle(effectiveArrivalIsNextDay ? .white : Palette.slate)
+                .foregroundStyle(effectiveNextDay ? .white : Palette.slate)
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xs)
-                .background(effectiveArrivalIsNextDay ? Palette.amber : Palette.mist, in: Capsule())
+                .background(effectiveNextDay ? Palette.amber : Palette.mist, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Arrives next day")
-        .accessibilityAddTraits(effectiveArrivalIsNextDay ? [.isSelected] : [])
+        .accessibilityAddTraits(effectiveNextDay ? [.isSelected] : [])
     }
 }
 

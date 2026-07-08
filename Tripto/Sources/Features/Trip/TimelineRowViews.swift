@@ -42,14 +42,7 @@ struct TimelineCardRow: View, Equatable {
         .padding(.vertical, Spacing.xs)
     }
 
-    private var categoryWord: String {
-        switch model.category {
-        case .flight: "Flight"
-        case .hotel: "Stay"
-        case .activity: "Activity"
-        case .food: "Food"
-        }
-    }
+    private var categoryWord: String { model.category.displayName }
 
     private var a11yLabel: String {
         var parts = [categoryWord, model.title, model.subtitle]

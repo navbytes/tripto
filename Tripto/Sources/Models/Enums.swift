@@ -28,6 +28,10 @@ enum ItemCategory: String, Codable, CaseIterable, Sendable {
     case hotel
     case activity
     case food
+    /// Rental cars, trains, ferries, airport transfers — a place + time at each
+    /// end, so it reuses the flight machinery (pickup = starts_at/tz, drop-off
+    /// = ends_at/details.arrivalTz). Added in v1.1 scope-expansion.
+    case transport
 }
 
 /// `itinerary_items.status` (BUILD_PLAN.md §5.6 — suggest-without-editing is

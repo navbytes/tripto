@@ -12,7 +12,7 @@ export interface Env {
   APPLE_TEAM_ID?: string;
 }
 
-export type ItemCategory = "flight" | "hotel" | "activity" | "food";
+export type ItemCategory = "flight" | "hotel" | "activity" | "food" | "transport";
 
 export interface PublicTripItem {
   category: ItemCategory;

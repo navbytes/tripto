@@ -78,6 +78,19 @@ enum DemoSeeder {
         // sprawling filler pool by fragile index/title matching.
         let napItem = familyDemoItem(tripId: tripId, userId: userId, now: now, lisbonTz: lisbonTz)
         items.append(napItem)
+        // Transport (the 5th category): a same-zone Lisbon rental car, so the
+        // drill/screenshots exercise the teal car icon + its detail card.
+        var lisbonCalendar = Calendar(identifier: .gregorian)
+        lisbonCalendar.timeZone = lisbonTz
+        let carPickup = lisbonCalendar.date(from: DateComponents(year: 2026, month: 5, day: 16, hour: 10, minute: 0)) ?? now
+        let carDropoff = lisbonCalendar.date(from: DateComponents(year: 2026, month: 5, day: 16, hour: 18, minute: 30)) ?? now
+        items.append(makeItem(
+            tripId: tripId, category: .transport, title: "Rental car",
+            startsAt: carPickup, endsAt: carDropoff, tz: lisbonTz.identifier,
+            locationName: "Lisbon Airport", confirmation: "HZ-40192",
+            details: ItemDetails(arrivalTz: lisbonTz.identifier, provider: "Hertz", dropoffLocation: "Lisbon Airport"),
+            userId: userId, now: now
+        ))
         // Tag two existing filler items in place — `details` is a computed
         // get/set property over the full `ItemDetails` struct
         // (`ItineraryItem+Details.swift`), so mutating just `.tags` here
