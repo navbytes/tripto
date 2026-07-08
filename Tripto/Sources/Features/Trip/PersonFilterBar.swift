@@ -57,6 +57,7 @@ struct PersonFilterBar: View {
         } label: {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "person.2.fill").font(.system(size: 12))
+                    .accessibilityHidden(true)
                 Text("Everyone").font(Typo.body(13, weight: .bold))
             }
             .foregroundStyle(isOn ? .white : Palette.slate)
@@ -90,6 +91,7 @@ struct PersonFilterBar: View {
                             .font(Typo.body(10, weight: .bold))
                             .foregroundStyle(.white)
                     }
+                    .accessibilityHidden(true)
                 Text(chip.firstName).font(Typo.body(13, weight: .bold))
             }
             .foregroundStyle(isOn ? .white : Palette.slate)

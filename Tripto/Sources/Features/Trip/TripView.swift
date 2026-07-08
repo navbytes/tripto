@@ -129,15 +129,14 @@ struct TripView: View {
                 missingTripState
             }
         }
-        .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         // Finding 8: the default `Spacing.xxl` inset sits inside the FAB's
         // band, so a toast (esp. the ~110-character signed-out edit
         // message) can overlap it. Constant inset — FAB height + its own
         // bottom padding + a gap — rather than FAB-visibility-conditional:
-        // `Packing` renders its own FAB in the same band, and a toast that
-        // jumps position per tab is worse than one that sits slightly high
-        // on `Bookings`.
+        // both `Bookings` and `Packing` render their own FAB in the same
+        // band now (UX audit finding 5), so a toast that jumps position
+        // per tab would be worse than one constant inset used everywhere.
         .toastOverlay($toast, bottomInset: Spacing.xxl + Fab.diameter + Spacing.md)
         .onAppear {
             let id = tripId
@@ -248,7 +247,10 @@ struct TripView: View {
                     PackingListView(tripId: trip.id)
                 }
 
-                if canAddItems && selectedTab == .itinerary {
+                // UX audit finding 5: FAB shows on Itinerary and Bookings —
+                // Packing owns its own FAB (see `PackingListView`), so it's
+                // excluded here rather than allow-listing just `.itinerary`.
+                if canAddItems && selectedTab != .packing {
                     Fab { isPresentingAdd = true }
                         .padding(.trailing, Spacing.xl)
                         .padding(.bottom, Spacing.xxl)
@@ -394,6 +396,7 @@ struct TripView: View {
 
     private var metaDot: some View {
         Text("·").opacity(0.6)
+            .accessibilityHidden(true)
     }
 
     private func dateRangeText(for trip: Trip) -> String {

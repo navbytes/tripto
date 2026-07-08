@@ -9,8 +9,9 @@ struct BookingsTabView: View {
     let items: [ItineraryItem]
     /// Invokes `TripView`'s `AddItemSheet` presentation (finding 6) — `nil`
     /// for viewers, who get read-only copy instead of a routing affordance.
-    /// No persistent FAB on this tab; the empty state is the only entry
-    /// point here (mirrors the itinerary tab's own empty-state prompt).
+    /// Backs the empty state's CTA; `TripView` also shows the shared FAB on
+    /// this tab for editors (UX audit finding 5), so this isn't the only
+    /// entry point once there's at least one booking on screen.
     var onAdd: (() -> Void)? = nil
 
     private var groups: [(category: ItemCategory, items: [ItineraryItem])] {
@@ -47,7 +48,7 @@ struct BookingsTabView: View {
                         }
                     }
                     .padding(.vertical, Spacing.lg)
-                    .padding(.bottom, Spacing.xxl)
+                    .padding(.bottom, Spacing.xxl * 2) // clearance for the FAB
                 }
             }
         }

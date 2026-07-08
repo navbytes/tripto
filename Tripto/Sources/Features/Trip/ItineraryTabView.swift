@@ -31,6 +31,10 @@ struct ItineraryTabView: View {
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
 
+    /// The existing tap counter already persists across launches, so it
+    /// doubles as the waitlist-membership flag — no new `@AppStorage` key.
+    private var isOnWaitlist: Bool { importWaitlistTaps > 0 }
+
     private var dayModels: [TimelineDayModel] {
         let tripStartDay = DayDate.from(trip.startDate, calendar: .current)
         let sections = ItineraryDayBucketing.sections(items: items, tripStart: tripStartDay)
@@ -220,8 +224,11 @@ struct ItineraryTabView: View {
     /// Routes to a waitlist counter, never a fabricated parse.
     private var importTeaser: some View {
         Button {
+            let wasOnWaitlist = isOnWaitlist
             importWaitlistTaps += 1
-            toast = "We\u{2019}ll tell you when it\u{2019}s ready"
+            toast = wasOnWaitlist
+                ? "You\u{2019}re already on the list"
+                : "You\u{2019}re on the list \u{2014} we\u{2019}ll tell you when it\u{2019}s ready"
         } label: {
             HStack(spacing: Spacing.md) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -232,7 +239,7 @@ struct ItineraryTabView: View {
                             .foregroundStyle(Palette.amber)
                     }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Email import — v1.5")
+                    Text("Email import — coming soon")
                         .font(Typo.body(weight: .semibold))
                         .foregroundStyle(.white)
                     Text("Forward confirmations to tripto@navbytes.io once it\u{2019}s live")
@@ -241,15 +248,28 @@ struct ItineraryTabView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: Spacing.sm)
-                Text("Notify me")
+                if isOnWaitlist {
+                    HStack(spacing: Spacing.xxs) {
+                        Image(systemName: "checkmark")
+                        Text("You\u{2019}re on the list")
+                    }
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(.white)
+                } else {
+                    Text("Notify me")
+                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
             }
             .padding(Spacing.md)
             .background(Palette.indigo, in: RoundedRectangle(cornerRadius: Radii.card + 2, style: .continuous))
         }
         .buttonStyle(.plain)
         .padding(.horizontal, Spacing.xl)
-        .accessibilityHint("Adds you to the email import waitlist")
+        .accessibilityHint(
+            isOnWaitlist
+                ? "You\u{2019}re on the email import waitlist"
+                : "Adds you to the email import waitlist"
+        )
     }
 }
