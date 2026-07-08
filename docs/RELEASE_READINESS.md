@@ -41,12 +41,12 @@ Apple App ID exists, (c) budgeting a support escalation if it 500s.
 
 | Item | Status | Notes |
 |---|---|---|
-| App icon (1024, no alpha) | ✅ asset made | `Assets.xcassets/AppIcon`; wire `ASSETCATALOG_COMPILER_APPICON_NAME` in project.yml after M3b |
-| Launch screen (branded) | ⏳ | replace blank `UILaunchScreen: {}` with a dusk wordmark screen |
+| App icon (1024, no alpha) | ✅ | wired (`ASSETCATALOG_COMPILER_APPICON_NAME`); compiles into Release build |
+| Launch screen (branded) | ✅ | `LaunchBackground` colorset (paper/ink), no white flash — Apple-idiomatic (no splash imagery) |
 | Privacy manifest `PrivacyInfo.xcprivacy` | ✅ | UserDefaults CA92.1; tracking=false; collected types declared. §4 |
 | Hosted privacy policy | ✅ | **live at https://tripto.navbytes.io/privacy** (Worker /privacy route) |
 | App Privacy "nutrition labels" | ⏳ draft | §4 — fillable copy ready for App Store Connect |
-| Release-build hygiene (DEBUG gating) | ⏳ | audit anon sign-in / seeder / `-uitest` hooks are `#if DEBUG`; Release archive clean. §3 |
+| Release-build hygiene (DEBUG gating) | ✅ | all test surfaces `#if DEBUG`; anon-auth compiled out of Release; **Release config builds clean** (verified). One pre-submission flip left: disable backend anon sign-ins once testing's done. §3 |
 | Encryption compliance | ✅ | `ITSAppUsesNonExemptEncryption = false` (standard TLS only) |
 | Permission usage strings | ◑ | Calendar ✅ (`NSCalendarsUsageDescription`); no location/photos/contacts prompts (MKLocalSearchCompleter needs none) |
 | Account deletion (5.1.1(v)) | 🔄 | RPC + UI in M3b; **SiwA token revocation edge function** still owed (§5) |
