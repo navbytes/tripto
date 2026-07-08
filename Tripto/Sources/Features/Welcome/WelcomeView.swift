@@ -96,9 +96,14 @@ struct WelcomeView: View {
                 errorMessage = "Sign in with Apple didn't return a usable credential — try again."
                 return
             }
+            // Apple's one-time authorization code (nil if Apple omits it). Used
+            // only to enable token revocation on account deletion; sign-in never
+            // depends on it.
+            let authorizationCode = credential.authorizationCode
+                .flatMap { String(data: $0, encoding: .utf8) }
             Task {
                 do {
-                    try await authManager.completeSignInWithApple(idToken: idToken)
+                    try await authManager.completeSignInWithApple(idToken: idToken, authorizationCode: authorizationCode)
                     errorMessage = nil
                 } catch {
                     errorMessage = "Sign in with Apple failed — try again."

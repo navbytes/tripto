@@ -152,20 +152,18 @@ struct SettingsView: View {
         toast = "Name updated"
     }
 
-    /// Apple 5.1.1(v) account deletion. `delete_account()` deletes the
-    /// `auth.users` row server-side, which cascades to this user's profile,
-    /// owned trips, and memberships (M3 brief: "VERIFIED (HTTP 204)") — the
-    /// data-deletion requirement is satisfied by that RPC alone.
-    ///
-    /// NOT satisfied here: Sign in with Apple's own contract additionally
-    /// expects the *relying party* to revoke the user's Apple token via
-    /// Apple's REST API on account deletion — that needs a server secret
-    /// (Apple's private key), i.e. a backend edge function, which doesn't
-    /// exist yet. Documented v1.1 follow-up, not silently skipped.
+    /// Apple 5.1.1(v) account deletion. Routes through the `delete-account`
+    /// edge function, which first best-effort-revokes the user's Apple token
+    /// via Apple's REST API (Sign in with Apple's additional contract) and then
+    /// deletes the `auth.users` row — cascading to this user's profile, owned
+    /// trips, memberships, packing, and the stored Apple refresh token. A
+    /// revoke hiccup never blocks deletion (data deletion always proceeds), and
+    /// if the Apple key secret isn't configured the function simply skips the
+    /// revoke and still deletes. Returns 204 on success.
     private func deleteAccount() async {
         isDeletingAccount = true
         do {
-            try await Supa.rpcVoid("delete_account")
+            try await Supa.client.functions.invoke("delete-account")
             await authManager.signOut()
             // No further UI work needed: `signOut()` wipes the local store
             // and clears the session, and `RootView`'s auth gate switches

@@ -72,8 +72,9 @@ final class AuthManager {
     }
 
     /// Call from `SignInWithAppleButton`'s `onCompletion` with the
-    /// authorization's `identityToken`, decoded as UTF-8.
-    func completeSignInWithApple(idToken: String) async throws {
+    /// authorization's `identityToken` and one-time `authorizationCode`, both
+    /// decoded as UTF-8.
+    func completeSignInWithApple(idToken: String, authorizationCode: String?) async throws {
         guard let nonce = pendingAppleNonce else {
             throw AuthManagerError.missingNonce
         }
@@ -81,6 +82,27 @@ final class AuthManager {
         _ = try await Supa.client.auth.signInWithIdToken(
             credentials: .init(provider: .apple, idToken: idToken, nonce: nonce)
         )
+        // Best-effort: hand Apple's one-time authorization code to the backend
+        // so it can store a refresh token for token revocation on account
+        // deletion (App Store 5.1.1(v), `apple-link-token` edge function). This
+        // must NEVER block or fail sign-in — a failure here only means
+        // revocation data isn't captured, which the delete flow already
+        // tolerates (its Apple revoke step is itself best-effort).
+        if let authorizationCode {
+            await linkAppleTokenBestEffort(authorizationCode)
+        }
+    }
+
+    private func linkAppleTokenBestEffort(_ authorizationCode: String) async {
+        struct Body: Encodable { let authorization_code: String }
+        do {
+            try await Supa.client.functions.invoke(
+                "apple-link-token",
+                options: FunctionInvokeOptions(body: Body(authorization_code: authorizationCode))
+            )
+        } catch {
+            // Swallowed by design — see the call site.
+        }
     }
 
     // MARK: - Sign out
