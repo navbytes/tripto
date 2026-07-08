@@ -74,6 +74,8 @@ struct HomeView: View {
                         // ever mounts this session.
                         if appRouter.isJoiningTrip || (!syncStatus.hasCompletedInitialHomePull && !syncStatus.isOffline) {
                             initialLoadState
+                        } else if !syncStatus.hasCompletedInitialHomePull && syncStatus.isOffline {
+                            offlineFirstLoadState
                         } else {
                             emptyState
                         }
@@ -309,14 +311,11 @@ struct HomeView: View {
                         }
                     }
                 }
-                .contextMenu {
-                    if isOrganizer(of: trip) {
-                        Button("Edit trip") { editingTrip = trip }
-                        Button("Delete trip", role: .destructive) {
-                            tripPendingDeletion = trip
-                        }
-                    }
-                }
+                .modifier(OrganizerTripMenu(
+                    isOrganizer: isOrganizer(of: trip),
+                    onEdit: { editingTrip = trip },
+                    onDelete: { tripPendingDeletion = trip }
+                ))
             }
 
             planNewTripRow
@@ -416,9 +415,7 @@ struct HomeView: View {
                     .foregroundStyle(Palette.slate)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, Spacing.xl)
-                if selectedTab == "Upcoming" {
-                    planNewTripCTA.padding(.top, Spacing.xs)
-                }
+                planNewTripCTA.padding(.top, Spacing.xs)
                 Spacer()
                 Spacer()
             }
@@ -440,6 +437,41 @@ struct HomeView: View {
                 Text(appRouter.isJoiningTrip ? "Joining trip\u{2026}" : "Checking for your trips\u{2026}")
                     .font(Typo.body())
                     .foregroundStyle(Palette.slate)
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
+        }
+        .refreshable { await syncEngine?.pullHome() }
+    }
+
+    /// First-launch-while-offline placeholder (finding 5) — distinct from
+    /// `initialLoadState` because there's no pull in flight to wait on yet,
+    /// and distinct from `emptyState` because a genuinely-empty account
+    /// can't be told apart from "trips exist but haven't been pulled" until
+    /// the first pull actually completes. Copy per §6.6: states what
+    /// happened and how it resolves, no apology, and doesn't assert "first
+    /// trip" the way `emptyState` does. `planNewTripCTA` stays present since
+    /// offline trip creation still works via the outbox (§4.1 "always
+    /// present").
+    private var offlineFirstLoadState: some View {
+        ScrollView {
+            VStack(spacing: Spacing.lg) {
+                Spacer()
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Palette.slate)
+                VStack(spacing: Spacing.xs) {
+                    Text("Can\u{2019}t check for trips yet")
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(Palette.ink)
+                    Text("You\u{2019}re offline. Trips already on your account will appear once you\u{2019}re back online.")
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                }
+                planNewTripCTA.padding(.top, Spacing.xs)
                 Spacer()
                 Spacer()
             }
@@ -543,5 +575,30 @@ struct HomeView: View {
         }
         try? modelContext.save()
         Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
+    }
+}
+
+/// Conditionally attaches a trip card's edit/delete context menu (UX audit
+/// finding 1). `.contextMenu { if isOrganizer { ... } }` always attaches the
+/// modifier and just leaves the menu's *contents* empty for non-organizers —
+/// that still gives a companion/viewer the long-press lift/haptic affordance
+/// for a menu that opens to nothing. Gating the modifier itself (rather than
+/// its contents) is the fix; the deprecated `contextMenu(ContextMenu?)`
+/// overload is the only bool-gated variant of this API, so an `if`-based
+/// `ViewModifier` is the supported shape instead.
+private struct OrganizerTripMenu: ViewModifier {
+    let isOrganizer: Bool
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    func body(content: Content) -> some View {
+        if isOrganizer {
+            content.contextMenu {
+                Button("Edit trip", action: onEdit)
+                Button("Delete trip", role: .destructive, action: onDelete)
+            }
+        } else {
+            content
+        }
     }
 }

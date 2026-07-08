@@ -18,9 +18,26 @@ struct AvatarStack: View {
     var maxVisible: Int = 3
     var diameter: CGFloat = 26
 
+    /// How many people are hidden behind the trailing "+N" chip (finding
+    /// 6). Kept as an internal helper — over `maxVisible` people, one
+    /// visible slot is traded for the overflow chip so the total circle
+    /// count (and thus the stack's width) never changes: a 6-person trip at
+    /// `maxVisible` 3 shows 2 avatars + "+4", not 3 avatars + "+3".
+    static func overflowCount(peopleCount: Int, maxVisible: Int) -> Int {
+        peopleCount > maxVisible ? peopleCount - (maxVisible - 1) : 0
+    }
+
+    private var overflowCount: Int {
+        AvatarStack.overflowCount(peopleCount: people.count, maxVisible: maxVisible)
+    }
+
+    private var visiblePeople: ArraySlice<Person> {
+        people.prefix(overflowCount > 0 ? maxVisible - 1 : maxVisible)
+    }
+
     var body: some View {
         HStack(spacing: -diameter * 0.35) {
-            ForEach(Array(people.prefix(maxVisible))) { person in
+            ForEach(Array(visiblePeople)) { person in
                 Circle()
                     .fill(AvatarColor.color(named: person.colorName))
                     .frame(width: diameter, height: diameter)
@@ -33,17 +50,51 @@ struct AvatarStack: View {
                         Circle().stroke(.white.opacity(0.9), lineWidth: 2)
                     }
             }
+            // Sighted users previously saw fewer avatars than VoiceOver's
+            // spoken count implied (a 6-person trip read as 3-person); this
+            // chip closes that gap without widening the stack.
+            if overflowCount > 0 {
+                Circle()
+                    .fill(Palette.slate)
+                    .frame(width: diameter, height: diameter)
+                    .overlay {
+                        Text("+\(overflowCount)")
+                            .font(Typo.body(diameter * 0.42, weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .overlay {
+                        Circle().stroke(.white.opacity(0.9), lineWidth: 2)
+                    }
+            }
         }
     }
 }
 
 #Preview {
-    AvatarStack(people: [
-        .init(id: UUID(), initial: "N", colorName: "amber"),
-        .init(id: UUID(), initial: "P", colorName: "moss"),
-        .init(id: UUID(), initial: "K", colorName: "plum"),
-        .init(id: UUID(), initial: "M", colorName: "sky"),
-    ])
+    VStack(alignment: .leading, spacing: Spacing.lg) {
+        AvatarStack(people: [
+            .init(id: UUID(), initial: "N", colorName: "amber"),
+            .init(id: UUID(), initial: "P", colorName: "moss"),
+        ])
+        AvatarStack(people: [
+            .init(id: UUID(), initial: "N", colorName: "amber"),
+            .init(id: UUID(), initial: "P", colorName: "moss"),
+            .init(id: UUID(), initial: "K", colorName: "plum"),
+            .init(id: UUID(), initial: "M", colorName: "sky"),
+        ])
+        // 6 people at the default maxVisible of 3 (finding 6): 2 avatars +
+        // a "+4" overflow chip, total circle count still 3.
+        AvatarStack(people: [
+            .init(id: UUID(), initial: "N", colorName: "amber"),
+            .init(id: UUID(), initial: "P", colorName: "moss"),
+            .init(id: UUID(), initial: "K", colorName: "plum"),
+            .init(id: UUID(), initial: "M", colorName: "sky"),
+            .init(id: UUID(), initial: "S", colorName: "amber"),
+            .init(id: UUID(), initial: "T", colorName: "moss"),
+        ])
+    }
     .padding(Spacing.xl)
     .background(Palette.paper)
 }

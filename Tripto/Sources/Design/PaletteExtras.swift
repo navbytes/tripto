@@ -52,3 +52,32 @@ public extension Palette {
     /// change between light and dark, same rationale as `onAmber` above.
     static let coverPillFill = Color.black.opacity(0.38)
 }
+
+// Hand-written companion to the generated `CoverGradient` (Tokens.swift).
+// Kept here for the same reason as the `Palette` extras above — this file
+// is never touched by `gen_tokens.py`.
+public extension CoverGradient {
+    /// `TripCard`'s bottom text scrim (UX audit finding 2) — the mockup lays
+    /// white title/meta text straight over the cover gradient with nothing
+    /// underneath it. Worst case is dusk's bottom-LEFT text position
+    /// (~#DB835B under the title/meta block): plain white on that measures
+    /// ~2.8:1, failing AA for the meta caption outright. This scrim is clear
+    /// until 35% down (so it never dims the top-row status/pending pills —
+    /// `coverPillFill`'s own top-edge contrast fix is unaffected) and ramps
+    /// to 45%-black by the bottom edge. Composited at the meta row's depth
+    /// (~84% down, effective black ~0.34) dusk's bottom-left stop yields
+    /// ~5.3:1 for `.white.opacity(0.92)` caption text; at the title's depth
+    /// (~72% down, effective ~0.26) it yields ~4.8:1 — clearing the 4.5:1 AA
+    /// bar and the 3:1 large-text bar respectively. Plum and moss are darker
+    /// at that corner already, so both only improve. Fixed (not
+    /// theme-adaptive), same rationale as `coverPillFill`: cover gradients
+    /// don't change between light and dark.
+    static let textScrim = LinearGradient(
+        stops: [
+            .init(color: .clear, location: 0.35),
+            .init(color: .black.opacity(0.45), location: 1.0),
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+}

@@ -32,6 +32,7 @@ struct TripCard: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             CoverGradient.from(key: trip.coverGradient)
+            CoverGradient.textScrim
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: Spacing.sm) {
@@ -144,7 +145,20 @@ struct TripCard: View {
     }
 
     private var startDateText: String {
-        trip.startDate.formatted(.dateTime.month(.abbreviated).day())
+        TripCard.startDateText(for: trip.startDate, asOf: today)
+    }
+
+    /// Split out of `startDateText` (finding 3) so it's unit-testable
+    /// without standing up a whole `TripCard`. A same-year date reads as
+    /// "May 14"; anything in a different year (multi-year Past-tab history,
+    /// or a trip booked for next January) gets the year appended so it
+    /// isn't ambiguous.
+    static func startDateText(for date: Date, asOf today: Date, calendar: Calendar = .current) -> String {
+        if calendar.isDate(date, equalTo: today, toGranularity: .year) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
+        } else {
+            return date.formatted(.dateTime.month(.abbreviated).day().year())
+        }
     }
 }
 
@@ -168,4 +182,56 @@ struct TripCard: View {
     .padding(Spacing.xl)
     .background(Palette.paper)
     .modelContainer(container)
+}
+
+/// Text-scrim contrast check (finding 2): all three cover gradients, worst
+/// case (bottom-left text) is the same for each since the scrim is a fixed
+/// vertical gradient independent of the cover's own diagonal — verified
+/// here in both light and dark since `Palette.paper`/`Palette.ink` (used
+/// only outside the card) are the only theme-adaptive pieces in frame.
+#Preview("Cover gradients — light") {
+    ScrollView {
+        VStack(spacing: Spacing.lg) {
+            ForEach(["dusk", "plum", "moss"], id: \.self) { gradient in
+                TripCard.previewCard(coverGradient: gradient)
+            }
+        }
+        .padding(Spacing.xl)
+    }
+    .background(Palette.paper)
+    .modelContainer(AppSchema.makeContainer(inMemory: true))
+}
+
+#Preview("Cover gradients — dark") {
+    ScrollView {
+        VStack(spacing: Spacing.lg) {
+            ForEach(["dusk", "plum", "moss"], id: \.self) { gradient in
+                TripCard.previewCard(coverGradient: gradient)
+            }
+        }
+        .padding(Spacing.xl)
+    }
+    .background(Palette.paper)
+    .modelContainer(AppSchema.makeContainer(inMemory: true))
+    .preferredColorScheme(.dark)
+}
+
+extension TripCard {
+    fileprivate static func previewCard(coverGradient: String) -> some View {
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: Calendar.current.date(byAdding: .day, value: 12, to: .now)!,
+            endDate: Calendar.current.date(byAdding: .day, value: 18, to: .now)!,
+            coverGradient: coverGradient, tripTypeRaw: "family", createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil
+        )
+        return TripCard(
+            trip: trip,
+            people: [
+                .init(id: UUID(), initial: "N", colorName: "amber"),
+                .init(id: UUID(), initial: "P", colorName: "moss"),
+            ],
+            isPending: true
+        )
+    }
 }
