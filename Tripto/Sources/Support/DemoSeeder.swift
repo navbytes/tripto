@@ -43,12 +43,16 @@ enum DemoSeeder {
             coverGradient: "dusk", tripTypeRaw: TripType.family.rawValue, createdBy: userId,
             createdAt: now, updatedAt: now, updatedBy: nil
         )
+        // A *local-only* provisional organizer membership for offline role-
+        // gating, exactly like the real create path (TripFormView.save) — it's
+        // inserted locally but never pushed; the server's trip-creation trigger
+        // seats the real organizer trip_members row (and a linked trip_profiles
+        // row) when the trip inserts, and the next pull reconciles this to it.
+        // The organizer's profile is therefore NOT built here — it arrives from
+        // the trigger with a stable server id, which is why demo assignments/
+        // packing only ever reference the non-app profiles below.
         let member = TripMember(
             id: UUID(), tripId: tripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now
-        )
-        let tripProfile = TripProfile(
-            id: UUID(), tripId: tripId, displayName: authManager.userId != nil ? "You" : "Organizer",
-            avatarColor: "amber", linkedUserId: userId, createdAt: now
         )
         // M4 family layer: two non-app profiles (BUILD_PLAN.md §3.3/§5.3) —
         // the kids/grandparents the "Just mine" filter and packing list are
@@ -99,41 +103,26 @@ enum DemoSeeder {
         }
 
         // M4: a dozen packing items across every group_key, some already
-        // packed (for a meaningful progress bar) and some assigned.
-        //
-        // Deliberately never assigned to `tripProfile.id` (the organizer's
-        // own "You" row this function builds below): the server's own
-        // trip-creation trigger *also* seats the organizer with its own
-        // `trip_profiles` row (linked_user_id = this user), and a partial
-        // unique index on `(trip_id, linked_user_id) WHERE linked_user_id
-        // IS NOT NULL` means this function's separately-`UUID()`-generated
-        // `tripProfile`/`member` rows always lose that race server-side —
-        // confirmed live: `pushUpsert`'s 23505-conflict fallback
-        // (`.update(values).eq("id", value: op.rowId)`) matches zero rows
-        // since `op.rowId` is this function's id, not the trigger's, so it
-        // "succeeds" without ever creating a second row. That's harmless
-        // for `tripProfile`/`member` themselves (this function's *local*
-        // copies still render fine — SwiftUI reads the local mirror, never
-        // re-fetches before this matters), but M4's `item_assignees`/
-        // `packing_items` genuinely FK-reference `trip_profiles.id`, so
-        // pointing one at this row 23503s for real. Pre-existing M1 gap,
-        // not fixed here (out of scope for this milestone) — worked around
-        // by simply never assigning demo data to the organizer's row.
+        // packed (for a meaningful progress bar) and some assigned. Assigned
+        // only to the non-app profiles (Meera/Grandma) — the organizer's own
+        // profile is trigger-created server-side (see the note above), so it
+        // has no stable local id to reference until the first pull.
         let packing = packingItems(
             tripId: tripId, userId: userId, now: now, meeraId: meeraProfile.id, grandmaId: grandmaProfile.id
         )
 
         modelContext.insert(trip)
-        modelContext.insert(member)
-        modelContext.insert(tripProfile)
+        modelContext.insert(member) // local-only; never enqueued (see note above)
         modelContext.insert(meeraProfile)
         modelContext.insert(grandmaProfile)
         try? modelContext.save()
 
         guard let syncEngine else { return tripId }
+        // Push the trip first so its trigger seats the organizer server-side
+        // before the non-app profiles (whose INSERT RLS requires organizer),
+        // then the flush below guarantees ordering. `member` is deliberately
+        // NOT pushed — the trigger owns the real organizer row.
         await syncEngine.enqueueUpsert(table: .trips, rowId: trip.id, tripId: trip.id, payload: trip.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripMembers, rowId: member.id, tripId: tripId, payload: member.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: tripProfile.id, tripId: tripId, payload: tripProfile.toDTO())
         await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: meeraProfile.id, tripId: tripId, payload: meeraProfile.toDTO())
         await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: grandmaProfile.id, tripId: tripId, payload: grandmaProfile.toDTO())
         // `item_assignees`/`packing_items` below FK-reference both
