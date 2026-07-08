@@ -33,7 +33,7 @@ Apple App ID exists, (c) budgeting a support escalation if it 500s.
 | M1 local-first data, auth gate, trip CRUD, home | ✅ committed |
 | M2 timeline, item CRUD, booking detail, OS handoffs | ✅ committed |
 | M3a no-app share web page (live at tripto.navbytes.io) | ✅ deployed |
-| M3b in-app collaboration, invites, roles, account deletion | 🔄 building |
+| M3b in-app collaboration, invites, roles, account deletion | ✅ committed |
 | M4 family layer (profiles, "Just mine", packing) | ⏳ |
 | M5 offline hardening + a11y + perf pass | ⏳ |
 
@@ -70,6 +70,16 @@ MARKETING_VERSION (1.0.0) + CURRENT_PROJECT_VERSION (1), and the app icon +
 launch screen present. A dedicated agent audits this in M6 and runs
 `xcodebuild -scheme Tripto -configuration Release archive` (unsigned is fine to
 prove it compiles; a *signed* archive is owner-gated).
+
+**Verification gotcha (cost 3 agents hours — see memory):** any drill that
+exercises authenticated writes must use a **signed** build. supabase-swift keeps
+the session in the Keychain, which is absent in a fully-unsigned build → session
+not persisted → writes fall back to the anon key → `42501`. It masquerades as a
+broken RLS policy. Proven both ways by `TriptoTests/LiveAuthWriteTests`
+(`TRIPTO_LIVE_TESTS=1`, passed via `TEST_RUNNER_…`): fails unsigned, passes
+signed. Production (TestFlight/App Store) is always signed, so it's a
+verification-only trap. **Pre-launch:** purge the accumulated anonymous test
+trips from the DB (harmless, RLS-isolated, but tidy up before real users).
 
 ## 4. Privacy — what Tripto collects (for the manifest + labels)
 
@@ -109,8 +119,15 @@ the Settings code.
 
 ## 6. 🔑 Owner-only actions (I cannot do these — they need your Apple account)
 
-1. **Enroll in the Apple Developer Program** ($99/yr) if not already —
-   confirms the bundle id `io.navbytes.tripto` is yours.
+**Apple Developer account: ✅ owner has one (textnav@outlook.com).** Enrollment
+blocker cleared. The steps below still need *your authenticated access* to that
+account's Developer console + App Store Connect — I can't log in as you.
+**Team ID: `59J9RQXYYP`** (provided 2026-07-08; not secret). Wired at the
+SiwA/signing milestone into: the associated-domains entitlement + signing team
+(project.yml), the Worker's AASA `APPLE_TEAM_ID` var, and the Supabase Apple
+provider — deferred until then so it doesn't collide with in-flight work.
+
+1. ✅ ~~Enroll in the Apple Developer Program~~ — done (textnav@outlook.com).
 2. **App ID**: create/confirm `io.navbytes.tripto` with the **Sign in with
    Apple** capability enabled.
 3. **Sign in with Apple key**: create a Key (.p8) with SiwA enabled; note the
