@@ -206,7 +206,10 @@ users, either add a keep-alive ping or move to Pro ($25/mo).
 
 - SiwA-on-Supabase issuer 500 — test against this project once the App ID
   exists; DEBUG OTP fallback keeps dev unblocked.
-- Free-tier pause kills live share links between trips — decide keep-alive vs Pro.
+- Free-tier pause — **MITIGATED**: a daily Cloudflare cron (`0 9 * * *` on the
+  share Worker) pings Supabase so the project never idles into a pause.
+  Deployed + verified. Revisit Pro ($25/mo) only if real traffic ever warrants
+  always-on guarantees.
 - Name proximity to TripIt/Tripoto — accepted at personal scale; low rejection
   risk, non-zero. (Owner decided to keep "Tripto".)
 - iCloud+ mail has no inbound API — only matters for the v1.5 email-import
