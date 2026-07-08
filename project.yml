@@ -81,14 +81,30 @@ targets:
           - CFBundleURLName: io.navbytes.tripto
             CFBundleURLSchemes:
               - tripto
+    entitlements:
+      # Written into the generated .entitlements so it survives `xcodegen
+      # generate` (adding the capability via Xcode's UI would be wiped).
+      path: Tripto/Generated/Tripto.entitlements
+      properties:
+        # Sign in with Apple — the production auth path (BUILD_PLAN §3.5), the
+        # app-side half of the capability enabled on the App ID.
+        # NOTE: Associated Domains (universal links) is deliberately NOT here —
+        # it first needs that capability enabled on the App ID, or archiving
+        # fails. Add `com.apple.developer.associated-domains: [applinks:tripto.navbytes.io]`
+        # once that's done; the AASA is already served (web/share-worker).
+        com.apple.developer.applesignin:
+          - Default
     settings:
       base:
         PRODUCT_NAME: Tripto
         PRODUCT_BUNDLE_IDENTIFIER: io.navbytes.tripto
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        # Automatic signing, but no team pinned — keeps the project buildable
-        # for anyone on the simulator with no Apple Developer account wired
-        # up. CI/verify builds additionally pass CODE_SIGNING_ALLOWED=NO.
+        # Owner's Apple Developer team — required for a signed archive and for
+        # the Sign in with Apple entitlement's provisioning profile. Automatic
+        # signing generates that profile (the App ID has SiwA enabled). Local
+        # verify/test builds still pass CODE_SIGNING_ALLOWED=NO, which skips
+        # signing and ignores both this and the entitlement entirely.
+        DEVELOPMENT_TEAM: "59J9RQXYYP"
         CODE_SIGN_STYLE: Automatic
 
   TriptoTests:
