@@ -749,7 +749,13 @@ struct HomeView: View {
     }
 
     private func isOrganizer(of trip: Trip) -> Bool {
-        guard let userId = authManager.userId else { return false }
+        // Finding 2: mirrors `TripView.canAddItems`' documented rule — a
+        // signed-out session only ever contains locally created trips
+        // (`AuthManager.signOut()` wipes the entire local mirror before
+        // clearing the session, `SyncEngine.wipeForSignOut()`), so a
+        // signed-out user is always the legitimately-permitted local
+        // creator/organizer of every trip they can even see here.
+        guard let userId = authManager.userId else { return true }
         return tripMembers.contains {
             $0.tripId == trip.id && $0.userId == userId && $0.role == .organizer
         }

@@ -63,7 +63,7 @@ struct ItineraryTabView: View {
                             }
                         }
                         .padding(.horizontal, Spacing.lg)
-                        .padding(.bottom, Spacing.xxl * 2) // clearance for the FAB
+                        .padding(.bottom, Fab.scrollClearance)
                     }
                     .scrollDismissesKeyboard(.immediately)
                     .task {
@@ -169,7 +169,7 @@ struct ItineraryTabView: View {
                     }
                 }
             }
-            .padding(.bottom, Spacing.xxl * 2)
+            .padding(.bottom, Fab.scrollClearance)
         }
     }
 

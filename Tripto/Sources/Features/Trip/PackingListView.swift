@@ -152,7 +152,10 @@ struct PackingListView: View {
                 }
             }
             .padding(Spacing.xl)
-            .padding(.bottom, Spacing.xxl)
+            // UX audit finding 4: matches the FAB clearance the itinerary/
+            // bookings scroll views use — this tab's own FAB sits in the
+            // same band, so its last row deserves the same headroom.
+            .padding(.bottom, Fab.scrollClearance)
         }
     }
 

@@ -8,6 +8,15 @@ struct Fab: View {
     /// the `58` magic number.
     static let diameter: CGFloat = 58
 
+    /// UX audit finding 4: the FAB's opaque band extends `diameter` (58) +
+    /// its own bottom padding `Spacing.xxl` (32) = 90pt up from the
+    /// container bottom, plus its ~12pt shadow radius — so scrollable
+    /// content anchored bottom-trailing under it needs 102pt of bottom
+    /// inset to clear the last row/card. Named here (not left as a magic
+    /// number at each scroll view) so every FAB-adjacent scroll inset uses
+    /// the same math `TripView`'s toast inset already did.
+    static let scrollClearance: CGFloat = Spacing.xxl + diameter + Spacing.md
+
     let action: () -> Void
     var accessibilityLabel: String = "Add to itinerary"
 

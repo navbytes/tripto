@@ -119,6 +119,18 @@ struct TripView: View {
         return myRole != .viewer
     }
 
+    /// Finding 2: the hero pencil's own gate was `myRole == .organizer`
+    /// only — that reads `nil` for a signed-out local creator (whose
+    /// `TripMember` row is always locally resolved, never fetched), so it
+    /// was hiding the edit affordance for the one person who legitimately
+    /// owns the trip. Same "signed-out = local creator" rule `canAddItems`
+    /// already codifies (see its doc comment above), applied to the
+    /// organizer-only edit surface instead of the broader add/edit-item one.
+    private var canEditTrip: Bool {
+        guard authManager.userId != nil else { return true }
+        return myRole == .organizer
+    }
+
     var body: some View {
         ZStack {
             Palette.paper.ignoresSafeArea()
@@ -130,6 +142,12 @@ struct TripView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Finding 1: `.toolbar(.hidden, for: .navigationBar)` above is the
+        // known killer of the interactive edge-swipe-to-pop gesture on the
+        // app's one shared `UINavigationController` — see
+        // `PopGestureRestorer`'s doc comment for why and how this restores
+        // it.
+        .background(PopGestureRestorer())
         // Finding 8: the default `Spacing.xxl` inset sits inside the FAB's
         // band, so a toast (esp. the ~110-character signed-out edit
         // message) can overlap it. Constant inset — FAB height + its own
@@ -137,7 +155,7 @@ struct TripView: View {
         // both `Bookings` and `Packing` render their own FAB in the same
         // band now (UX audit finding 5), so a toast that jumps position
         // per tab would be worse than one constant inset used everywhere.
-        .toastOverlay($toast, bottomInset: Spacing.xxl + Fab.diameter + Spacing.md)
+        .toastOverlay($toast, bottomInset: Fab.scrollClearance)
         .onAppear {
             let id = tripId
             Task {
@@ -300,7 +318,7 @@ struct TripView: View {
                 // Discoverable organizer edit entry point (finding 4): the
                 // Home context menu's "Edit trip" is a shortcut, not the
                 // sole route (HIG). Gated on the same `myRole` the FAB uses.
-                if myRole == .organizer {
+                if canEditTrip {
                     GlassCircleButton(systemImage: "pencil", accessibilityLabel: "Edit trip") {
                         isEditingTrip = true
                     }
@@ -544,14 +562,36 @@ struct TripView: View {
         firstName(from: displayName).prefix(1).uppercased()
     }
 
+    /// Finding 3: the old bare-amber-text "Back to trips" button was both
+    /// under AA contrast (~2.3:1 amber-on-paper) and under the 44pt hit
+    /// target. Restyled as the same filled-amber capsule CTA
+    /// `BookingsTabView`'s empty state uses, and the heading now explains
+    /// *why* — §6.6 voice: name the likely cause, then point at where the
+    /// traveler's other trips still are.
     private var missingTripState: some View {
         VStack(spacing: Spacing.md) {
             Text("This trip is no longer available")
                 .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.slate)
-            Button("Back to trips") { dismiss() }
-                .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.amber)
+                .foregroundStyle(Palette.ink)
+            Text(
+                "It may have been removed by the organizer, or your access may have ended. " +
+                    "Your other trips are still on your trips list."
+            )
+            .font(Typo.body())
+            .foregroundStyle(Palette.slate)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Spacing.xxl)
+            Button(action: { dismiss() }) {
+                Text("Back to trips")
+                    .font(Typo.body(weight: .semibold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.md)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                    .contentShape(Capsule())
+                    .background(Palette.amber, in: Capsule())
+            }
+            .padding(.top, Spacing.xs)
         }
     }
 }

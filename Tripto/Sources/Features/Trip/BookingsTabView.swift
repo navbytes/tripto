@@ -48,7 +48,7 @@ struct BookingsTabView: View {
                         }
                     }
                     .padding(.vertical, Spacing.lg)
-                    .padding(.bottom, Spacing.xxl * 2) // clearance for the FAB
+                    .padding(.bottom, Fab.scrollClearance)
                 }
             }
         }
@@ -107,14 +107,22 @@ private struct BookingRow: View {
                         .font(Typo.body(Typo.Size.body, weight: .semibold))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
+                        .layoutPriority(1)
                     Text(TimelineBuilder.dayTitleText(item.startLocalDay))
                         .font(Typo.body(Typo.Size.caption))
                         .foregroundStyle(Palette.slate)
                 }
                 Spacer(minLength: Spacing.sm)
+                // Finding 5: a long pasted confirmation code would otherwise
+                // wrap mid-code and crowd the title toward zero width — one
+                // mono line, truncated in the middle (keeps the code's
+                // distinguishing head/tail visible); the full code is one
+                // tap away in `BookingDetailView`.
                 Text(item.confirmation ?? "")
                     .font(Typo.mono(Typo.Size.caption))
                     .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Palette.slate.opacity(0.6))
