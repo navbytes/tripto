@@ -15,35 +15,53 @@ enum TimelineLayout {
     static let railWidth: CGFloat = 14
 
     /// Finding F5: a fixed 44pt time gutter clips at accessibility Dynamic
-    /// Type sizes ("08:20" + a zone label no longer fit). Widens to ~76pt
-    /// at AX sizes; `CheckOutRow` shares this (rather than its own private
-    /// width) so the two row kinds' columns stay aligned regardless of
-    /// type size. Takes a plain `Bool` (not the full `DynamicTypeSize`) so
-    /// call sites can drive it from the same `isAXSize` field they already
-    /// carry for the `.equatable()` short-circuit fix (see
-    /// `TimelineCardRow`'s doc comment).
-    static func gutterWidth(isAXSize: Bool) -> CGFloat {
-        isAXSize ? 76 : 44
+    /// Type sizes ("08:20" + a zone label no longer fit). `CheckOutRow`
+    /// shares this (rather than its own private width) so the two row
+    /// kinds' columns stay aligned regardless of type size.
+    ///
+    /// Finding F1: the old two-step (44pt / 76pt) jump left every size
+    /// between "default" and "accessibility" either clipped or wasting
+    /// space. This now steps with `Typo`'s own `UIFontMetrics(.body)` curve
+    /// — one width bump per Dynamic Type step up to `.xxxLarge`, then the
+    /// same 76pt AX ceiling as before once accessibility sizes kick in.
+    /// Takes the full `DynamicTypeSize` (not a plain `Bool`) so it can key
+    /// off more than just the AX/non-AX split; call sites already carry
+    /// this value as `typeSize` for the `.equatable()` short-circuit fix
+    /// (see `TimelineCardRow`'s doc comment).
+    static func gutterWidth(for size: DynamicTypeSize) -> CGFloat {
+        if size.isAccessibilitySize { return 76 }
+        switch size {
+        case .xSmall, .small, .medium, .large: return 44
+        case .xLarge: return 50
+        case .xxLarge: return 56
+        case .xxxLarge: return 62
+        default: return 44
+        }
     }
 
     /// Left indent for rows with no gutter/rail of their own (staying
     /// strips, tz-shift chips) so they still line up under the card column.
-    static func indentedLeading(isAXSize: Bool) -> CGFloat {
-        gutterWidth(isAXSize: isAXSize) + railWidth + Spacing.sm
+    static func indentedLeading(for size: DynamicTypeSize) -> CGFloat {
+        gutterWidth(for: size) + railWidth + Spacing.sm
     }
 }
 
 struct TimelineCardRow: View, Equatable {
     let model: TimelineCardModel
-    /// Finding F5: `dynamicTypeSize.isAccessibilitySize`, read by the
-    /// caller and passed in as a stored property (rather than read here via
-    /// `@Environment`) so it participates in the `==` below — `.equatable()`
-    /// views can otherwise miss a live Dynamic Type change entirely, since
-    /// the equality check is what decides whether SwiftUI re-evaluates
-    /// `body` at all.
-    var isAXSize: Bool = false
+    /// Finding F5: `dynamicTypeSize`, read by the caller and passed in as a
+    /// stored property (rather than read here via `@Environment`) so it
+    /// participates in the `==` below — `.equatable()` views can otherwise
+    /// miss a live Dynamic Type change entirely, since the equality check is
+    /// what decides whether SwiftUI re-evaluates `body` at all. Finding F1:
+    /// carries the full `DynamicTypeSize` (not just an AX/non-AX `Bool`) so
+    /// `TimelineLayout.gutterWidth` can step the gutter width with it;
+    /// `isAXSize` below stays a derived computed var so the existing
+    /// `lineLimit(isAXSize ? 2 : 1)` call sites are untouched.
+    var typeSize: DynamicTypeSize = .large
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
+    private var isAXSize: Bool { typeSize.isAccessibilitySize }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: model.id)) {
@@ -78,7 +96,7 @@ struct TimelineCardRow: View, Equatable {
         }
         parts.append("at \(model.timeText)\(model.zoneLabel.map { " \($0)" } ?? "")")
         if !model.assignees.isEmpty {
-            parts.append("for \(model.assignees.count) \(model.assignees.count == 1 ? "person" : "people")")
+            parts.append(Self.assigneesPhrase(for: model.assignees))
         }
         for tag in model.tags { parts.append(ItemTag(rawValue: tag)?.label ?? tag) }
         if model.hasTicket { parts.append("has a confirmation") }
@@ -87,18 +105,44 @@ struct TimelineCardRow: View, Equatable {
         return parts.joined(separator: ", ")
     }
 
+    /// Finding F4: names beat a bare count when they're available — "for
+    /// Meera" reads better than "for 1 person". Falls back to the old
+    /// "for N people" wording whenever any assignee's `name` is empty (older
+    /// call sites that haven't threaded a name through yet), so this never
+    /// silently drops someone's presence from the count. Internal (not
+    /// `private`) so a unit test can pin the pluralization/overflow wording
+    /// directly.
+    static func assigneesPhrase(for assignees: [AvatarStack.Person]) -> String {
+        let names = assignees.map(\.name).filter { !$0.isEmpty }
+        guard names.count == assignees.count, !names.isEmpty else {
+            return "for \(assignees.count) \(assignees.count == 1 ? "person" : "people")"
+        }
+        switch names.count {
+        case 1: return "for \(names[0])"
+        case 2: return "for \(names[0]) and \(names[1])"
+        case 3: return "for \(names[0]), \(names[1]), and \(names[2])"
+        default:
+            let others = names.count - 2
+            return "for \(names[0]), \(names[1]), and \(others) other\(others == 1 ? "" : "s")"
+        }
+    }
+
     private var timeGutter: some View {
         VStack(alignment: .trailing, spacing: 1) {
             Text(model.timeText)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.ink)
+                .lineLimit(1)
             if let zoneLabel = model.zoneLabel {
                 Text(zoneLabel)
                     .font(Typo.body(9.5, weight: .medium))
                     .foregroundStyle(Palette.slate)
+                    .lineLimit(1)
+                    .minimumScaleFactor(isAXSize ? 0.6 : 0.8)
+                    .allowsTightening(true)
             }
         }
-        .frame(width: TimelineLayout.gutterWidth(isAXSize: isAXSize), alignment: .trailing)
+        .frame(width: TimelineLayout.gutterWidth(for: typeSize), alignment: .trailing)
         .padding(.top, 13)
         .padding(.trailing, Spacing.sm)
     }
@@ -180,12 +224,12 @@ struct TimelineCardRow: View, Equatable {
 /// details without hunting for the check-in card above it.
 struct StayingStripRow: View, Equatable {
     let model: StayingStripModel
-    /// See `TimelineCardRow.isAXSize`'s doc comment — same
+    /// See `TimelineCardRow.typeSize`'s doc comment — same
     /// `.equatable()`-vs-Dynamic-Type fix, needed here too so the indent
-    /// stays aligned with the card/check-out columns at AX sizes.
-    var isAXSize: Bool = false
+    /// stays aligned with the card/check-out columns at every type size.
+    var typeSize: DynamicTypeSize = .large
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: model.itemId)) {
@@ -215,7 +259,7 @@ struct StayingStripRow: View, Equatable {
             .accessibilityLabel(model.text)
         }
         .buttonStyle(.plain)
-        .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
+        .padding(.leading, TimelineLayout.indentedLeading(for: typeSize))
         .padding(.vertical, Spacing.xxs)
     }
 }
@@ -227,10 +271,12 @@ struct StayingStripRow: View, Equatable {
 /// hand-tuned offset needed to make that true.
 struct CheckOutRow: View, Equatable {
     let model: CheckOutRowModel
-    /// See `TimelineCardRow.isAXSize`'s doc comment.
-    var isAXSize: Bool = false
+    /// See `TimelineCardRow.typeSize`'s doc comment.
+    var typeSize: DynamicTypeSize = .large
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
+    private var isAXSize: Bool { typeSize.isAccessibilitySize }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: model.itemId)) {
@@ -277,13 +323,17 @@ struct CheckOutRow: View, Equatable {
             Text(model.timeText)
                 .font(Typo.body(11, weight: .semibold))
                 .foregroundStyle(Palette.slate)
+                .lineLimit(1)
             if let zoneLabel = model.zoneLabel {
                 Text(zoneLabel)
                     .font(Typo.body(9, weight: .medium))
                     .foregroundStyle(Palette.slate)
+                    .lineLimit(1)
+                    .minimumScaleFactor(isAXSize ? 0.6 : 0.8)
+                    .allowsTightening(true)
             }
         }
-        .frame(width: TimelineLayout.gutterWidth(isAXSize: isAXSize), alignment: .trailing)
+        .frame(width: TimelineLayout.gutterWidth(for: typeSize), alignment: .trailing)
     }
 }
 
@@ -323,10 +373,10 @@ struct TagChip: View {
 /// card.
 struct TZShiftChipRow: View, Equatable {
     let model: TZShiftModel
-    /// See `TimelineCardRow.isAXSize`'s doc comment.
-    var isAXSize: Bool = false
+    /// See `TimelineCardRow.typeSize`'s doc comment.
+    var typeSize: DynamicTypeSize = .large
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -342,7 +392,7 @@ struct TZShiftChipRow: View, Equatable {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
         .background(Palette.amberSoft, in: Capsule())
-        .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
+        .padding(.leading, TimelineLayout.indentedLeading(for: typeSize))
         .padding(.vertical, Spacing.xxs)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -351,4 +401,39 @@ struct TZShiftChipRow: View, Equatable {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(model.text)
     }
+}
+
+/// Finding F1's validate-first artifact: the width table above pinned at
+/// `.xxLarge` with a half-hour-zone flight (Asia/Kolkata's "GMT+5:30" — the
+/// widest routine case, ACCEPTANCE.md's own half-hour-zone callout) and a
+/// card whose zone label takes `ItineraryTimeZone.zoneLabel`'s
+/// nil-abbreviation fallback (`citySegment(of:)`, a bare city name rather
+/// than a short abbreviation). Both must render their zone label on one
+/// line inside the stepped gutter at this size.
+#Preview("Gutter at xxLarge") {
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            TimelineCardRow(
+                model: TimelineCardModel(
+                    id: UUID(), category: .flight, timeText: "08:20", zoneLabel: "GMT+5:30",
+                    title: "Flight to Delhi", subtitle: "JFK → DEL · Seat 14C", hasTicket: true,
+                    isPending: false, editedBy: nil, assignees: [], tags: []
+                ),
+                typeSize: .xxLarge
+            )
+            .equatable()
+            TimelineCardRow(
+                model: TimelineCardModel(
+                    id: UUID(), category: .activity, timeText: "14:00", zoneLabel: "Kathmandu",
+                    title: "Boudhanath walking tour", subtitle: "Kathmandu", hasTicket: false,
+                    isPending: false, editedBy: nil, assignees: [], tags: []
+                ),
+                typeSize: .xxLarge
+            )
+            .equatable()
+        }
+        .padding(Spacing.lg)
+    }
+    .dynamicTypeSize(.xxLarge)
+    .background(Palette.paper)
 }

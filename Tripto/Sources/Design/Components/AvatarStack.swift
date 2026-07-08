@@ -12,6 +12,12 @@ struct AvatarStack: View {
         let id: UUID
         let initial: String
         let colorName: String
+        /// Finding F4: exists for spoken labels (`TimelineCardRow`'s
+        /// assignees phrase), not for display — `AvatarStack`'s own
+        /// rendering below is initials-only and never reads this. Defaulted
+        /// so existing call sites (`TripCard`/`HomeView.people(for:)`) keep
+        /// compiling unchanged.
+        var name: String = ""
     }
 
     let people: [Person]

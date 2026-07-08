@@ -623,7 +623,14 @@ struct TripView: View {
         return idsByItem.mapValues { profileIds in
             profileIds.compactMap { id -> AvatarStack.Person? in
                 guard let profile = profilesById[id] else { return nil }
-                return AvatarStack.Person(id: profile.id, initial: initials(from: profile.displayName), colorName: profile.avatarColor)
+                // Finding F4: same first-name derivation `personFilterChips`/
+                // `selectedProfileFirstName` already use for their own
+                // spoken/visible labels — one truncation rule, not a second
+                // one for the timeline's assignees phrase.
+                return AvatarStack.Person(
+                    id: profile.id, initial: initials(from: profile.displayName),
+                    colorName: profile.avatarColor, name: firstName(from: profile.displayName)
+                )
             }
         }
     }

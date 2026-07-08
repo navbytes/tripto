@@ -45,10 +45,10 @@ struct ItineraryTabView: View {
     var hiddenCountByDay: [String: Int] = [:]
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
-    /// Finding F1: `tabBar()`'s `isAccessibilitySize` convention
-    /// (`TripCard.swift`/`TripView.swift`) — also feeds `isAXSize` into the
-    /// row views below so their `.equatable()` short-circuit can't miss a
-    /// live Dynamic Type change (see `TimelineCardRow.isAXSize`'s doc
+    /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
+    /// as `typeSize`, both so `TimelineLayout.gutterWidth` can step the
+    /// gutter width with it and so their `.equatable()` short-circuit can't
+    /// miss a live Dynamic Type change (see `TimelineCardRow.typeSize`'s doc
     /// comment).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -79,18 +79,30 @@ struct ItineraryTabView: View {
         )
     }
 
+    /// Finding F5: `dayModels` re-runs `ItineraryDayBucketing` +
+    /// `TimelineBuilder` in full every time it's read — the old `body`
+    /// read it 4-5 separate times per render pass (the `isEmpty` check, the
+    /// `ForEach`, both DEBUG scroll-target lookups, and `firstFreeDayId`).
+    /// Evaluating it once into `models` here and threading that single
+    /// snapshot through the rest of `body` (including into the `.task`
+    /// closure, which captures it by value) cuts that to one run per pass.
+    /// Deliberately stops there — no cross-pass cache — since there's no
+    /// observed jank to justify the cache-key complexity a memoized version
+    /// would need.
     var body: some View {
-        Group {
-            if dayModels.isEmpty {
+        let models = dayModels
+        let hintDayId = firstFreeDayId(in: models)
+        return Group {
+            if models.isEmpty {
                 emptyState
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            ForEach(dayModels) { day in
+                            ForEach(models) { day in
                                 Section {
                                     if day.isFreeDay {
-                                        freeDayRow(day, showsAddHint: canEdit && day.id == firstFreeDayId)
+                                        freeDayRow(day, showsAddHint: canEdit && day.id == hintDayId)
                                     } else {
                                         ForEach(day.rows) { row in
                                             rowView(for: row)
@@ -120,7 +132,7 @@ struct ItineraryTabView: View {
                             hasAutoScrolledToToday = true
                             let today = DayDate.from(.now, calendar: .current)
                             if today >= tripStartDay, today <= tripEndDay,
-                                let target = dayModels.first(where: { $0.id >= today.stringValue }) {
+                                let target = models.first(where: { $0.id >= today.stringValue }) {
                                 try? await Task.sleep(nanoseconds: 300_000_000)
                                 let headerId = "day-header-\(target.id)"
                                 if reduceMotion {
@@ -139,11 +151,11 @@ struct ItineraryTabView: View {
                         // same frame, with no scroll-gesture automation
                         // available in this environment.
                         if ProcessInfo.processInfo.arguments.contains("-uitestScrollTimeline") {
-                            let firstChipId = dayModels
+                            let firstChipId = models
                                 .flatMap(\.rows)
                                 .first { if case .tzShift = $0 { true } else { false } }?
                                 .id
-                            let target = firstChipId ?? dayModels.dropFirst().first?.id
+                            let target = firstChipId ?? models.dropFirst().first?.id
                             if let target {
                                 try? await Task.sleep(nanoseconds: 300_000_000)
                                 // `.top` lands the row exactly under the
@@ -159,7 +171,7 @@ struct ItineraryTabView: View {
                         // same no-gesture-automation reasoning as
                         // `-uitestScrollTimeline` above.
                         if ProcessInfo.processInfo.arguments.contains("-uitestScrollToTag") {
-                            let target = dayModels
+                            let target = models
                                 .flatMap(\.rows)
                                 .first {
                                     if case .card(let model) = $0 { !model.tags.isEmpty } else { false }
@@ -178,15 +190,32 @@ struct ItineraryTabView: View {
         .background(Palette.paper)
     }
 
-    private var isAXSize: Bool { dynamicTypeSize.isAccessibilitySize }
-
     @ViewBuilder
     private func rowView(for row: TimelineRowModel) -> some View {
         switch row {
-        case .card(let model): TimelineCardRow(model: model, isAXSize: isAXSize).equatable()
-        case .staying(let model): StayingStripRow(model: model, isAXSize: isAXSize).equatable()
-        case .checkOut(let model): CheckOutRow(model: model, isAXSize: isAXSize).equatable()
-        case .tzShift(let model): TZShiftChipRow(model: model, isAXSize: isAXSize).equatable()
+        case .card(let model): TimelineCardRow(model: model, typeSize: dynamicTypeSize).equatable()
+        case .staying(let model): StayingStripRow(model: model, typeSize: dynamicTypeSize).equatable()
+        case .checkOut(let model): CheckOutRow(model: model, typeSize: dynamicTypeSize).equatable()
+        case .tzShift(let model): TZShiftChipRow(model: model, typeSize: dynamicTypeSize).equatable()
+        }
+    }
+
+    /// Finding F6: cards scrolling under the pinned header used to hard-clip
+    /// against its flat `Palette.paper` fill — this replaces that fill with
+    /// a paper-to-clear scrim over the header's bottom ~8pt, so a card
+    /// scrolling underneath fades out instead of vanishing at a hard edge.
+    /// When the header isn't pinned (its own section is in normal scroll
+    /// flow, nothing behind it) the scrim renders paper-on-paper and is
+    /// invisible, so the settled, non-overlapping case is unchanged.
+    /// Rejected: a permanent 1pt mist hairline under every header
+    /// (`PersonFilterBar`'s treatment) — that changes the timeline's visual
+    /// rhythm every day for what's only a mid-scroll overlap, not a
+    /// standing boundary.
+    private var dayHeaderBackground: some View {
+        VStack(spacing: 0) {
+            Palette.paper
+            LinearGradient(colors: [Palette.paper, Palette.paper.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 8)
         }
     }
 
@@ -213,7 +242,7 @@ struct ItineraryTabView: View {
         }
         .padding(.top, Spacing.lg)
         .padding(.bottom, Spacing.xs)
-        .background(Palette.paper)
+        .background(dayHeaderBackground)
         // Finding 4: one VoiceOver heading per day — merges the "Today"
         // chip into the date it modifies (instead of a disconnected second
         // stop) and enables the headings rotor to jump between days on long
@@ -254,11 +283,11 @@ struct ItineraryTabView: View {
                 .foregroundStyle(Palette.slate)
             Spacer(minLength: 0)
         }
-        .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
+        .padding(.leading, TimelineLayout.indentedLeading(for: dynamicTypeSize))
         .padding(.vertical, Spacing.sm)
     }
 
-    /// Finding 8: the id of the first free day in `dayModels`, so the "tap +
+    /// Finding 8: the id of the first free day in `models`, so the "tap +
     /// to add a plan" hint appears exactly once instead of on every gap day.
     ///
     /// UX audit finding 1 + 6: only a *genuinely* free day (nothing hidden
@@ -270,20 +299,35 @@ struct ItineraryTabView: View {
     /// re-anchors to the first actionable day on an in-progress trip,
     /// falling back to the first overall for trips wholly in the future or
     /// past.
-    private var firstFreeDayId: String? {
-        let genuinelyFree = dayModels.filter { $0.isFreeDay && hiddenCountByDay[$0.id, default: 0] == 0 }
+    ///
+    /// Finding F5: takes the already-computed `models` snapshot (rather than
+    /// re-reading `dayModels` itself) so `body`'s single evaluation per
+    /// render pass covers this too.
+    private func firstFreeDayId(in models: [TimelineDayModel]) -> String? {
+        let genuinelyFree = models.filter { $0.isFreeDay && hiddenCountByDay[$0.id, default: 0] == 0 }
         let todayId = DayDate.from(.now, calendar: .current).stringValue
         return genuinelyFree.first(where: { $0.id >= todayId })?.id ?? genuinelyFree.first?.id
     }
 
     // MARK: - Empty state (BUILD_PLAN.md §4.2, §6.6)
 
+    /// Finding F2: ordering contract, don't regress it. The loading branch
+    /// must come *before* the filter branch, not after — both use
+    /// `hasAnyItems`/`isAwaitingFirstSync` to decide what's actually known,
+    /// so they need to agree on which fact wins when both could apply.
+    /// `isAwaitingFirstSync && !hasAnyItems` means the trip's first pull
+    /// this session hasn't finished *and* nothing's loaded yet, so whether
+    /// a person filter is hiding items or the trip is just genuinely empty
+    /// is unknowable — that ambiguity, not the filter selection, is what
+    /// should drive the copy. Once `hasAnyItems` is true (or the pull has
+    /// settled), the filter branch is safe to answer honestly again, and
+    /// `filteredEmptyGuidance`'s own `hasAnyItems` guard (below) is only
+    /// ever reached post-settle, where "Add a plan with the + button first"
+    /// is a fact rather than a guess.
     private var emptyState: some View {
         ScrollView {
             VStack(spacing: Spacing.xl) {
-                if let filteredPersonName {
-                    filteredEmptyState(personName: filteredPersonName)
-                } else if isAwaitingFirstSync {
+                if isAwaitingFirstSync && !hasAnyItems {
                     // Finding 2: a freshly-claimed (or just-opened) trip's
                     // itinerary can't yet be told apart from a genuinely
                     // empty one while its first pull is still in flight —
@@ -300,6 +344,8 @@ struct ItineraryTabView: View {
                             .font(Typo.body())
                             .foregroundStyle(Palette.slate)
                     }
+                } else if let filteredPersonName {
+                    filteredEmptyState(personName: filteredPersonName)
                 } else {
                     // Finding F11: this branch is the *settled* empty
                     // state (sync finished, trip really has nothing) — a
@@ -364,6 +410,13 @@ struct ItineraryTabView: View {
     /// unfiltered trip to assign — for an organizer looking at a genuinely
     /// empty trip, or a viewer who can't assign anything at all, that's
     /// misleading. Branches on `canEdit`/`hasAnyItems` instead.
+    ///
+    /// Finding F2: this function is only ever reached from `emptyState`'s
+    /// filter branch, which now runs *after* the loading branch — so by the
+    /// time `hasAnyItems` is read here, either the first pull has settled
+    /// or something was already loaded before it started. The
+    /// `!hasAnyItems` case below is a real, known fact at this point, not a
+    /// guess made mid-load.
     private func filteredEmptyGuidance(personName: String) -> String {
         guard canEdit else {
             return "Switch back to Everyone to see the whole trip."

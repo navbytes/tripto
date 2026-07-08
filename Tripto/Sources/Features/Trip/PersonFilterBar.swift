@@ -21,6 +21,11 @@ struct PersonFilterBar: View {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "line.3.horizontal.decrease")
                     .font(.system(size: 10, weight: .bold))
+                    // Finding F3: decorative — the "Showing plans for" text
+                    // right next to it already says the same thing, same
+                    // pattern as this bar's `person.2.fill` chip icon and
+                    // `PersonFilterBanner`'s sparkles.
+                    .accessibilityHidden(true)
                 Text("Showing plans for")
                     .font(Typo.body(11, weight: .bold))
                     .tracking(0.4)
