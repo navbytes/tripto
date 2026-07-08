@@ -115,7 +115,10 @@ struct PackingListView: View {
             }
             Button("Cancel", role: .cancel) { reassigningItem = nil }
         }
-        .toastOverlay($toast)
+        // UX audit finding 8 (this tab): mirrors TripView.swift's own
+        // finding-8 fix — this tab renders its own FAB in the same band, so
+        // its toast needs the same constant FAB-clearance inset.
+        .toastOverlay($toast, bottomInset: Fab.scrollClearance)
         .task {
             #if DEBUG
             await applyUITestAutopilotIfNeeded()
@@ -316,6 +319,8 @@ struct PackingListView: View {
                             .foregroundStyle(Palette.onAmber)
                             .padding(.horizontal, Spacing.xl)
                             .padding(.vertical, Spacing.md)
+                            .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                            .contentShape(Capsule())
                             .background(Palette.amber, in: Capsule())
                     }
                     .buttonStyle(.plain)
@@ -501,16 +506,25 @@ private struct PackingItemFormSheet: View {
             Button("Cancel") { dismiss() }
                 .font(Typo.body(weight: .semibold))
                 .foregroundStyle(Palette.slate)
+                // Finding 3b: 44pt hit band (§6.5) — same
+                // PersonFilterBar.swift compensation move as below.
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             Spacer()
             Text("Add packing item")
                 .font(Typo.body(weight: .bold))
                 .foregroundStyle(Palette.ink)
             Spacer()
             Text("Cancel").font(Typo.body(weight: .semibold)).opacity(0) // balances the leading button
+                .frame(minHeight: 44)
         }
         .padding(.horizontal, Spacing.lg)
-        .padding(.top, Spacing.md)
-        .padding(.bottom, Spacing.sm)
+        // Finding 3b: trimmed from Spacing.md/.sm to .xs/.xs — the Cancel
+        // button's new 44pt hit band grows the row, so this keeps the
+        // header's total height roughly unchanged (PersonFilterBar.swift's
+        // same trade-off).
+        .padding(.top, Spacing.xs)
+        .padding(.bottom, Spacing.xs)
     }
 
     private func groupTile(_ key: PackingGroupKey) -> some View {
@@ -560,6 +574,10 @@ private struct PackingItemFormSheet: View {
             .overlay {
                 Capsule().stroke(isOn ? Color.clear : Palette.mist, lineWidth: 1)
             }
+            // Finding 3a: same 44pt hit band as PersonFilterBar's chips
+            // (§6.5) — visuals unchanged, hit area compliant.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])

@@ -57,6 +57,9 @@ struct TripView: View {
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Finding 4: `tabBar()`'s AX-size horizontal-scroll branch, same
+    /// `isAccessibilitySize` convention as `TripCard.swift`.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
@@ -467,42 +470,23 @@ struct TripView: View {
     /// reached from a "button" in this row; it's now a peer tab so all three
     /// behave consistently (they read as tabs, so they should act as tabs).
     private func tabBar() -> some View {
-        HStack(spacing: Spacing.xl) {
-            ForEach(Tab.allCases, id: \.self) { tab in
-                Button {
-                    if reduceMotion {
-                        selectedTab = tab
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.18)) { selectedTab = tab }
-                    }
-                } label: {
-                    // Finding 1a: `minHeight: 44` (not the HStack's old
-                    // `.padding(.top, Spacing.md)`) so the full 44pt column
-                    // is hit-testable while the text+underline stay
-                    // bottom-aligned exactly where they render today — the
-                    // padding's ~12pt of headroom is absorbed into this
-                    // frame instead.
-                    VStack(spacing: Spacing.sm) {
-                        Text(tab.rawValue)
-                            .font(Typo.body(weight: .semibold))
-                            .foregroundStyle(selectedTab == tab ? Palette.ink : Palette.slate)
-                        ZStack {
-                            Color.clear.frame(height: 2)
-                            if selectedTab == tab {
-                                RoundedRectangle(cornerRadius: 1)
-                                    .fill(Palette.amber)
-                                    .frame(height: 2)
-                                    .matchedGeometryEffect(id: "tab-underline", in: tabUnderline)
-                            }
-                        }
-                    }
-                    .frame(minHeight: 44, alignment: .bottom)
-                    .contentShape(Rectangle())
+        Group {
+            // Finding 4: a fixed `HStack` truncates the labels unreadably at
+            // accessibility sizes (`TripCard.swift`'s established
+            // `isAccessibilitySize` convention) — this branches to a
+            // horizontal scroll row there instead, exactly like
+            // `PersonFilterBar`'s row. Non-AX rendering below is untouched.
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Spacing.xl) { tabButtons }
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
+            } else {
+                HStack(spacing: Spacing.xl) {
+                    tabButtons
+                    Spacer()
+                }
             }
-            Spacer()
         }
         .padding(.horizontal, Spacing.xl)
         // Finding 9a: `.isTabBar` (iOS 17+, matches this app's SwiftData/
@@ -513,6 +497,44 @@ struct TripView: View {
         .accessibilityAddTraits(.isTabBar)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.mist).frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var tabButtons: some View {
+        ForEach(Tab.allCases, id: \.self) { tab in
+            Button {
+                if reduceMotion {
+                    selectedTab = tab
+                } else {
+                    withAnimation(.easeInOut(duration: 0.18)) { selectedTab = tab }
+                }
+            } label: {
+                // Finding 1a: `minHeight: 44` (not the HStack's old
+                // `.padding(.top, Spacing.md)`) so the full 44pt column
+                // is hit-testable while the text+underline stay
+                // bottom-aligned exactly where they render today — the
+                // padding's ~12pt of headroom is absorbed into this
+                // frame instead.
+                VStack(spacing: Spacing.sm) {
+                    Text(tab.rawValue)
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(selectedTab == tab ? Palette.ink : Palette.slate)
+                    ZStack {
+                        Color.clear.frame(height: 2)
+                        if selectedTab == tab {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(Palette.amber)
+                                .frame(height: 2)
+                                .matchedGeometryEffect(id: "tab-underline", in: tabUnderline)
+                        }
+                    }
+                }
+                .frame(minHeight: 44, alignment: .bottom)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
         }
     }
 
