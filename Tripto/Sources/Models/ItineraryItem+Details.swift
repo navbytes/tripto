@@ -39,13 +39,21 @@ struct ItemDetails: Equatable, Sendable {
     // own location_name/lat/lng instead).
     var address: String?
 
+    /// Kid-aware item tags (BUILD_PLAN.md §5.4, this milestone's brief:
+    /// "details.tags: [string]") — free-form strings so a future tag never
+    /// needs a schema change, but `ItemTag` gives the three v1 values
+    /// (nap/stroller-ok/kids-menu) a typed picker/renderer. Applies across
+    /// every category, unlike the fields above; defaults to empty, never nil,
+    /// so call sites don't need an optional-array dance.
+    var tags: [String] = []
+
     static let empty = ItemDetails()
 
     init(
         airline: String? = nil, flightNo: String? = nil, fromIATA: String? = nil, toIATA: String? = nil,
         seat: String? = nil, terminal: String? = nil, gate: String? = nil, arrivalTz: String? = nil,
         room: String? = nil, ticketRef: String? = nil, partySize: Int? = nil, reservationName: String? = nil,
-        address: String? = nil
+        address: String? = nil, tags: [String] = []
     ) {
         self.airline = airline
         self.flightNo = flightNo
@@ -60,6 +68,7 @@ struct ItemDetails: Equatable, Sendable {
         self.partySize = partySize
         self.reservationName = reservationName
         self.address = address
+        self.tags = tags
     }
 
     init(json: AnyJSON) {
@@ -77,6 +86,7 @@ struct ItemDetails: Equatable, Sendable {
         partySize = object["party_size"]?.intValue
         reservationName = object["reservation_name"]?.stringValue
         address = object["address"]?.stringValue
+        tags = (object["tags"]?.arrayValue ?? []).compactMap(\.stringValue)
     }
 
     var json: AnyJSON {
@@ -94,7 +104,38 @@ struct ItemDetails: Equatable, Sendable {
         if let partySize { object["party_size"] = .integer(partySize) }
         if let reservationName { object["reservation_name"] = .string(reservationName) }
         if let address { object["address"] = .string(address) }
+        if !tags.isEmpty { object["tags"] = .array(tags.map { .string($0) }) }
         return .object(object)
+    }
+}
+
+/// The three v1 kid-aware tags (this milestone's brief). Raw values are the
+/// literal strings stored in `details.tags` — plain `[String]` on the model
+/// so a future tag some other client adds is preserved, not dropped, even
+/// though this enum only knows these three.
+enum ItemTag: String, CaseIterable, Sendable {
+    case nap
+    case strollerOk = "stroller-ok"
+    case kidsMenu = "kids-menu"
+
+    var label: String {
+        switch self {
+        case .nap: "Nap window"
+        case .strollerOk: "Stroller-friendly"
+        case .kidsMenu: "Kids\u{2019} menu"
+        }
+    }
+
+    /// docs/TripAppFamily.jsx's `JustMine` mockup: a Baby glyph rides along
+    /// nap/stroller-ok chips only — kids-menu is text-only, no icon. SF
+    /// Symbols has no literal "baby" glyph; `figure.and.child.holdinghands`
+    /// is the closest built-in stand-in and (deliberately, per the mockup)
+    /// shared by both rather than split into two different icons.
+    var symbolName: String? {
+        switch self {
+        case .nap, .strollerOk: "figure.and.child.holdinghands"
+        case .kidsMenu: nil
+        }
     }
 }
 

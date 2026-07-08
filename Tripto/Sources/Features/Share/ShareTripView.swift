@@ -34,6 +34,10 @@ struct ShareTripView: View {
     @State private var memberPendingRoleChange: TripMember?
     @State private var memberPendingOrganizerConfirm: TripMember?
     @State private var memberPendingRemoval: TripMember?
+    /// M4: "Add someone without the app" / edit-existing-profile sheets
+    /// (this milestone's brief §2) — both drive `TripProfileFormSheet`.
+    @State private var isPresentingAddProfile = false
+    @State private var editingProfile: TripProfile?
 
     init(tripId: UUID) {
         self.tripId = tripId
@@ -67,6 +71,18 @@ struct ShareTripView: View {
                     changeRole(of: member, to: newRole)
                 }
             }
+        }
+        .sheet(isPresented: $isPresentingAddProfile) {
+            TripProfileFormSheet(mode: .add) { name, color in
+                addProfile(displayName: name, avatarColor: color)
+            }
+        }
+        .sheet(item: $editingProfile) { profile in
+            TripProfileFormSheet(
+                mode: .edit(profile),
+                onSave: { name, color in updateProfile(profile, displayName: name, avatarColor: color) },
+                onDelete: { deleteProfile(profile) }
+            )
         }
         .confirmationDialog(
             "Reset the share link?",
@@ -371,6 +387,32 @@ struct ShareTripView: View {
                     }
                 }
             }
+
+            addProfileButton
+        }
+    }
+
+    /// M4 §2/§5.3: kids, grandparents, anyone assignable with no account.
+    /// Same RLS-mirroring gate as adding an itinerary/packing item
+    /// (`trip_profiles_insert`: organizer or companion) — reused rather
+    /// than reinvented, per `ItemPermissions`'s own doc comment.
+    @ViewBuilder
+    private var addProfileButton: some View {
+        if ItemPermissions.canAdd(role: myRole) {
+            Button {
+                isPresentingAddProfile = true
+            } label: {
+                HStack {
+                    Image(systemName: "person.badge.plus")
+                    Text("Add someone without the app").font(Typo.body(weight: .semibold))
+                }
+                .foregroundStyle(Palette.indigo)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.md)
+                .background(Palette.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, Spacing.sm)
         }
     }
 
@@ -426,8 +468,12 @@ struct ShareTripView: View {
         }
     }
 
+    /// Tappable (opens `TripProfileFormSheet` in edit mode) and swipeable
+    /// only for organizers — `trip_profiles_update`/`_delete` RLS is
+    /// organizer-only (confirmed live), unlike the insert path
+    /// `addProfileButton` gates more permissively.
     private func unlinkedProfileRow(_ profile: TripProfile) -> some View {
-        HStack(spacing: Spacing.md) {
+        let content = HStack(spacing: Spacing.md) {
             Circle()
                 .fill(AvatarColor.color(named: profile.avatarColor))
                 .frame(width: 42, height: 42)
@@ -440,8 +486,26 @@ struct ShareTripView: View {
             }
             Spacer(minLength: Spacing.sm)
             PillLabel(text: "Assignable \u{00B7} no account", tint: .neutral)
+            if isOrganizer {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.slate.opacity(0.5))
+            }
         }
         .padding(.vertical, Spacing.sm)
+        .contentShape(Rectangle())
+
+        return Group {
+            if isOrganizer {
+                Button { editingProfile = profile } label: { content }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing) {
+                        Button("Remove", role: .destructive) { deleteProfile(profile) }
+                    }
+            } else {
+                content
+            }
+        }
     }
 
     // MARK: - Mutations (SYNC_DESIGN.md: SwiftData write on the main
@@ -615,6 +679,41 @@ struct ShareTripView: View {
         modelContext.delete(member)
         try? modelContext.save()
         Task { await syncEngine?.enqueueDelete(table: .tripMembers, rowId: id, tripId: tripId) }
+        toast = "Removed from trip"
+    }
+
+    // MARK: - Non-app profiles (M4 §2/§5.3)
+
+    private func addProfile(displayName: String, avatarColor: String) {
+        guard !displayName.isEmpty else { return }
+        let profile = TripProfile(
+            id: UUID(), tripId: tripId, displayName: displayName, avatarColor: avatarColor,
+            linkedUserId: nil, createdAt: .now
+        )
+        modelContext.insert(profile)
+        try? modelContext.save()
+        let dto = profile.toDTO()
+        let id = profile.id
+        Task { await syncEngine?.enqueueUpsert(table: .tripProfiles, rowId: id, tripId: tripId, payload: dto) }
+        toast = "\(displayName) added"
+    }
+
+    private func updateProfile(_ profile: TripProfile, displayName: String, avatarColor: String) {
+        guard !displayName.isEmpty else { return }
+        profile.displayName = displayName
+        profile.avatarColor = avatarColor
+        try? modelContext.save()
+        let dto = profile.toDTO()
+        let id = profile.id
+        Task { await syncEngine?.enqueueUpsert(table: .tripProfiles, rowId: id, tripId: tripId, payload: dto) }
+        toast = "Profile updated"
+    }
+
+    private func deleteProfile(_ profile: TripProfile) {
+        let id = profile.id
+        modelContext.delete(profile)
+        try? modelContext.save()
+        Task { await syncEngine?.enqueueDelete(table: .tripProfiles, rowId: id, tripId: tripId) }
         toast = "Removed from trip"
     }
 

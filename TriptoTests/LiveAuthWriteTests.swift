@@ -129,4 +129,91 @@ final class LiveAuthWriteTests: XCTestCase {
         // Cleanup: B removes itself; A's throwaway trip is swept separately.
         _ = try? await Supa.client.rpc("delete_account").execute()
     }
+
+    private struct ItemInsert: Encodable {
+        let id: UUID
+        let tripId: UUID
+        let category: String
+        let title: String
+        let startsAt: String
+        let tz: String
+        let createdBy: UUID
+    }
+    private struct TripProfileInsert: Encodable {
+        let id: UUID
+        let tripId: UUID
+        let displayName: String
+    }
+    private struct AssigneeInsert: Encodable {
+        let itemId: UUID
+        let profileId: UUID
+    }
+    private struct AssigneeRow: Decodable {
+        let itemId: UUID
+        let profileId: UUID
+    }
+
+    /// M4: proves the composite-key (`item_id`, `profile_id`) delete
+    /// `SyncEngine+Push.pushDelete`'s `.itemAssignees` branch special-cases
+    /// actually works against the live backend — `item_assignees` has no
+    /// surrogate `id` column (confirmed live via `list_tables`), so this is
+    /// the one mirrored table where every other table's plain
+    /// `.eq("id", value: rowId)` delete shape would be wrong (`column "id"
+    /// does not exist`). Reuses this file's harness/gating per this
+    /// milestone's CRITICAL verification rule: signed build required (an
+    /// authenticated write), `TRIPTO_LIVE_TESTS=1` to run.
+    func testItemAssigneeCompositeKeyInsertAndDelete() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["TRIPTO_LIVE_TESTS"] == "1",
+            "Live backend test — set TRIPTO_LIVE_TESTS=1 to run."
+        )
+
+        let session = try await Supa.client.auth.signInAnonymously()
+        let uid = session.user.id
+
+        let tripId = UUID()
+        try await Supa.client.from("trips").insert(
+            TripInsert(
+                id: tripId, title: "ItemAssigneeCompositeKeyTest",
+                startDate: "2026-09-01", endDate: "2026-09-03", createdBy: uid
+            ),
+            returning: .minimal
+        ).execute()
+
+        let itemId = UUID()
+        try await Supa.client.from("itinerary_items").insert(
+            ItemInsert(
+                id: itemId, tripId: tripId, category: "activity", title: "Composite key test item",
+                startsAt: "2026-09-01T10:00:00Z", tz: "UTC", createdBy: uid
+            ),
+            returning: .minimal
+        ).execute()
+
+        let profileId = UUID()
+        try await Supa.client.from("trip_profiles").insert(
+            TripProfileInsert(id: profileId, tripId: tripId, displayName: "Composite Test Profile"),
+            returning: .minimal
+        ).execute()
+
+        // Insert the assignment — the exact shape `pushUpsert`'s plain-insert
+        // path issues (no `.upsert()`, see that method's doc comment).
+        try await Supa.client.from("item_assignees").insert(
+            AssigneeInsert(itemId: itemId, profileId: profileId), returning: .minimal
+        ).execute()
+
+        var rows: [AssigneeRow] = try await Supa.client.from("item_assignees").select()
+            .eq("item_id", value: itemId).eq("profile_id", value: profileId).execute().value
+        XCTAssertEqual(rows.count, 1, "assignment did not reach the server")
+
+        // Delete by the composite key — the exact shape
+        // `SyncEngine+Push.pushDelete`'s `.itemAssignees` branch issues.
+        try await Supa.client.from("item_assignees").delete()
+            .eq("item_id", value: itemId).eq("profile_id", value: profileId).execute()
+
+        rows = try await Supa.client.from("item_assignees").select()
+            .eq("item_id", value: itemId).eq("profile_id", value: profileId).execute().value
+        XCTAssertTrue(rows.isEmpty, "composite-key delete did not remove the row server-side")
+
+        _ = try? await Supa.client.rpc("delete_account").execute()
+    }
 }

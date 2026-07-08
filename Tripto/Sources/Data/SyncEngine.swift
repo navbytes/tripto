@@ -140,6 +140,27 @@ actor SyncEngine {
         }
     }
 
+    /// `item_assignees`-only entry point (see `ItemAssignee`'s doc comment):
+    /// `rowId` (`ItemAssignee.compositeId`) is purely a local dedup key, so
+    /// unlike the generic `enqueueDelete` above, the real `itemId`/
+    /// `profileId` pair has to travel with the op or the push path has
+    /// nothing to build `.eq("item_id", ...).eq("profile_id", ...)` from —
+    /// see `SyncEngine+Push.pushDelete`'s `.itemAssignees` branch, the other
+    /// half of this.
+    func enqueueDeleteItemAssignee(itemId: UUID, profileId: UUID, tripId: UUID?) async {
+        let rowId = ItemAssignee.compositeId(itemId: itemId, profileId: profileId)
+        do {
+            let payload = ItemAssigneeDTO(itemId: itemId, profileId: profileId)
+            let data = try JSONCoding.encoder.encode(payload)
+            let json = String(data: data, encoding: .utf8) ?? "{}"
+            try await store.enqueueDelete(table: .itemAssignees, rowId: rowId, tripId: tripId, payloadJSON: json)
+            await refreshStatusCounts()
+            schedulePush()
+        } catch {
+            logDebug("enqueueDeleteItemAssignee failed: \(error)")
+        }
+    }
+
     // MARK: - DEBUG reset
 
     /// "Reset local cache (re-pull)" — wipes every mirrored row and the

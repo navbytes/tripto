@@ -74,6 +74,9 @@ struct HomeView: View {
             .navigationDestination(for: SettingsRoute.self) { _ in
                 SettingsView()
             }
+            .navigationDestination(for: PackingRoute.self) { route in
+                PackingListView(tripId: route.tripId)
+            }
             .toolbar {
                 #if DEBUG
                 ToolbarItem(placement: .topBarLeading) {
@@ -179,6 +182,10 @@ struct HomeView: View {
         }
         if arguments.contains("-uitestOpenShare"), let targetTripId, path.count == 1 {
             path.append(ShareRoute(tripId: targetTripId))
+        }
+        // M4 verify drill: Home -> Trip -> Packing in one launch.
+        if arguments.contains("-uitestOpenPacking"), let targetTripId, path.count == 1 {
+            path.append(PackingRoute(tripId: targetTripId))
         }
         if arguments.contains("-uitestOpenSettings"), path.isEmpty {
             path.append(SettingsRoute())

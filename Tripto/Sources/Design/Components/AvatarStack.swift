@@ -5,7 +5,10 @@ import SwiftUI
 /// come from `TripProfile`, never from `TripMember` directly — a
 /// `TripProfile` exists for everyone on the trip, account or not.
 struct AvatarStack: View {
-    struct Person: Identifiable {
+    /// `Equatable` so it can ride inside the timeline's value-snapshot row
+    /// models (`TimelineCardModel.assignees`, §7.2's "Equatable row views
+    /// over value snapshots" — see `TimelineRowViews.swift`'s doc comment).
+    struct Person: Identifiable, Equatable {
         let id: UUID
         let initial: String
         let colorName: String

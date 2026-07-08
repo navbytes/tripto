@@ -66,6 +66,10 @@ enum SyncTable: String, Codable, CaseIterable, Sendable {
     case packingItems = "packing_items"
     case shareLinks = "share_links"
     case invites
+    /// M4: composite PK (`item_id`, `profile_id`), no surrogate `id` column
+    /// — see `ItemAssignee`'s doc comment for how this app's single-`rowId`
+    /// outbox represents that.
+    case itemAssignees = "item_assignees"
 }
 
 /// `OutboxOp.op` (SYNC_DESIGN.md "Local store").

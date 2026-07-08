@@ -50,6 +50,18 @@ enum DemoSeeder {
             id: UUID(), tripId: tripId, displayName: authManager.userId != nil ? "You" : "Organizer",
             avatarColor: "amber", linkedUserId: userId, createdAt: now
         )
+        // M4 family layer: two non-app profiles (BUILD_PLAN.md §3.3/§5.3) —
+        // the kids/grandparents the "Just mine" filter and packing list are
+        // built for, seeded the same way a real organizer would add them
+        // via `ShareTripView`'s "Add someone without the app".
+        let meeraProfile = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Meera (7)", avatarColor: "plum",
+            linkedUserId: nil, createdAt: now
+        )
+        let grandmaProfile = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Grandma", avatarColor: "sky",
+            linkedUserId: nil, createdAt: now
+        )
 
         var items: [ItineraryItem] = []
         items.append(contentsOf: flights(tripId: tripId, userId: userId, now: now, nyTz: nyTz, lisbonTz: lisbonTz, madridTz: madridTz))
@@ -57,21 +69,152 @@ enum DemoSeeder {
         items.append(contentsOf: fillerItems(
             tripId: tripId, tripStartDay: tripStartDay, userId: userId, now: now, lisbonTz: lisbonTz, madridTz: madridTz
         ))
+        // A dedicated, unambiguous kid-tagged item (BUILD_PLAN.md §5.4) —
+        // clearer for the verify-drill screenshot than reaching into the
+        // sprawling filler pool by fragile index/title matching.
+        let napItem = familyDemoItem(tripId: tripId, userId: userId, now: now, lisbonTz: lisbonTz)
+        items.append(napItem)
+        // Tag two existing filler items in place — `details` is a computed
+        // get/set property over the full `ItemDetails` struct
+        // (`ItineraryItem+Details.swift`), so mutating just `.tags` here
+        // preserves whatever address/ticketRef/etc. the filler loop already
+        // set, exactly like a real edit through `AddItemSheet` would.
+        let strollerItem = items.first { $0.title == "Oceanário de Lisboa" }
+        strollerItem?.details.tags = [ItemTag.strollerOk.rawValue]
+        let kidsMenuItem = items.first { $0.category == .food }
+        kidsMenuItem?.details.tags = [ItemTag.kidsMenu.rawValue]
+
+        // M4: item_assignees — "Just mine" needs at least one item per
+        // profile so every chip has something to filter to.
+        var assignees: [ItemAssignee] = [ItemAssignee(itemId: napItem.id, profileId: meeraProfile.id)]
+        if let strollerItem {
+            assignees.append(ItemAssignee(itemId: strollerItem.id, profileId: meeraProfile.id))
+        }
+        if let kidsMenuItem {
+            assignees.append(ItemAssignee(itemId: kidsMenuItem.id, profileId: meeraProfile.id))
+            assignees.append(ItemAssignee(itemId: kidsMenuItem.id, profileId: grandmaProfile.id))
+        }
+        if let outboundFlight = items.first(where: { $0.title == "TAP TP1234" }) {
+            assignees.append(ItemAssignee(itemId: outboundFlight.id, profileId: grandmaProfile.id))
+        }
+
+        // M4: a dozen packing items across every group_key, some already
+        // packed (for a meaningful progress bar) and some assigned.
+        //
+        // Deliberately never assigned to `tripProfile.id` (the organizer's
+        // own "You" row this function builds below): the server's own
+        // trip-creation trigger *also* seats the organizer with its own
+        // `trip_profiles` row (linked_user_id = this user), and a partial
+        // unique index on `(trip_id, linked_user_id) WHERE linked_user_id
+        // IS NOT NULL` means this function's separately-`UUID()`-generated
+        // `tripProfile`/`member` rows always lose that race server-side —
+        // confirmed live: `pushUpsert`'s 23505-conflict fallback
+        // (`.update(values).eq("id", value: op.rowId)`) matches zero rows
+        // since `op.rowId` is this function's id, not the trigger's, so it
+        // "succeeds" without ever creating a second row. That's harmless
+        // for `tripProfile`/`member` themselves (this function's *local*
+        // copies still render fine — SwiftUI reads the local mirror, never
+        // re-fetches before this matters), but M4's `item_assignees`/
+        // `packing_items` genuinely FK-reference `trip_profiles.id`, so
+        // pointing one at this row 23503s for real. Pre-existing M1 gap,
+        // not fixed here (out of scope for this milestone) — worked around
+        // by simply never assigning demo data to the organizer's row.
+        let packing = packingItems(
+            tripId: tripId, userId: userId, now: now, meeraId: meeraProfile.id, grandmaId: grandmaProfile.id
+        )
 
         modelContext.insert(trip)
         modelContext.insert(member)
         modelContext.insert(tripProfile)
-        for item in items { modelContext.insert(item) }
+        modelContext.insert(meeraProfile)
+        modelContext.insert(grandmaProfile)
         try? modelContext.save()
 
         guard let syncEngine else { return tripId }
         await syncEngine.enqueueUpsert(table: .trips, rowId: trip.id, tripId: trip.id, payload: trip.toDTO())
         await syncEngine.enqueueUpsert(table: .tripMembers, rowId: member.id, tripId: tripId, payload: member.toDTO())
         await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: tripProfile.id, tripId: tripId, payload: tripProfile.toDTO())
+        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: meeraProfile.id, tripId: tripId, payload: meeraProfile.toDTO())
+        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: grandmaProfile.id, tripId: tripId, payload: grandmaProfile.toDTO())
+        // `item_assignees`/`packing_items` below FK-reference both
+        // `trip_profiles.id` and (for assignees) `itinerary_items.id` — an
+        // explicit synchronous flush per phase, rather than trusting the
+        // debounced queue's FIFO-by-`createdAt` ordering across a burst of
+        // ~70 same-instant enqueues, so a same-batch sibling row is
+        // guaranteed to exist server-side before anything references it.
+        // DEBUG-only seeding; `flushPush()` is the same push the debounced
+        // timer would eventually call, just awaited synchronously here.
+        await syncEngine.flushPush()
+
+        for item in items { modelContext.insert(item) }
+        try? modelContext.save()
         for item in items {
             await syncEngine.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: tripId, payload: item.toDTO())
         }
+        await syncEngine.flushPush()
+
+        for assignee in assignees { modelContext.insert(assignee) }
+        for packingItem in packing { modelContext.insert(packingItem) }
+        try? modelContext.save()
+        for assignee in assignees {
+            await syncEngine.enqueueUpsert(table: .itemAssignees, rowId: assignee.id, tripId: tripId, payload: assignee.toDTO())
+        }
+        for packingItem in packing {
+            await syncEngine.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: tripId, payload: packingItem.toDTO())
+        }
+        await syncEngine.flushPush()
         return tripId
+    }
+
+    // MARK: - M4 family layer (non-app profiles, item_assignees, packing)
+
+    /// One clean, unambiguous nap-tagged activity assigned to the (non-app)
+    /// "Meera" profile — see the doc comment where this is called.
+    private static func familyDemoItem(tripId: UUID, userId: UUID, now: Date, lisbonTz: TimeZone) -> ItineraryItem {
+        var lisbonCalendar = Calendar(identifier: .gregorian)
+        lisbonCalendar.timeZone = lisbonTz
+        var details = ItemDetails.empty
+        details.tags = [ItemTag.nap.rawValue]
+        return makeItem(
+            tripId: tripId, category: .activity, title: "Quiet time",
+            startsAt: instant(2026, 5, 15, 15, 0, calendar: lisbonCalendar), endsAt: nil,
+            tz: lisbonTz.identifier, locationName: "Memmo Alfama, Lisbon", confirmation: nil,
+            details: details, userId: userId, now: now
+        )
+    }
+
+    private static func packingItems(
+        tripId: UUID, userId: UUID, now: Date, meeraId: UUID, grandmaId: UUID
+    ) -> [PackingItem] {
+        struct Draft {
+            let label: String
+            let group: PackingGroupKey
+            let assignee: UUID?
+            let isDone: Bool
+        }
+        let drafts: [Draft] = [
+            // Unassigned, not the organizer's own profile — see the doc
+            // comment where this function is called.
+            Draft(label: "Passports (all 5)", group: .documents, assignee: nil, isDone: true),
+            Draft(label: "Travel insurance printout", group: .documents, assignee: nil, isDone: true),
+            Draft(label: "Boarding passes", group: .documents, assignee: nil, isDone: false),
+            Draft(label: "Meera\u{2019}s car seat", group: .kids, assignee: meeraId, isDone: false),
+            Draft(label: "Stroller (compact)", group: .kids, assignee: meeraId, isDone: false),
+            Draft(label: "Snacks & activities for the flight", group: .kids, assignee: nil, isDone: true),
+            Draft(label: "Universal power adapters \u{d7}3", group: .shared, assignee: nil, isDone: false),
+            Draft(label: "Sunscreen (family size)", group: .shared, assignee: grandmaId, isDone: true),
+            Draft(label: "First-aid kit", group: .shared, assignee: nil, isDone: false),
+            Draft(label: "Rain jackets", group: .clothing, assignee: nil, isDone: false),
+            Draft(label: "Swimwear", group: .clothing, assignee: grandmaId, isDone: true),
+            Draft(label: "Portable phone charger", group: .custom, assignee: nil, isDone: false),
+        ]
+        return drafts.map { draft in
+            PackingItem(
+                id: UUID(), tripId: tripId, label: draft.label, groupKeyRaw: draft.group.rawValue,
+                assigneeProfileId: draft.assignee, isDone: draft.isDone, createdBy: userId,
+                createdAt: now, updatedAt: now, updatedBy: nil
+            )
+        }
     }
 
     // MARK: - Named items (ACCEPTANCE.md's exact flight, tz-crossing legs, multi-night stays)

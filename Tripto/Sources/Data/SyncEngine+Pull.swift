@@ -98,6 +98,19 @@ extension SyncEngine {
             try await store.applyShareLinks(shareLinksResult, tripId: tripId)
             try await store.applyInvites(invitesResult, tripId: tripId)
 
+            // `item_assignees` has no `trip_id` column (composite PK
+            // item_id+profile_id — `ItemAssignee`'s doc comment), so it
+            // can't join the four concurrent queries above by a plain
+            // `.eq("trip_id", ...)`; it depends on `itemsResult`'s ids
+            // instead, so it runs after they resolve. Skipping the network
+            // round trip entirely for a (rare) itemless trip, rather than
+            // sending `.in("item_id", values: [])`.
+            let itemIds = itemsResult.map(\.id)
+            let assigneesResult: [ItemAssigneeDTO] = itemIds.isEmpty ? [] : try await Supa.client
+                .from(SyncTable.itemAssignees.rawValue)
+                .select().in("item_id", values: itemIds).execute().value
+            try await store.applyItemAssignees(assigneesResult, tripId: tripId)
+
             await status.markSynced()
         } catch {
             logDebug("pullTrip(\(tripId)) failed: \(error)")

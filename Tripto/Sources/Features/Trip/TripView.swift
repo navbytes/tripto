@@ -28,6 +28,13 @@ struct ShareRoute: Hashable {
 /// per-trip.
 struct SettingsRoute: Hashable {}
 
+/// M4: `PackingListView` (Features/Trip/PackingListView.swift), pushed from
+/// `TripView`'s tab-bar row (this milestone's brief: "Reachable from
+/// TripView via a toolbar 'Packing' button").
+struct PackingRoute: Hashable {
+    let tripId: UUID
+}
+
 /// The trip screen (BUILD_PLAN.md §4.2 — THE core screen): cover-gradient
 /// hero, Itinerary · Bookings sub-tabs (Map/$ Split hidden per §9.4), and
 /// the day-grouped timeline. Renders entirely from the local SwiftData
@@ -45,6 +52,11 @@ struct TripView: View {
     @Query private var members: [TripMember]
     @Query private var tripProfiles: [TripProfile]
     @Query private var profiles: [Profile]
+    /// Unfiltered, like `tripProfiles`' siblings on other screens —
+    /// `ItemAssignee` has no `tripId` of its own (composite PK item_id+
+    /// profile_id; see its doc comment), so this scopes to the current trip
+    /// by cross-referencing `items`' ids instead of a predicate here.
+    @Query private var itemAssignees: [ItemAssignee]
 
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
@@ -55,6 +67,8 @@ struct TripView: View {
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
     @State private var toast: String?
+    /// "Just mine" selection (BUILD_PLAN.md §5.4) — `nil` is "Everyone."
+    @State private var selectedProfileFilter: UUID?
     @Namespace private var tabUnderline
 
     // M2 verify-drill autopilot only (see `WelcomeView`/`HomeView`'s
@@ -140,6 +154,14 @@ struct TripView: View {
         if arguments.contains("-uitestOpenAdd") {
             isPresentingAdd = true
         }
+        // M4 verify drill: selects the "Just mine" filter to the seeded
+        // non-app "Meera" profile so the timeline/banner screenshot doesn't
+        // depend on tapping a `PersonFilterBar` chip (no GUI tap automation
+        // available in this environment).
+        if arguments.contains("-uitestFilterToMeera"),
+            let meera = tripProfiles.first(where: { $0.displayName.hasPrefix("Meera") }) {
+            selectedProfileFilter = meera.id
+        }
         if arguments.contains("-uitestOpenBookingDetail") {
             // Prefer a flight (the boarding-pass screenshot's whole point);
             // items sort by raw instant, so a same-UTC-day filler in
@@ -162,18 +184,31 @@ struct TripView: View {
                 SyncBanner()
             }
 
-            tabBar
+            tabBar(for: trip)
+
+            if selectedTab == .itinerary, !tripProfiles.isEmpty {
+                PersonFilterBar(chips: personFilterChips, selection: $selectedProfileFilter)
+                if let selectedProfileFirstName {
+                    PersonFilterBanner(
+                        personFirstName: selectedProfileFirstName,
+                        visibleCount: filteredItems.count,
+                        totalCount: items.count
+                    )
+                }
+            }
 
             ZStack(alignment: .bottomTrailing) {
                 switch selectedTab {
                 case .itinerary:
                     ItineraryTabView(
                         trip: trip,
-                        items: items,
+                        items: filteredItems,
                         pendingRowIds: syncStatus.pendingRowIds,
                         myUserId: authManager.userId,
                         namesById: profileNames,
                         canEdit: canAddItems,
+                        assigneesByItem: assigneesByItem,
+                        filteredPersonName: selectedProfileFirstName,
                         toast: $toast
                     )
                 case .bookings:
@@ -262,7 +297,13 @@ struct TripView: View {
 
     // MARK: - Sub-tabs (Itinerary · Bookings only — Map/$ Split hidden, §9.4)
 
-    private var tabBar: some View {
+    /// Sub-tabs plus the M4 "Packing" entry point (this milestone's brief:
+    /// "Reachable from TripView via a toolbar 'Packing' button (sub-tabs
+    /// stay Itinerary·Bookings)") — `TripView`'s hero/body have no native
+    /// `.toolbar` (it's hidden for the custom gradient hero), so this row
+    /// is the closest equivalent surface, matching where the sub-tabs
+    /// already live.
+    private func tabBar(for trip: Trip) -> some View {
         HStack(spacing: Spacing.xl) {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Button {
@@ -292,6 +333,14 @@ struct TripView: View {
                 .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
             }
             Spacer()
+            NavigationLink(value: PackingRoute(tripId: trip.id)) {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "bag.fill").font(.system(size: 13, weight: .semibold))
+                    Text("Packing").font(Typo.body(Typo.Size.caption, weight: .semibold))
+                }
+                .foregroundStyle(Palette.slate)
+            }
+            .accessibilityLabel("Packing list")
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.top, Spacing.md)
@@ -315,6 +364,56 @@ struct TripView: View {
             names[profile.id] = profile.displayName
         }
         return names
+    }
+
+    // MARK: - "Just mine" (BUILD_PLAN.md §5.4)
+
+    /// `items` scoped to `selectedProfileFilter` — see `PersonFilter`'s doc
+    /// comment for the "no assignees = for everyone" rule.
+    private var filteredItems: [ItineraryItem] {
+        PersonFilter.filteredItems(items, assignees: itemAssignees, selectedProfileId: selectedProfileFilter)
+    }
+
+    /// `itemId` -> resolved assignee avatars, for `ItineraryTabView`'s
+    /// per-card `AvatarStack`. Scoped to `items`' own ids since
+    /// `itemAssignees` is an unfiltered query (`ItemAssignee` has no
+    /// `tripId` of its own).
+    private var assigneesByItem: [UUID: [AvatarStack.Person]] {
+        let idsByItem = PersonFilter.assigneeProfileIds(itemAssignees, itemIds: Set(items.map(\.id)))
+        let profilesById = Dictionary(uniqueKeysWithValues: tripProfiles.map { ($0.id, $0) })
+        return idsByItem.mapValues { profileIds in
+            profileIds.compactMap { id -> AvatarStack.Person? in
+                guard let profile = profilesById[id] else { return nil }
+                return AvatarStack.Person(id: profile.id, initial: initials(from: profile.displayName), colorName: profile.avatarColor)
+            }
+        }
+    }
+
+    private var personFilterChips: [PersonFilterBar.Chip] {
+        tripProfiles
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { profile in
+                PersonFilterBar.Chip(
+                    id: profile.id,
+                    firstName: firstName(from: profile.displayName),
+                    initial: initials(from: profile.displayName),
+                    colorName: profile.avatarColor
+                )
+            }
+    }
+
+    private var selectedProfileFirstName: String? {
+        guard let selectedProfileFilter else { return nil }
+        guard let profile = tripProfiles.first(where: { $0.id == selectedProfileFilter }) else { return nil }
+        return firstName(from: profile.displayName)
+    }
+
+    private func firstName(from displayName: String) -> String {
+        displayName.split(separator: " ").first.map(String.init) ?? displayName
+    }
+
+    private func initials(from displayName: String) -> String {
+        firstName(from: displayName).prefix(1).uppercased()
     }
 
     private var missingTripState: some View {

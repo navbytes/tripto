@@ -175,6 +175,15 @@ extension SyncEngine {
                 .insert(values, returning: .minimal)
                 .execute()
         } catch let error as PostgrestError where error.code == "23505" {
+            guard op.table != .itemAssignees else {
+                // `item_assignees`' PK *is* (item_id, profile_id) — every
+                // column this row has. A conflict here means the assignment
+                // already exists exactly as intended, so there is nothing to
+                // update (and no `id` column to `.eq(...)` against even if
+                // there were — see `ItemAssignee`'s doc comment). Treat the
+                // conflict as success, unlike every other mirrored table.
+                return
+            }
             // unique_violation on `id` — this row already exists server-side
             // (a later edit of something this device previously created),
             // not a first-time create. Fall back to a plain update.
@@ -187,6 +196,28 @@ extension SyncEngine {
     }
 
     private func pushDelete(_ op: OutboxOpSnapshot) async throws {
+        guard op.table != .itemAssignees else {
+            // Composite PK, no `id` column — `op.rowId` is only
+            // `ItemAssignee.compositeId(...)`, a local dedup key with no
+            // server-side meaning. `enqueueDeleteItemAssignee` stashed the
+            // real pair in `payloadJSON` (the *decoding* — not passthrough —
+            // decoder: this payload was encoded from a real `ItemAssigneeDTO`
+            // via `JSONCoding.encoder`, so it needs the matching
+            // `.convertFromSnakeCase` decode back into that same DTO shape,
+            // unlike `pushUpsert`'s `AnyJSON` passthrough above).
+            guard let data = op.payloadJSON.data(using: .utf8),
+                let dto = try? JSONCoding.decoder.decode(ItemAssigneeDTO.self, from: data)
+            else {
+                throw SyncEngineError.invalidPayload
+            }
+            try await Supa.client
+                .from(op.table.rawValue)
+                .delete()
+                .eq("item_id", value: dto.itemId)
+                .eq("profile_id", value: dto.profileId)
+                .execute()
+            return
+        }
         try await Supa.client
             .from(op.table.rawValue)
             .delete()

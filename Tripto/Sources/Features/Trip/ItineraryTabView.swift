@@ -15,6 +15,18 @@ struct ItineraryTabView: View {
     let myUserId: UUID?
     let namesById: [UUID: String]
     let canEdit: Bool
+    /// "Just mine" assignee clusters (BUILD_PLAN.md §5.4), already resolved
+    /// to display-ready `AvatarStack.Person`s by `TripView` — this view
+    /// stays a pure renderer and never touches `ItemAssignee`/`TripProfile`
+    /// directly.
+    var assigneesByItem: [UUID: [AvatarStack.Person]] = [:]
+    /// First name of the person `PersonFilterBar` is currently filtering to
+    /// — `nil` for "Everyone". Only changes the empty-state copy: `items`
+    /// arrives already filtered (`PersonFilter.filteredItems`), so a
+    /// filtered-to-zero trip that still has *other* items must not claim
+    /// the trip itself has nothing planned (this milestone's brief's own
+    /// context banner already states the "N of M" count above this view).
+    var filteredPersonName: String? = nil
     @Binding var toast: String?
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
@@ -23,7 +35,8 @@ struct ItineraryTabView: View {
         let tripStartDay = DayDate.from(trip.startDate, calendar: .current)
         let sections = ItineraryDayBucketing.sections(items: items, tripStart: tripStartDay)
         return TimelineBuilder.build(
-            sections: sections, pendingRowIds: pendingRowIds, myUserId: myUserId, namesById: namesById
+            sections: sections, pendingRowIds: pendingRowIds, myUserId: myUserId, namesById: namesById,
+            assigneesByItem: assigneesByItem
         )
     }
 
@@ -74,6 +87,22 @@ struct ItineraryTabView: View {
                                 withAnimation { proxy.scrollTo(target, anchor: .center) }
                             }
                         }
+                        // M4 verify drill: scrolls to the first card
+                        // carrying a kid-aware tag (BUILD_PLAN.md §5.4) —
+                        // same no-gesture-automation reasoning as
+                        // `-uitestScrollTimeline` above.
+                        if ProcessInfo.processInfo.arguments.contains("-uitestScrollToTag") {
+                            let target = dayModels
+                                .flatMap(\.rows)
+                                .first {
+                                    if case .card(let model) = $0 { !model.tags.isEmpty } else { false }
+                                }?
+                                .id
+                            if let target {
+                                try? await Task.sleep(nanoseconds: 300_000_000)
+                                withAnimation { proxy.scrollTo(target, anchor: .center) }
+                            }
+                        }
                         #endif
                     }
                 }
@@ -109,31 +138,59 @@ struct ItineraryTabView: View {
     private var emptyState: some View {
         ScrollView {
             VStack(spacing: Spacing.xl) {
-                skeletonRows
-                    .padding(.top, Spacing.xl)
+                if let filteredPersonName {
+                    filteredEmptyState(personName: filteredPersonName)
+                } else {
+                    skeletonRows
+                        .padding(.top, Spacing.xl)
 
-                VStack(spacing: Spacing.xs) {
-                    Text(canEdit ? "Add your first flight, stay, or plan" : "Nothing planned yet")
-                        .font(Typo.display(Typo.Size.title))
-                        .foregroundStyle(Palette.ink)
+                    VStack(spacing: Spacing.xs) {
+                        Text(canEdit ? "Add your first flight, stay, or plan" : "Nothing planned yet")
+                            .font(Typo.display(Typo.Size.title))
+                            .foregroundStyle(Palette.ink)
+                            .multilineTextAlignment(.center)
+                        Text(
+                            canEdit
+                                ? "Tap the + button to start building the itinerary."
+                                : "The organizer hasn\u{2019}t added anything yet."
+                        )
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
                         .multilineTextAlignment(.center)
-                    Text(
-                        canEdit
-                            ? "Tap the + button to start building the itinerary."
-                            : "The organizer hasn\u{2019}t added anything yet."
-                    )
-                    .font(Typo.body())
-                    .foregroundStyle(Palette.slate)
-                    .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, Spacing.xl)
+                    }
+                    .padding(.horizontal, Spacing.xl)
 
-                if canEdit {
-                    importTeaser
+                    if canEdit {
+                        importTeaser
+                    }
                 }
             }
             .padding(.bottom, Spacing.xxl * 2)
         }
+    }
+
+    /// Shown instead of the "add your first plan" skeleton when
+    /// `PersonFilterBar` has filtered the (non-empty) trip down to zero
+    /// items for one person — this milestone's brief's "Just mine" filter;
+    /// the trip itself isn't empty, so the day-skeleton/import-teaser below
+    /// would misrepresent it as one.
+    private func filteredEmptyState(personName: String) -> some View {
+        VStack(spacing: Spacing.xs) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 28))
+                .foregroundStyle(Palette.amber)
+                .padding(.bottom, Spacing.sm)
+            Text("Nothing assigned to \(personName) yet")
+                .font(Typo.display(Typo.Size.title))
+                .foregroundStyle(Palette.ink)
+                .multilineTextAlignment(.center)
+            Text("Assign a plan to them from a booking\u{2019}s \u{201C}Who\u{2019}s this for?\u{201D}, or switch back to Everyone.")
+                .font(Typo.body())
+                .foregroundStyle(Palette.slate)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, Spacing.xxl)
+        .padding(.horizontal, Spacing.xl)
     }
 
     private var skeletonRows: some View {

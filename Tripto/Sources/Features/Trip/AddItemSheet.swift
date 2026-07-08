@@ -18,12 +18,28 @@ struct AddItemSheet: View {
     let editing: ItineraryItem?
     let onToast: (String) -> Void
 
+    @Query var tripProfiles: [TripProfile]
+    @Query private var members: [TripMember]
+    /// `ItemAssignee`s for the item being edited — filtered to a sentinel
+    /// (never-matching) id when adding, since there's no item yet to have
+    /// any. Seeds `selectedAssigneeProfileIds` once via `.task` below
+    /// (`@Query` results aren't available synchronously in `init`, unlike
+    /// `editing`'s other fields).
+    @Query private var existingAssignees: [ItemAssignee]
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
     @Environment(\.dismiss) private var dismiss
 
     @State var category: ItemCategory
+
+    // Family (M4 §3): "Who's this for?" + kid-aware tags — apply across
+    // every category, unlike the fields above.
+    @State var selectedTags: Set<String> = []
+    @State var selectedAssigneeProfileIds: Set<UUID> = []
+    @State private var originalAssigneeProfileIds: Set<UUID> = []
+    @State private var hasLoadedAssignees = false
 
     // Flight
     @State var airline = ""
@@ -82,6 +98,11 @@ struct AddItemSheet: View {
         self.editing = editing
         self.onToast = onToast
 
+        _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
+        _members = Query(filter: #Predicate<TripMember> { $0.tripId == tripId })
+        let existingAssigneesItemId = editing?.id ?? UUID()
+        _existingAssignees = Query(filter: #Predicate<ItemAssignee> { $0.itemId == existingAssigneesItemId })
+
         if let editing {
             let details = editing.details
             _category = State(initialValue: editing.category)
@@ -90,6 +111,7 @@ struct AddItemSheet: View {
             _locationLat = State(initialValue: editing.locationLat)
             _locationLng = State(initialValue: editing.locationLng)
             _address = State(initialValue: details.address)
+            _selectedTags = State(initialValue: Set(details.tags))
 
             switch editing.category {
             case .flight:
@@ -172,6 +194,8 @@ struct AddItemSheet: View {
                             }
                         }
 
+                        familySection
+
                         saveButton
                             .padding(.top, Spacing.xs)
                     }
@@ -182,6 +206,7 @@ struct AddItemSheet: View {
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
         }
+        .task { seedAssigneesIfNeeded() }
     }
 
     private var header: some View {
@@ -275,7 +300,8 @@ struct AddItemSheet: View {
     private func save() {
         guard isValid, let userId = authManager.userId else { return }
         let now = Date()
-        let fields = composedFields()
+        var fields = composedFields()
+        fields.details.tags = Array(selectedTags)
 
         if let editing {
             editing.category = category
@@ -294,6 +320,7 @@ struct AddItemSheet: View {
             let dto = editing.toDTO()
             let rowId = editing.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
+            reconcileAssignees(itemId: rowId)
             onToast("\(category.displayName) updated")
         } else {
             let item = ItineraryItem(
@@ -310,11 +337,75 @@ struct AddItemSheet: View {
             let dto = item.toDTO()
             let rowId = item.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
+            reconcileAssignees(itemId: rowId)
             onToast("\(category.displayName) added")
         }
 
         persistZoneDefaults()
         dismiss()
+    }
+
+    // MARK: - Family: assignees + tags (this milestone's brief §3)
+
+    private var myRole: TripRole? {
+        guard let userId = authManager.userId else { return nil }
+        return members.first { $0.userId == userId }?.role
+    }
+
+    /// Gates the "Who's this for?" section — the exact `item_assignees`
+    /// RLS rule (confirmed live): organizer may assign on any item; a
+    /// companion only on one they created. A brand-new item
+    /// (`editing == nil`) has no `createdBy` yet — whoever can add it at
+    /// all becomes its creator, so `ItemPermissions.canAdd` is the
+    /// equivalent gate for that case.
+    var canManageAssignees: Bool {
+        if let editing {
+            return ItemPermissions.canEdit(item: editing, role: myRole, userId: authManager.userId)
+        }
+        return ItemPermissions.canAdd(role: myRole)
+    }
+
+    /// Seeds the multi-select from `existingAssignees` exactly once —
+    /// `@Query` results aren't available synchronously in `init` (unlike
+    /// `editing`'s other fields), so this runs from `.task` on first
+    /// appearance instead. Guarded by `hasLoadedAssignees` so a later
+    /// re-fire (e.g. an unrelated pull touching this trip) never clobbers
+    /// selections the user is mid-edit on.
+    private func seedAssigneesIfNeeded() {
+        guard !hasLoadedAssignees else { return }
+        hasLoadedAssignees = true
+        let ids = Set(existingAssignees.map(\.profileId))
+        selectedAssigneeProfileIds = ids
+        originalAssigneeProfileIds = ids
+    }
+
+    /// Diffs `selectedAssigneeProfileIds` against the snapshot captured at
+    /// seed time and applies exactly the additions/removals — not a
+    /// wholesale delete-then-reinsert, so an unrelated field save doesn't
+    /// churn rows nobody actually changed.
+    private func reconcileAssignees(itemId: UUID) {
+        let toAdd = selectedAssigneeProfileIds.subtracting(originalAssigneeProfileIds)
+        let toRemove = originalAssigneeProfileIds.subtracting(selectedAssigneeProfileIds)
+
+        for profileId in toAdd {
+            let assignee = ItemAssignee(itemId: itemId, profileId: profileId)
+            modelContext.insert(assignee)
+            try? modelContext.save()
+            let dto = assignee.toDTO()
+            let rowId = assignee.id
+            Task { await syncEngine?.enqueueUpsert(table: .itemAssignees, rowId: rowId, tripId: tripId, payload: dto) }
+        }
+
+        for profileId in toRemove {
+            let compositeId = ItemAssignee.compositeId(itemId: itemId, profileId: profileId)
+            if let existing = existingAssignees.first(where: { $0.id == compositeId }) {
+                modelContext.delete(existing)
+                try? modelContext.save()
+            }
+            Task { await syncEngine?.enqueueDeleteItemAssignee(itemId: itemId, profileId: profileId, tripId: tripId) }
+        }
+
+        originalAssigneeProfileIds = selectedAssigneeProfileIds
     }
 
     private func persistZoneDefaults() {

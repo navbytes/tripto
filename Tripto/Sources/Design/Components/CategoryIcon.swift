@@ -80,3 +80,29 @@ struct RailNode: View {
     .padding(Spacing.xl)
     .background(Palette.paper)
 }
+
+/// `PackingGroupKey` → section title + SF Symbol, the packing-list
+/// equivalent of `ItemCategory`'s mapping above (BUILD_PLAN.md §3.3;
+/// docs/TripAppFamily.jsx's `Packing` mockup groups: Documents/Kids/Shared —
+/// extended here to all 5 server-side `group_key` values).
+extension PackingGroupKey {
+    var displayName: String {
+        switch self {
+        case .documents: "Documents"
+        case .kids: "Kids"
+        case .shared: "Shared"
+        case .clothing: "Clothing"
+        case .custom: "Other"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .documents: "doc.text.fill"
+        case .kids: "figure.and.child.holdinghands"
+        case .shared: "bolt.fill"
+        case .clothing: "tshirt.fill"
+        case .custom: "ellipsis.circle.fill"
+        }
+    }
+}

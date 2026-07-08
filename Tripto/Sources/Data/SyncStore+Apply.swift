@@ -142,6 +142,20 @@ extension SyncStore {
         where !validTripIds.contains(row.tripId) && !pending.contains(row.id) {
             modelContext.delete(row)
         }
+        // `ItemAssignee` has no `tripId` of its own (composite PK item_id+
+        // profile_id) — computed independently of the loop above, rather
+        // than re-fetching `ItineraryItem` after it stages deletes, so this
+        // doesn't depend on whether SwiftData's in-context fetch reflects
+        // not-yet-saved deletes.
+        let validItemIds = Set(
+            try modelContext.fetch(
+                FetchDescriptor<ItineraryItem>(predicate: #Predicate { validTripIds.contains($0.tripId) })
+            ).map(\.id)
+        )
+        for row in try modelContext.fetch(FetchDescriptor<ItemAssignee>())
+        where !validItemIds.contains(row.itemId) && !pending.contains(row.id) {
+            modelContext.delete(row)
+        }
         try modelContext.save()
     }
 
@@ -187,6 +201,47 @@ extension SyncStore {
                 model.apply(dto)
             } else {
                 modelContext.insert(PackingItem(dto: dto))
+            }
+        }
+
+        let toDelete = SyncReconcile.idsToDelete(
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+        )
+        for id in toDelete {
+            if let model = existingById[id] { modelContext.delete(model) }
+        }
+        try modelContext.save()
+    }
+
+    /// `item_assignees` has no `trip_id` column of its own (composite PK
+    /// item_id+profile_id — see `ItemAssignee`'s doc comment), so unlike
+    /// every sibling in this section, "existing rows for this trip" is
+    /// derived by first finding this trip's own local item ids, then
+    /// filtering assignee rows by `itemId` membership rather than a direct
+    /// `tripId` predicate. `dtos` is expected to already be scoped to this
+    /// trip's items by the caller (`SyncEngine+Pull.pullTrip` queries
+    /// `item_assignees` with `.in("item_id", values:)` against the same
+    /// pull's own `itineraryItems` result) — this method doesn't re-filter
+    /// `dtos` itself, only the *local* existing/delete-candidate set.
+    func applyItemAssignees(_ dtos: [ItemAssigneeDTO], tripId: UUID) throws {
+        let pending = try allPendingRowIds()
+        let localItemIds = Set(
+            try modelContext.fetch(FetchDescriptor<ItineraryItem>(predicate: #Predicate { $0.tripId == tripId }))
+                .map(\.id)
+        )
+        let existing = try modelContext.fetch(
+            FetchDescriptor<ItemAssignee>(predicate: #Predicate { localItemIds.contains($0.itemId) })
+        )
+        let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let pulledIds = Set(dtos.map { ItemAssignee.compositeId(itemId: $0.itemId, profileId: $0.profileId) })
+
+        for dto in dtos {
+            let id = ItemAssignee.compositeId(itemId: dto.itemId, profileId: dto.profileId)
+            guard !pending.contains(id) else { continue }
+            if let model = existingById[id] {
+                model.apply(dto)
+            } else {
+                modelContext.insert(ItemAssignee(dto: dto))
             }
         }
 

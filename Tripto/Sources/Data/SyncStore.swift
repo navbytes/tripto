@@ -66,12 +66,20 @@ extension SyncStore {
     }
 
     /// Coalescing rule: a delete supersedes any pending upsert for the row.
-    func enqueueDelete(table: SyncTable, rowId: UUID, tripId: UUID?) throws {
+    ///
+    /// `payloadJSON` defaults to empty — every table but `item_assignees`
+    /// deletes by a single `id` (`SyncEngine+Push.pushDelete`'s default
+    /// path), so there's nothing to stash. `item_assignees` has no such
+    /// column (composite PK `item_id`+`profile_id`); its dedicated
+    /// `SyncEngine.enqueueDeleteItemAssignee` passes both columns through
+    /// here so the push path can build the right `.eq(...).eq(...)` filter —
+    /// see `ItemAssignee`'s doc comment.
+    func enqueueDelete(table: SyncTable, rowId: UUID, tripId: UUID?, payloadJSON: String = "") throws {
         if let existing = try fetchOp(rowId: rowId) {
             existing.tableRaw = table.rawValue
             existing.op = .delete
             existing.tripId = tripId
-            existing.payloadJSON = ""
+            existing.payloadJSON = payloadJSON
             existing.createdAt = .now
             existing.attempts = 0
             existing.lastError = nil
@@ -82,7 +90,7 @@ extension SyncStore {
                     opRaw: OutboxOpKind.delete.rawValue,
                     rowId: rowId,
                     tripId: tripId,
-                    payloadJSON: ""
+                    payloadJSON: payloadJSON
                 )
             )
         }
@@ -171,6 +179,7 @@ extension SyncStore {
         try modelContext.delete(model: TripProfile.self)
         try modelContext.delete(model: ItineraryItem.self)
         try modelContext.delete(model: PackingItem.self)
+        try modelContext.delete(model: ItemAssignee.self)
         try modelContext.delete(model: TripShareLink.self)
         try modelContext.delete(model: Invite.self)
         try modelContext.delete(model: OutboxOp.self)

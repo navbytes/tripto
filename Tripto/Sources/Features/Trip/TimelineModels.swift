@@ -45,6 +45,15 @@ struct TimelineCardModel: Identifiable, Equatable {
     /// "edited by Priya · 2 hours ago" — nil unless updated_by is someone
     /// else and the edit is < 48h old.
     let editedBy: String?
+    /// "Just mine" assignee cluster (BUILD_PLAN.md §5.4, §6.3 "avatar
+    /// stacks for members/assignees") — empty when the item has no
+    /// `item_assignees` rows (unassigned = for everyone, per
+    /// `PersonFilter`'s doc comment).
+    let assignees: [AvatarStack.Person]
+    /// Kid-aware tags (this milestone's brief), raw `details.tags` strings —
+    /// rendered via `ItemTag`'s label/icon where recognized, plain text
+    /// otherwise (`TimelineRowViews.swift`'s tag chip).
+    let tags: [String]
 }
 
 struct StayingStripModel: Identifiable, Equatable {
@@ -80,6 +89,7 @@ enum TimelineBuilder {
         pendingRowIds: Set<UUID>,
         myUserId: UUID?,
         namesById: [UUID: String],
+        assigneesByItem: [UUID: [AvatarStack.Person]] = [:],
         now: Date = .now
     ) -> [TimelineDayModel] {
         var previous: ItineraryItem?
@@ -106,6 +116,7 @@ enum TimelineBuilder {
                         pendingRowIds: pendingRowIds,
                         myUserId: myUserId,
                         namesById: namesById,
+                        assignees: assigneesByItem[item.id] ?? [],
                         now: now
                     )))
                     // The landing chip rides directly under its flight —
@@ -146,6 +157,7 @@ enum TimelineBuilder {
         pendingRowIds: Set<UUID>,
         myUserId: UUID?,
         namesById: [UUID: String],
+        assignees: [AvatarStack.Person],
         now: Date
     ) -> TimelineCardModel {
         let zoneChanged = ItineraryTimeZone.zoneChanged(from: previous, to: item)
@@ -162,7 +174,9 @@ enum TimelineBuilder {
             subtitle: subtitle(for: item),
             hasTicket: !(item.confirmation ?? "").isEmpty,
             isPending: pendingRowIds.contains(item.id),
-            editedBy: editedByText(for: item, myUserId: myUserId, namesById: namesById, now: now)
+            editedBy: editedByText(for: item, myUserId: myUserId, namesById: namesById, now: now),
+            assignees: assignees,
+            tags: item.details.tags
         )
     }
 

@@ -76,6 +76,17 @@ struct TimelineCardRow: View, Equatable {
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
                     .lineLimit(1)
+                if !model.assignees.isEmpty || !model.tags.isEmpty {
+                    HStack(spacing: Spacing.xs) {
+                        if !model.assignees.isEmpty {
+                            AvatarStack(people: model.assignees, maxVisible: 4, diameter: 18)
+                        }
+                        ForEach(model.tags, id: \.self) { tag in
+                            TagChip(tag: tag)
+                        }
+                    }
+                    .padding(.top, 1)
+                }
                 if model.isPending || model.editedBy != nil {
                     HStack(spacing: Spacing.xs) {
                         if model.isPending { PendingSyncChip() }
@@ -178,6 +189,31 @@ struct CheckOutRow: View, Equatable {
             }
         }
         .frame(width: 40, alignment: .trailing)
+    }
+}
+
+/// Kid-aware tag chip (BUILD_PLAN.md §5.4, this milestone's brief:
+/// "rendered as small moss chips"). `tag` is the raw `details.tags` string;
+/// unrecognized values (a future tag this build doesn't know) still render,
+/// just as plain text with no icon, rather than being dropped.
+struct TagChip: View {
+    let tag: String
+
+    private var itemTag: ItemTag? { ItemTag(rawValue: tag) }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let symbolName = itemTag?.symbolName {
+                Image(systemName: symbolName).font(.system(size: 9, weight: .semibold))
+            }
+            Text(itemTag?.label ?? tag)
+        }
+        .font(Typo.body(10, weight: .bold))
+        .foregroundStyle(CategoryColor.activity.fg)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, 3)
+        .background(CategoryColor.activity.soft, in: Capsule())
+        .lineLimit(1)
     }
 }
 

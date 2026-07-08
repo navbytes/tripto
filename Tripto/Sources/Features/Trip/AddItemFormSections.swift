@@ -135,6 +135,96 @@ extension AddItemSheet {
         }
     }
 
+    // MARK: - Family: "Who's this for?" + kid-aware tags (M4 §3), shared
+    // across every category — appended once after the category switch.
+
+    @ViewBuilder
+    var familySection: some View {
+        if canManageAssignees {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                if !tripProfiles.isEmpty {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("Who\u{2019}s this for?")
+                            .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                            .foregroundStyle(Palette.slate)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: Spacing.sm) {
+                                ForEach(tripProfiles) { profile in
+                                    assigneeChipToggle(profile)
+                                }
+                            }
+                        }
+                        Text("Leave everyone unselected if it\u{2019}s for the whole group.")
+                            .font(Typo.body(9.5))
+                            .foregroundStyle(Palette.slate.opacity(0.8))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("Family tags")
+                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                        .foregroundStyle(Palette.slate)
+                    HStack(spacing: Spacing.sm) {
+                        ForEach(ItemTag.allCases, id: \.self) { tag in
+                            tagToggle(tag)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+    }
+
+    private func assigneeChipToggle(_ profile: TripProfile) -> some View {
+        let isOn = selectedAssigneeProfileIds.contains(profile.id)
+        let color = AvatarColor.color(named: profile.avatarColor)
+        return Button {
+            if isOn { selectedAssigneeProfileIds.remove(profile.id) } else { selectedAssigneeProfileIds.insert(profile.id) }
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(isOn ? .white.opacity(0.3) : color)
+                    .frame(width: 20, height: 20)
+                    .overlay {
+                        Text(profile.displayName.prefix(1).uppercased())
+                            .font(Typo.body(9, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                Text(profile.displayName.split(separator: " ").first.map(String.init) ?? profile.displayName)
+                    .font(Typo.body(12.5, weight: .semibold))
+            }
+            .foregroundStyle(isOn ? .white : Palette.slate)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs + 2)
+            .background(isOn ? color : Palette.elevated, in: Capsule())
+            .overlay {
+                Capsule().stroke(isOn ? Color.clear : Palette.mist, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
+    private func tagToggle(_ tag: ItemTag) -> some View {
+        let isOn = selectedTags.contains(tag.rawValue)
+        return Button {
+            if isOn { selectedTags.remove(tag.rawValue) } else { selectedTags.insert(tag.rawValue) }
+        } label: {
+            HStack(spacing: 4) {
+                if let symbolName = tag.symbolName {
+                    Image(systemName: symbolName).font(.system(size: 10, weight: .semibold))
+                }
+                Text(tag.label).font(Typo.body(11.5, weight: .semibold))
+            }
+            .foregroundStyle(isOn ? .white : CategoryColor.activity.fg)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs + 2)
+            .background(isOn ? CategoryColor.activity.fg : CategoryColor.activity.soft, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
     // MARK: - Zone-hint derivation (this milestone's brief: "every time
     // field shows its zone label ... set by departure airport")
 

@@ -12,6 +12,7 @@ enum AppSchema {
         TripProfile.self,
         ItineraryItem.self,
         PackingItem.self,
+        ItemAssignee.self,
         TripShareLink.self,
         Invite.self,
         OutboxOp.self,
