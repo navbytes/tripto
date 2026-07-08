@@ -244,6 +244,22 @@ users, either add a keep-alive ping or move to Pro ($25/mo).
 - **Marketing URL:** https://tripto.navbytes.io
 - **Privacy Policy URL:** https://tripto.navbytes.io/privacy
 - **Copyright:** © 2026 navbytes
+- **App Review notes (paste into the "Notes" field):**
+  > Sign in with Apple is the only sign-in method — no username/password and no
+  > demo account are needed; please sign in with your own Apple ID.
+  >
+  > Quick tour: after signing in, tap "Plan a new trip"; open it and use the ＋
+  > to add a flight/stay/activity; tap the share icon (top-right) to see the
+  > collaboration screen — you can generate an "anyone-can-view" link that opens
+  > a read-only itinerary in any browser with NO app and NO account (e.g.
+  > https://tripto.navbytes.io/t/… — booking codes and notes are stripped), and
+  > role-carrying invite links for companions/viewers.
+  >
+  > Account deletion is in Settings (tap the avatar, top-right of Home) →
+  > "Delete account"; it permanently deletes the account and revokes the Apple
+  > token. The app works offline (reads + optimistic edits that sync on
+  > reconnect). No third-party tracking or ads.
+- **Demo account:** not required (Sign in with Apple).
 
 ## 8. Remaining risks (from research, carried here)
 
