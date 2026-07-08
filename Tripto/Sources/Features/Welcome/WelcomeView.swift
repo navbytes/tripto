@@ -67,6 +67,14 @@ struct WelcomeView: View {
                 AccessibilityNotification.Announcement(announcement).post()
             }
         }
+        // Only the false -> true transition announces: success is signaled
+        // by the screen swap and failure by the errorMessage .onChange
+        // above, so announcing true -> false here would be redundant.
+        .onChange(of: isCompletingAppleSignIn) { _, newValue in
+            if newValue {
+                AccessibilityNotification.Announcement(Self.signingInStatusText).post()
+            }
+        }
     }
 
     private var content: some View {
@@ -77,7 +85,7 @@ struct WelcomeView: View {
                 Text("Tripto")
                     .font(Typo.display(48))
                     .foregroundStyle(Palette.ink)
-                Text("Everyone's plans, one shared itinerary.")
+                Text("Everyone\u{2019}s plans, one shared itinerary.")
                     .font(Typo.body())
                     .foregroundStyle(Palette.slate)
                     .multilineTextAlignment(.center)
@@ -119,7 +127,7 @@ struct WelcomeView: View {
                 if isCompletingAppleSignIn {
                     HStack(spacing: Spacing.xs) {
                         ProgressView()
-                        Text("Signing you in\u{2026}")
+                        Text(Self.signingInStatusText)
                     }
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(Palette.slate)
@@ -235,6 +243,7 @@ struct WelcomeView: View {
                 Text("\(preview.inviterName) invited you to")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
+                    .multilineTextAlignment(.center)
                 // Title-only cover chip — the invite's one moment to show the
                 // trip's actual brand gradient (§6.3) before sign-in. Small
                 // text (inviter/dates/role) stays off the gradient on
@@ -316,10 +325,14 @@ struct WelcomeView: View {
         case .failure(let error):
             // A user-initiated cancel isn't an error worth surfacing.
             if !Self.isUserCancelledAppleSignIn(error) {
-                errorMessage = "Sign in with Apple failed \u{2014} try again."
+                errorMessage = Self.appleSideFailureMessage(for: error)
             }
         }
     }
+
+    /// Visible label for the in-progress state, pinned to a constant so the
+    /// rendered `Text` and the VoiceOver announcement in `body` can't drift.
+    static let signingInStatusText = "Signing you in\u{2026}"
 
     /// Domain-then-code check (mirrors `urlErrorCode`'s type-then-string-
     /// fallback idiom) — a code-only check risks a false positive if some
@@ -329,6 +342,20 @@ struct WelcomeView: View {
         let nsError = error as NSError
         return nsError.domain == ASAuthorizationErrorDomain
             && nsError.code == ASAuthorizationError.canceled.rawValue
+    }
+
+    /// `.unknown` is where the no-Apple-Account case surfaces, and iOS has
+    /// usually just shown its own Settings-pointing alert by the time this
+    /// fires — so this copy agrees with the system (§6.6) instead of telling
+    /// the user to "try again" on something retrying won't fix. The other
+    /// codes (`.failed`, `.invalidResponse`, `.notHandled`) stay transient.
+    static func appleSideFailureMessage(for error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == ASAuthorizationErrorDomain
+            && nsError.code == ASAuthorizationError.unknown.rawValue {
+            return "Sign in with Apple isn\u{2019}t available \u{2014} check that you\u{2019}re signed in to an Apple Account in Settings."
+        }
+        return "Sign in with Apple failed \u{2014} try again."
     }
 
     /// VoiceOver copy for `appRouter.invitePreviewState`'s resolved states
@@ -392,7 +419,7 @@ struct WelcomeView: View {
         do {
             try await authManager.signInAnonymously()
         } catch {
-            errorMessage = "Couldn't start a test session — try again."
+            errorMessage = "Couldn\u{2019}t start a test session \u{2014} try again."
         }
     }
     #endif
