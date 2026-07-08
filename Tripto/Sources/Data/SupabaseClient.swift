@@ -34,8 +34,17 @@ enum Supa {
         try await client.rpc(function, params: params).execute().value
     }
 
-    /// Overload for parameterless RPCs (e.g. `delete_account()`).
+    /// Overload for parameterless RPCs.
     static func rpc<Response: Decodable>(_ function: String) async throws -> Response {
         try await client.rpc(function).execute().value
+    }
+
+    /// Void-returning RPC overload — `delete_account()` responds `204 No
+    /// Content` with an empty body (M3 brief: "VERIFIED (HTTP 204)"), so
+    /// there's nothing for a generic `Decodable` `Response` to decode.
+    /// Mirrors `SyncEngine+Push.swift`'s own `.execute()`-without-`.value`
+    /// pattern: still throws on a non-2xx response, just discards the body.
+    static func rpcVoid(_ function: String) async throws {
+        _ = try await client.rpc(function).execute()
     }
 }

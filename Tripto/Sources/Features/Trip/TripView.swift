@@ -2,15 +2,31 @@ import SwiftData
 import SwiftUI
 
 /// Value routes for the one `NavigationStack` (rooted in `HomeView`).
-/// Distinct wrapper types — not bare `UUID`s — so trip and item
+/// Distinct wrapper types — not bare `UUID`s — so trip/item/share/settings
 /// destinations can't collide in the same path.
 struct TripRoute: Hashable {
     let id: UUID
+    /// Set only when this push follows a successful invite claim (M3
+    /// `AppRouter`) — shown once as a "You're in" toast when `TripView`
+    /// appears (see `initialToast`), then discarded; not otherwise part of
+    /// a trip route's identity in any meaningful sense.
+    var welcomeToast: String?
 }
 
 struct ItemRoute: Hashable {
     let id: UUID
 }
+
+/// M3: `ShareTripView` (Features/Share/ShareTripView.swift), pushed from
+/// this trip's hero share button.
+struct ShareRoute: Hashable {
+    let tripId: UUID
+}
+
+/// M3: `SettingsView` (Features/Settings/SettingsView.swift), pushed from
+/// `HomeView`'s avatar tap. No associated data — one settings screen, not
+/// per-trip.
+struct SettingsRoute: Hashable {}
 
 /// The trip screen (BUILD_PLAN.md §4.2 — THE core screen): cover-gradient
 /// hero, Itinerary · Bookings sub-tabs (Map/$ Split hidden per §9.4), and
@@ -19,6 +35,10 @@ struct ItemRoute: Hashable {
 /// debounced pull (SYNC_DESIGN.md "Realtime").
 struct TripView: View {
     let tripId: UUID
+    /// Shown once as a toast on appear (M3: set by `HomeView` after a
+    /// successful invite claim — "You're in — welcome to {trip}"). `nil`
+    /// for every normal navigation into a trip.
+    var initialToast: String?
 
     @Query private var trips: [Trip]
     @Query private var items: [ItineraryItem]
@@ -50,8 +70,9 @@ struct TripView: View {
         case bookings = "Bookings"
     }
 
-    init(tripId: UUID) {
+    init(tripId: UUID, initialToast: String? = nil) {
         self.tripId = tripId
+        self.initialToast = initialToast
         _trips = Query(filter: #Predicate<Trip> { $0.id == tripId })
         _items = Query(
             filter: #Predicate<ItineraryItem> { $0.tripId == tripId },
@@ -96,7 +117,12 @@ struct TripView: View {
             let id = tripId
             Task { await syncEngine?.stopObservingTrip(id) }
         }
-        .task { applyUITestAutopilotIfNeeded() }
+        .task {
+            applyUITestAutopilotIfNeeded()
+            if let initialToast {
+                toast = initialToast
+            }
+        }
         .sheet(isPresented: $showUITestBookingDetail) {
             if let uitestBookingDetailItemId {
                 NavigationStack { BookingDetailView(itemId: uitestBookingDetailItemId) }
@@ -177,10 +203,18 @@ struct TripView: View {
                     dismiss()
                 }
                 Spacer()
-                GlassCircleButton(systemImage: "square.and.arrow.up", accessibilityLabel: "Share trip") {
-                    // No dead-end silence (§9.4 spirit): sharing is M3.
-                    toast = "Sharing lands in M3"
+                // A `NavigationLink(value:)`, not a `GlassCircleButton`
+                // action closure: `TripView` doesn't own the shared
+                // `NavigationPath` (`HomeView` does), but a value-based
+                // link pushes onto the nearest enclosing `NavigationStack`
+                // regardless of nesting depth — same mechanism
+                // `BookingsTabView`/`TimelineRowViews` already use for
+                // `ItemRoute`. See `HomeView`'s `.navigationDestination(for:
+                // ShareRoute.self)`.
+                NavigationLink(value: ShareRoute(tripId: trip.id)) {
+                    GlassCircleGlyph(systemImage: "square.and.arrow.up")
                 }
+                .accessibilityLabel("Share trip")
             }
 
             Spacer(minLength: Spacing.sm)

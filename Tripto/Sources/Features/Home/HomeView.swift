@@ -15,11 +15,15 @@ struct HomeView: View {
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
     @Environment(SyncStatus.self) private var syncStatus
+    @Environment(AppRouter.self) private var appRouter
 
     @State private var selectedTab = "Upcoming"
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
     @State private var tripPendingDeletion: Trip?
+    /// M3: surfaces `AppRouter.errorToast` (an expired/revoked invite link)
+    /// — nothing else on Home toasts today.
+    @State private var toast: String?
     /// The app's one `NavigationPath` (`TripView.swift`'s doc comment: "the
     /// one `NavigationStack` rooted in `HomeView`") — pushing `TripRoute`/
     /// `ItemRoute` values onto this, rather than wrapping each row in a
@@ -59,10 +63,16 @@ struct HomeView: View {
             // comment): Home pushes `TripRoute`; `TripView`'s own tabs push
             // `ItemRoute` onto this same stack to reach `BookingDetailView`.
             .navigationDestination(for: TripRoute.self) { route in
-                TripView(tripId: route.id)
+                TripView(tripId: route.id, initialToast: route.welcomeToast)
             }
             .navigationDestination(for: ItemRoute.self) { route in
                 BookingDetailView(itemId: route.id)
+            }
+            .navigationDestination(for: ShareRoute.self) { route in
+                ShareTripView(tripId: route.tripId)
+            }
+            .navigationDestination(for: SettingsRoute.self) { _ in
+                SettingsView()
             }
             .toolbar {
                 #if DEBUG
@@ -107,12 +117,40 @@ struct HomeView: View {
                     Text("This removes \u{201C}\(trip.title)\u{201D} and everything in it for everyone on the trip.")
                 }
             }
-            .task { await applyUITestAutopilotIfNeeded() }
+            .task {
+                // Real product behavior (M3), not test autopilot: claims a
+                // token stashed by `AppRouter.handleIncoming` while signed
+                // out, now that Home mounting proves a session exists.
+                await appRouter.claimPendingInviteIfNeeded()
+                await applyUITestAutopilotIfNeeded()
+            }
+            .onChange(of: appRouter.tripToOpen) { _, tripId in
+                guard let tripId else { return }
+                Task {
+                    await syncEngine?.pullHome()
+                    // A direct fetch, not the reactive `@Query` array —
+                    // avoids depending on how quickly `@Query` re-renders
+                    // after another context's save (SwiftData cross-context
+                    // change notification isn't guaranteed synchronous with
+                    // the awaited `pullHome()` above returning).
+                    let descriptor = FetchDescriptor<Trip>(predicate: #Predicate<Trip> { $0.id == tripId })
+                    let title = (try? modelContext.fetch(descriptor))?.first?.title
+                    path.append(TripRoute(id: tripId, welcomeToast: "You\u{2019}re in \u{2014} welcome to \(title ?? "the trip")"))
+                    appRouter.clearTripToOpen()
+                }
+            }
+            .onChange(of: appRouter.errorToast) { _, message in
+                guard let message else { return }
+                toast = message
+                appRouter.clearErrorToast()
+            }
+            .toastOverlay($toast)
         }
     }
 
-    /// M2 verify-drill autopilot (see `WelcomeView`'s matching hook) — seeds
-    /// the demo trip and/or navigates straight into it when launched with
+    /// M2/M3 verify-drill autopilot (see `WelcomeView`'s matching hook) —
+    /// seeds the demo trip and/or navigates straight into it (and, for M3,
+    /// into Share/Settings, or simulates `.onOpenURL`) when launched with
     /// the matching DEBUG flags, so the screenshot pass doesn't depend on
     /// GUI tap automation. Idempotent across relaunches of the same
     /// simulator: seeding only runs `if trips.isEmpty`, so a second launch
@@ -122,12 +160,28 @@ struct HomeView: View {
         let arguments = ProcessInfo.processInfo.arguments
         guard authManager.isSignedIn else { return }
 
+        // Simulates a real `.onOpenURL` delivery for the verify drill's
+        // two-user claim phase (`xcrun simctl openurl` reaches the real
+        // `.onOpenURL` directly; this flag exists only for a launch where
+        // that's inconvenient to sequence, e.g. handing the URL in at the
+        // same moment as sign-in). Format: `-uitestOpenURL <url-string>`.
+        if let index = arguments.firstIndex(of: "-uitestOpenURL"), index + 1 < arguments.count,
+            let url = URL(string: arguments[index + 1]) {
+            appRouter.handleIncoming(url: url, isSignedIn: authManager.isSignedIn)
+        }
+
         var targetTripId = trips.first?.id
         if arguments.contains("-uitestSeedIfEmpty"), trips.isEmpty {
             targetTripId = await DemoSeeder.seed(modelContext: modelContext, syncEngine: syncEngine, authManager: authManager)
         }
         if arguments.contains("-uitestOpenFirstTrip"), let targetTripId, path.isEmpty {
             path.append(TripRoute(id: targetTripId))
+        }
+        if arguments.contains("-uitestOpenShare"), let targetTripId, path.count == 1 {
+            path.append(ShareRoute(tripId: targetTripId))
+        }
+        if arguments.contains("-uitestOpenSettings"), path.isEmpty {
+            path.append(SettingsRoute())
         }
         #endif
     }
@@ -145,14 +199,20 @@ struct HomeView: View {
                     .foregroundStyle(Palette.ink)
             }
             Spacer()
-            Circle()
-                .fill(Palette.indigo)
-                .frame(width: 42, height: 42)
-                .overlay {
-                    Text(initials(from: myProfile?.displayName ?? "Traveler"))
-                        .font(Typo.display(16))
-                        .foregroundStyle(.white)
-                }
+            // NavigationLink(value:), same reasoning as TripView's share
+            // button: pushes SettingsRoute onto this stack (M3 brief:
+            // "Reachable from HomeView (avatar tap → Settings)").
+            NavigationLink(value: SettingsRoute()) {
+                Circle()
+                    .fill(Palette.indigo)
+                    .frame(width: 42, height: 42)
+                    .overlay {
+                        Text(initials(from: myProfile?.displayName ?? "Traveler"))
+                            .font(Typo.display(16))
+                            .foregroundStyle(.white)
+                    }
+            }
+            .accessibilityLabel("Settings")
         }
     }
 

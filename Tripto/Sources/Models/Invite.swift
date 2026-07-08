@@ -45,6 +45,10 @@ final class Invite {
     }
 }
 
+/// Explicit, since `@Model` doesn't synthesize this (see `Trip`'s identical
+/// comment) — `ShareTripView` renders active invites in a `ForEach`.
+extension Invite: Identifiable {}
+
 struct InviteDTO: Codable, Sendable, Equatable {
     var id: UUID
     var tripId: UUID

@@ -55,6 +55,28 @@ targets:
         NSCalendarsUsageDescription: "Tripto adds your bookings to your calendar when you ask it to."
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
+        # M3: role-carrying invite links (Support/DeepLink.swift,
+        # App/AppRouter.swift). The custom scheme works today with no
+        # further setup — this is all it needs.
+        #
+        # Universal links (`https://tripto.navbytes.io/join/<token>` opening
+        # the app directly, no scheme) additionally need an
+        # associated-domains entitlement:
+        #   com.apple.developer.associated-domains: ["applinks:tripto.navbytes.io"]
+        # which in turn needs the real Apple Team ID baked into the deployed
+        # AASA file (web/share-worker's APPLE_TEAM_ID var — see that repo's
+        # README) *and* a signing team pinned here (today CODE_SIGN_STYLE is
+        # Automatic with no team, deliberately, so the project builds for
+        # anyone on the simulator with no Apple Developer account — see the
+        # comment on PRODUCT_BUNDLE_IDENTIFIER below). Not wired up yet
+        # because that team ID doesn't exist in this environment; TODO once
+        # it does. Until then, https://tripto.navbytes.io/join/<token> still
+        # works for everyone via the web `/join` interstitial's "Open in
+        # Tripto" button, which hands off to the tripto:// scheme.
+        CFBundleURLTypes:
+          - CFBundleURLName: io.navbytes.tripto
+            CFBundleURLSchemes:
+              - tripto
     settings:
       base:
         PRODUCT_NAME: Tripto

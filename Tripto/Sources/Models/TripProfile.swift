@@ -33,6 +33,11 @@ final class TripProfile {
     }
 }
 
+/// Explicit, since `@Model` doesn't synthesize this (see `Trip`'s identical
+/// comment) — `ShareTripView` renders unlinked (no-account) profiles in a
+/// `ForEach`.
+extension TripProfile: Identifiable {}
+
 struct TripProfileDTO: Codable, Sendable, Equatable {
     var id: UUID
     var tripId: UUID

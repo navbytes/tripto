@@ -37,5 +37,6 @@ struct RootView: View {
         .environment(auth)
         .environment(status)
         .environment(\.syncEngine, engine)
+        .environment(AppRouter())
         .modelContainer(container)
 }

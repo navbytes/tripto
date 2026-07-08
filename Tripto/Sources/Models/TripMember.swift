@@ -33,6 +33,11 @@ final class TripMember {
     }
 }
 
+/// Explicit, since `@Model` doesn't synthesize this (see `Trip`'s identical
+/// comment) — `ShareTripView`'s people list renders members in a `ForEach`
+/// and drives its role-picker sheet via `.sheet(item:)`.
+extension TripMember: Identifiable {}
+
 struct TripMemberDTO: Codable, Sendable, Equatable {
     var id: UUID
     var tripId: UUID
