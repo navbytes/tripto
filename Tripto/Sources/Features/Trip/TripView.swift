@@ -274,7 +274,8 @@ struct TripView: View {
                         assigneesByItem: assigneesByItem,
                         filteredPersonName: selectedProfileFirstName,
                         toast: $toast,
-                        isAwaitingFirstSync: awaitingFirstTripPull
+                        isAwaitingFirstSync: awaitingFirstTripPull,
+                        hasAnyItems: !items.isEmpty
                     )
                 case .bookings:
                     BookingsTabView(
@@ -585,17 +586,29 @@ struct TripView: View {
         }
     }
 
+    /// Finding F12: the viewer's own linked profile sorts first — before,
+    /// "Just mine" was scattered wherever `createdAt` happened to place it,
+    /// so a traveler filtering to themself had to scan the whole row first.
+    /// Everything else keeps the existing `createdAt` order; the
+    /// "Everyone" chip's own position is `PersonFilterBar`'s, untouched.
     private var personFilterChips: [PersonFilterBar.Chip] {
-        tripProfiles
-            .sorted { $0.createdAt < $1.createdAt }
-            .map { profile in
-                PersonFilterBar.Chip(
-                    id: profile.id,
-                    firstName: firstName(from: profile.displayName),
-                    initial: initials(from: profile.displayName),
-                    colorName: profile.avatarColor
-                )
-            }
+        let sorted = tripProfiles.sorted { $0.createdAt < $1.createdAt }
+        // `linkedUserId == nil` means "not an app user" (§3.3) — must not
+        // match a signed-out `authManager.userId == nil` as "mine".
+        let isMine: (TripProfile) -> Bool = { profile in
+            guard let userId = authManager.userId, let linkedUserId = profile.linkedUserId else { return false }
+            return linkedUserId == userId
+        }
+        let mine = sorted.filter(isMine)
+        let others = sorted.filter { !isMine($0) }
+        return (mine + others).map { profile in
+            PersonFilterBar.Chip(
+                id: profile.id,
+                firstName: firstName(from: profile.displayName),
+                initial: initials(from: profile.displayName),
+                colorName: profile.avatarColor
+            )
+        }
     }
 
     private var selectedProfileFirstName: String? {

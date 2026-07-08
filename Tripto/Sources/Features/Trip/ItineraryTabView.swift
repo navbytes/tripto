@@ -31,19 +31,45 @@ struct ItineraryTabView: View {
     /// Finding 2: true while this trip's first pull this session hasn't
     /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
     var isAwaitingFirstSync: Bool = false
+    /// Finding F7: whether the *unfiltered* trip has any items at all —
+    /// `items` above arrives already filtered by `PersonFilterBar`, so this
+    /// is the only way `filteredEmptyState` can tell "nothing's been added
+    /// to this trip yet" apart from "everything's just hidden by the
+    /// filter" and phrase its guidance accordingly.
+    var hasAnyItems: Bool = true
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
+    /// Finding F1: `tabBar()`'s `isAccessibilitySize` convention
+    /// (`TripCard.swift`/`TripView.swift`) — also feeds `isAXSize` into the
+    /// row views below so their `.equatable()` short-circuit can't miss a
+    /// live Dynamic Type change (see `TimelineCardRow.isAXSize`'s doc
+    /// comment).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One-shot: only auto-scroll to "today" the first time this view's
+    /// `.task` fires, not on every subsequent data refresh.
+    @State private var hasAutoScrolledToToday = false
 
     /// The existing tap counter already persists across launches, so it
     /// doubles as the waitlist-membership flag — no new `@AppStorage` key.
     private var isOnWaitlist: Bool { importWaitlistTaps > 0 }
 
+    private var tripStartDay: DayDate { DayDate.from(trip.startDate, calendar: .current) }
+    private var tripEndDay: DayDate { DayDate.from(trip.endDate, calendar: .current) }
+
+    /// Finding F8: 1-based total day count of the trip itself, used to tell
+    /// "Day N" apart from "Before/After the trip" in the section titles.
+    private var tripDayCount: Int {
+        ItineraryDayBucketing.dayCount(from: tripStartDay, to: tripEndDay, calendar: Calendar(identifier: .gregorian)) + 1
+    }
+
     private var dayModels: [TimelineDayModel] {
-        let tripStartDay = DayDate.from(trip.startDate, calendar: .current)
-        let sections = ItineraryDayBucketing.sections(items: items, tripStart: tripStartDay)
+        let sections = ItineraryDayBucketing.sections(items: items, tripStart: tripStartDay, tripEnd: tripEndDay)
         return TimelineBuilder.build(
             sections: sections, pendingRowIds: pendingRowIds, myUserId: myUserId, namesById: namesById,
-            assigneesByItem: assigneesByItem
+            assigneesByItem: assigneesByItem,
+            today: DayDate.from(.now, calendar: .current),
+            tripDayCount: tripDayCount
         )
     }
 
@@ -57,11 +83,15 @@ struct ItineraryTabView: View {
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                             ForEach(dayModels) { day in
                                 Section {
-                                    ForEach(day.rows) { row in
-                                        rowView(for: row)
+                                    if day.isFreeDay {
+                                        freeDayRow
+                                    } else {
+                                        ForEach(day.rows) { row in
+                                            rowView(for: row)
+                                        }
                                     }
                                 } header: {
-                                    dayHeader(day.title)
+                                    dayHeader(day)
                                 }
                             }
                         }
@@ -70,6 +100,30 @@ struct ItineraryTabView: View {
                     }
                     .scrollDismissesKeyboard(.immediately)
                     .task {
+                        // Finding F1: one-shot scroll to "today"'s section
+                        // on first appearance, skipped when a DEBUG uitest
+                        // drill below is about to claim the scroll position
+                        // for its own screenshot target instead.
+                        #if DEBUG
+                        let hasUITestScrollTarget = ProcessInfo.processInfo.arguments.contains("-uitestScrollTimeline")
+                            || ProcessInfo.processInfo.arguments.contains("-uitestScrollToTag")
+                        #else
+                        let hasUITestScrollTarget = false
+                        #endif
+                        if !hasUITestScrollTarget, !hasAutoScrolledToToday {
+                            hasAutoScrolledToToday = true
+                            let today = DayDate.from(.now, calendar: .current)
+                            if today >= tripStartDay, today <= tripEndDay,
+                                let target = dayModels.first(where: { $0.id >= today.stringValue }) {
+                                try? await Task.sleep(nanoseconds: 300_000_000)
+                                let headerId = "day-header-\(target.id)"
+                                if reduceMotion {
+                                    proxy.scrollTo(headerId, anchor: .top)
+                                } else {
+                                    withAnimation { proxy.scrollTo(headerId, anchor: .top) }
+                                }
+                            }
+                        }
                         #if DEBUG
                         // M2 verify-drill autopilot only (see
                         // `WelcomeView`/`HomeView`/`TripView`'s matching
@@ -118,26 +172,55 @@ struct ItineraryTabView: View {
         .background(Palette.paper)
     }
 
+    private var isAXSize: Bool { dynamicTypeSize.isAccessibilitySize }
+
     @ViewBuilder
     private func rowView(for row: TimelineRowModel) -> some View {
         switch row {
-        case .card(let model): TimelineCardRow(model: model).equatable()
-        case .staying(let model): StayingStripRow(model: model).equatable()
-        case .checkOut(let model): CheckOutRow(model: model).equatable()
-        case .tzShift(let model): TZShiftChipRow(model: model).equatable()
+        case .card(let model): TimelineCardRow(model: model, isAXSize: isAXSize).equatable()
+        case .staying(let model): StayingStripRow(model: model, isAXSize: isAXSize).equatable()
+        case .checkOut(let model): CheckOutRow(model: model, isAXSize: isAXSize).equatable()
+        case .tzShift(let model): TZShiftChipRow(model: model, isAXSize: isAXSize).equatable()
         }
     }
 
-    private func dayHeader(_ title: String) -> some View {
-        HStack {
-            Text(title)
+    private func dayHeader(_ day: TimelineDayModel) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Text(day.title)
                 .font(Typo.body(13, weight: .bold))
                 .foregroundStyle(Palette.ink)
+            // Finding F1: a quiet "today" marker so the current day doesn't
+            // require scanning dates to find — paired with the one-shot
+            // auto-scroll in `.task` above.
+            if day.isToday {
+                Text("Today")
+                    .font(Typo.body(10, weight: .bold))
+                    .foregroundStyle(Palette.amber)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, 2)
+                    .background(Palette.amberSoft, in: Capsule())
+            }
             Spacer(minLength: 0)
         }
         .padding(.top, Spacing.lg)
         .padding(.bottom, Spacing.xs)
         .background(Palette.paper)
+        .id("day-header-\(day.id)")
+    }
+
+    /// Finding F2: a gap day the bucketing layer filled in (no rows at
+    /// all) — a quiet, non-interactive row rather than letting the day
+    /// vanish from the list; the FAB already floats over this tab, so this
+    /// doesn't need to be its own add affordance.
+    private var freeDayRow: some View {
+        HStack {
+            Text(canEdit ? "Free day \u{2014} tap + to add a plan" : "Free day")
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
+        .padding(.vertical, Spacing.sm)
     }
 
     // MARK: - Empty state (BUILD_PLAN.md §4.2, §6.6)
@@ -165,7 +248,12 @@ struct ItineraryTabView: View {
                             .foregroundStyle(Palette.slate)
                     }
                 } else {
-                    skeletonRows
+                    // Finding F11: this branch is the *settled* empty
+                    // state (sync finished, trip really has nothing) — a
+                    // real day skeleton reads as "start planning" rather
+                    // than the grey placeholder rows above, which look
+                    // identical to "still loading."
+                    daySkeleton
                         .padding(.top, Spacing.xl)
 
                     VStack(spacing: Spacing.xs) {
@@ -198,17 +286,18 @@ struct ItineraryTabView: View {
     /// items for one person — this milestone's brief's "Just mine" filter;
     /// the trip itself isn't empty, so the day-skeleton/import-teaser below
     /// would misrepresent it as one.
+    ///
+    /// Finding F6: `PersonFilterBanner` (shown just above this view) already
+    /// states the factual "Nothing is assigned to \(name) yet" sentence, so
+    /// this drops the duplicate headline and keeps only the icon plus one
+    /// guidance sentence.
     private func filteredEmptyState(personName: String) -> some View {
         VStack(spacing: Spacing.xs) {
             Image(systemName: "sparkles")
                 .font(.system(size: 28))
                 .foregroundStyle(Palette.amber)
                 .padding(.bottom, Spacing.sm)
-            Text("Nothing assigned to \(personName) yet")
-                .font(Typo.display(Typo.Size.title))
-                .foregroundStyle(Palette.ink)
-                .multilineTextAlignment(.center)
-            Text("Assign a plan to them from a booking\u{2019}s \u{201C}Who\u{2019}s this for?\u{201D}, or switch back to Everyone.")
+            Text(filteredEmptyGuidance(personName: personName))
                 .font(Typo.body())
                 .foregroundStyle(Palette.slate)
                 .multilineTextAlignment(.center)
@@ -217,6 +306,23 @@ struct ItineraryTabView: View {
         .padding(.horizontal, Spacing.xl)
     }
 
+    /// Finding F7: the old copy always assumed there was *something* on the
+    /// unfiltered trip to assign — for an organizer looking at a genuinely
+    /// empty trip, or a viewer who can't assign anything at all, that's
+    /// misleading. Branches on `canEdit`/`hasAnyItems` instead.
+    private func filteredEmptyGuidance(personName: String) -> String {
+        guard canEdit else {
+            return "Switch back to Everyone to see the whole trip."
+        }
+        guard hasAnyItems else {
+            return "Add a plan with the + button first, then assign it to \(personName)."
+        }
+        return "Assign a plan to them from a booking\u{2019}s \u{201C}Who\u{2019}s this for?\u{201D}, or switch back to Everyone."
+    }
+
+    /// Finding F11: loading-only now — the settled "genuinely empty" case
+    /// below renders `daySkeleton` instead, so these grey placeholders only
+    /// ever appear while `isAwaitingFirstSync` is actually true.
     private var skeletonRows: some View {
         VStack(spacing: Spacing.md) {
             ForEach(0..<3, id: \.self) { _ in
@@ -238,6 +344,43 @@ struct ItineraryTabView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .accessibilityHidden(true)
+    }
+
+    /// Finding F11: the settled empty state's skeleton — up to the first 3
+    /// of the trip's own real day headers (actual dates, via
+    /// `TimelineBuilder.dayTitleText`) with a dashed add-slot under Day 1,
+    /// so it reads as "here's your itinerary, start filling it in" rather
+    /// than a generic loading placeholder.
+    private var daySkeleton: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            ForEach(0..<max(min(3, tripDayCount), 0), id: \.self) { offset in
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("Day \(offset + 1) \u{00B7} \(skeletonDayTitleText(forDayOffset: offset))")
+                        .font(Typo.body(13, weight: .bold))
+                        .foregroundStyle(Palette.ink)
+                    if offset == 0 {
+                        RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                            .strokeBorder(Palette.mist, style: StrokeStyle(lineWidth: 1.25, dash: [5, 4]))
+                            .frame(height: 54)
+                            .overlay {
+                                Text("Add your first flight, stay, or plan")
+                                    .font(Typo.body(Typo.Size.caption))
+                                    .foregroundStyle(Palette.slate)
+                            }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, Spacing.xl)
+        .accessibilityHidden(true)
+    }
+
+    private func skeletonDayTitleText(forDayOffset offset: Int) -> String {
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        let date = utcCalendar.date(byAdding: .day, value: offset, to: tripStartDay.asDate(calendar: utcCalendar))
+        let day = date.map { DayDate.from($0, calendar: utcCalendar) } ?? tripStartDay
+        return TimelineBuilder.dayTitleText(day)
     }
 
     /// Honest import teaser (this milestone's brief: "never fake parsing").

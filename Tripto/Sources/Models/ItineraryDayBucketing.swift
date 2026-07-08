@@ -43,6 +43,11 @@ enum ItineraryDayBucketing {
         var id: DayDate { day }
     }
 
+    /// A corrupt/mistyped `tripEnd` (or one absurdly far from `tripStart`)
+    /// must not walk this loop for years — caps the gap-day range this
+    /// function will ever generate (finding F2).
+    static let maxGapFillDays = 60
+
     /// Builds day sections for every day touched by at least one row —
     /// `status == 'suggested'` items are dropped up front (v1 only ever
     /// renders `'confirmed'`, BUILD_PLAN.md §5.6). Sections are sorted by
@@ -50,9 +55,19 @@ enum ItineraryDayBucketing {
     /// (no meaningful instant *on* that day — the stay spans the whole day)
     /// pinned first so they read as an all-day backdrop rather than
     /// competing with the day's scheduled items.
+    ///
+    /// `tripEnd` (finding F2 — "vanishing free days"): when supplied (and
+    /// the trip has at least one item), every day in `tripStart...tripEnd`
+    /// gets its own section even if no item touches it, so a free day in
+    /// the middle of a trip still renders (as an empty-rows section; the
+    /// view turns that into a quiet "Free day" row) instead of silently
+    /// disappearing from the list. Days carrying rows outside that range
+    /// (e.g. a stray pre-trip item) keep their own sections regardless.
+    /// Defaults to `nil` so existing call sites are unaffected.
     static func sections(
         items: [ItineraryItem],
         tripStart: DayDate,
+        tripEnd: DayDate? = nil,
         calendar: Calendar = Calendar(identifier: .gregorian)
     ) -> [Section] {
         var utcCalendar = calendar
@@ -84,6 +99,22 @@ enum ItineraryDayBucketing {
                 } else {
                     let night = dayCount(from: startDay, to: cursor, calendar: utcCalendar) + 1
                     rowsByDay[cursor, default: []].append(.staying(item: item, night: night, totalNights: totalNights))
+                }
+            }
+        }
+
+        // A zero-item trip still hits the view's empty state — only fill
+        // gap days once there's at least one real row to anchor around.
+        if !rowsByDay.isEmpty, let tripEnd, tripEnd >= tripStart {
+            let totalDays = dayCount(from: tripStart, to: tripEnd, calendar: utcCalendar) + 1
+            if totalDays <= maxGapFillDays {
+                var cursor = tripStart
+                while true {
+                    if rowsByDay[cursor] == nil { rowsByDay[cursor] = [] }
+                    guard cursor < tripEnd,
+                        let nextDate = utcCalendar.date(byAdding: .day, value: 1, to: cursor.asDate(calendar: utcCalendar))
+                    else { break }
+                    cursor = DayDate.from(nextDate, calendar: utcCalendar)
                 }
             }
         }

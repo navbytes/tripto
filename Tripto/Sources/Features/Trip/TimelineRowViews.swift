@@ -12,17 +12,38 @@ import SwiftUI
 /// gutter/rail/card alignment matches across card rows and the strips/chips
 /// that indent underneath them.
 enum TimelineLayout {
-    static let gutterWidth: CGFloat = 44
     static let railWidth: CGFloat = 14
+
+    /// Finding F5: a fixed 44pt time gutter clips at accessibility Dynamic
+    /// Type sizes ("08:20" + a zone label no longer fit). Widens to ~76pt
+    /// at AX sizes; `CheckOutRow` shares this (rather than its own private
+    /// width) so the two row kinds' columns stay aligned regardless of
+    /// type size. Takes a plain `Bool` (not the full `DynamicTypeSize`) so
+    /// call sites can drive it from the same `isAXSize` field they already
+    /// carry for the `.equatable()` short-circuit fix (see
+    /// `TimelineCardRow`'s doc comment).
+    static func gutterWidth(isAXSize: Bool) -> CGFloat {
+        isAXSize ? 76 : 44
+    }
+
     /// Left indent for rows with no gutter/rail of their own (staying
     /// strips, tz-shift chips) so they still line up under the card column.
-    static let indentedLeading: CGFloat = gutterWidth + railWidth + Spacing.sm
+    static func indentedLeading(isAXSize: Bool) -> CGFloat {
+        gutterWidth(isAXSize: isAXSize) + railWidth + Spacing.sm
+    }
 }
 
 struct TimelineCardRow: View, Equatable {
     let model: TimelineCardModel
+    /// Finding F5: `dynamicTypeSize.isAccessibilitySize`, read by the
+    /// caller and passed in as a stored property (rather than read here via
+    /// `@Environment`) so it participates in the `==` below — `.equatable()`
+    /// views can otherwise miss a live Dynamic Type change entirely, since
+    /// the equality check is what decides whether SwiftUI re-evaluates
+    /// `body` at all.
+    var isAXSize: Bool = false
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: model.id)) {
@@ -68,7 +89,7 @@ struct TimelineCardRow: View, Equatable {
                     .foregroundStyle(Palette.slate)
             }
         }
-        .frame(width: TimelineLayout.gutterWidth, alignment: .trailing)
+        .frame(width: TimelineLayout.gutterWidth(isAXSize: isAXSize), alignment: .trailing)
         .padding(.top, 13)
         .padding(.trailing, Spacing.sm)
     }
@@ -92,11 +113,11 @@ struct TimelineCardRow: View, Equatable {
                 Text(model.title)
                     .font(Typo.body(Typo.Size.body, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
+                    .lineLimit(isAXSize ? 2 : 1)
                 Text(model.subtitle)
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
-                    .lineLimit(1)
+                    .lineLimit(isAXSize ? 2 : 1)
                 if !model.assignees.isEmpty || !model.tags.isEmpty {
                     HStack(spacing: Spacing.xs) {
                         if !model.assignees.isEmpty {
@@ -144,36 +165,60 @@ struct TimelineCardRow: View, Equatable {
 
 /// Quiet mid-stay marker (ACCEPTANCE.md "(c)") — deliberately no time
 /// gutter/rail node of its own; it indents to sit under the card column so
-/// it reads as a backdrop, not a competing event.
+/// it reads as a backdrop, not a competing event. Finding F3: now tappable
+/// (same `ItemRoute` the check-in card and check-out chip already use) so a
+/// traveler mid-scroll on a "staying" day can still reach the hotel's
+/// details without hunting for the check-in card above it.
 struct StayingStripRow: View, Equatable {
     let model: StayingStripModel
+    /// See `TimelineCardRow.isAXSize`'s doc comment — same
+    /// `.equatable()`-vs-Dynamic-Type fix, needed here too so the indent
+    /// stays aligned with the card/check-out columns at AX sizes.
+    var isAXSize: Bool = false
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
 
     var body: some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "bed.double.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(CategoryColor.hotel.fg)
-            Text(model.text)
-                .font(Typo.body(Typo.Size.caption, weight: .medium))
-                .foregroundStyle(Palette.ink.opacity(0.85))
-            Spacer(minLength: 0)
+        NavigationLink(value: ItemRoute(id: model.itemId)) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "bed.double.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(CategoryColor.hotel.fg)
+                Text(model.text)
+                    .font(Typo.body(Typo.Size.caption, weight: .medium))
+                    .foregroundStyle(Palette.ink.opacity(0.85))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+            .background(Palette.amberSoft.opacity(0.6), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+            // Finding F5's 44pt hit-target rule now applies here too, since
+            // this strip is interactive — a visual capsule centered in a
+            // 44pt band, the same pattern `PersonFilterBar`'s chips use.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .background(Palette.amberSoft.opacity(0.6), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
-        .padding(.leading, TimelineLayout.indentedLeading)
+        .buttonStyle(.plain)
+        .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
         .padding(.vertical, Spacing.xxs)
+        // Finding F9: one spoken stop for the strip, not two (an icon +
+        // text pair VoiceOver would otherwise announce separately).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.text)
     }
 }
 
 /// Compact check-out marker — deliberately smaller and rail-node-free so it
-/// never reads as a second full booking (ACCEPTANCE.md "(c)").
+/// never reads as a second full booking (ACCEPTANCE.md "(c)"). Shares
+/// `TimelineLayout.gutterWidth` with `TimelineCardRow` (finding F5) so its
+/// own time column lines up with every card's, with no private width or
+/// hand-tuned offset needed to make that true.
 struct CheckOutRow: View, Equatable {
     let model: CheckOutRowModel
+    /// See `TimelineCardRow.isAXSize`'s doc comment.
+    var isAXSize: Bool = false
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: model.itemId)) {
@@ -185,17 +230,32 @@ struct CheckOutRow: View, Equatable {
                 Text(model.title)
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
+                    .lineLimit(isAXSize ? 2 : 1)
                 if model.isPending { PendingSyncChip() }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
             .background(Palette.mist.opacity(0.5), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+            // Finding F4: the capsule visually reads shorter than 44pt —
+            // same "visual capsule centered in a 44pt hit band" pattern as
+            // `PersonFilterBar`'s chips (Finding 1b), visuals unchanged.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.leading, TimelineLayout.gutterWidth + TimelineLayout.railWidth - 40)
         .padding(.vertical, Spacing.xxs)
+        // Finding F9: one spoken stop — "Check-out · title, at time zone,
+        // waiting to sync" — instead of the gutter/icon/title/pending chip
+        // reading as separate VoiceOver stops.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11yLabel)
+    }
+
+    private var a11yLabel: String {
+        var parts = [model.title, "at \(model.timeText)\(model.zoneLabel.map { " \($0)" } ?? "")"]
+        if model.isPending { parts.append("waiting to sync") }
+        return parts.joined(separator: ", ")
     }
 
     private var timeGutter: some View {
@@ -209,7 +269,7 @@ struct CheckOutRow: View, Equatable {
                     .foregroundStyle(Palette.slate)
             }
         }
-        .frame(width: 40, alignment: .trailing)
+        .frame(width: TimelineLayout.gutterWidth(isAXSize: isAXSize), alignment: .trailing)
     }
 }
 
@@ -243,8 +303,10 @@ struct TagChip: View {
 /// card.
 struct TZShiftChipRow: View, Equatable {
     let model: TZShiftModel
+    /// See `TimelineCardRow.isAXSize`'s doc comment.
+    var isAXSize: Bool = false
 
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.isAXSize == rhs.isAXSize }
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -260,9 +322,13 @@ struct TZShiftChipRow: View, Equatable {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
         .background(Palette.amberSoft, in: Capsule())
-        .padding(.leading, TimelineLayout.indentedLeading)
+        .padding(.leading, TimelineLayout.indentedLeading(isAXSize: isAXSize))
         .padding(.vertical, Spacing.xxs)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Finding F9: the arrow glyph is decorative — without this, it's a
+        // second VoiceOver stop with nothing to say.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.text)
     }
 }
