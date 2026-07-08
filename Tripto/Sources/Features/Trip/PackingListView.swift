@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The shared, assignable packing list (BUILD_PLAN.md §3.3, §5.4;
 /// docs/TripAppFamily.jsx's `Packing` screen is the visual reference) —
-/// pushed via `PackingRoute` from `TripView`'s tab-bar row. Progress header,
+/// rendered as `TripView`'s third content tab. Progress header,
 /// grouped rows (checkbox/label/assignee), an add sheet, and role-gated
 /// mutations (`PackingPermissions`) — everything here follows the same
 /// "SwiftData write on the main context, then `SyncEngine.enqueue`" flow
@@ -54,19 +54,16 @@ struct PackingListView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.paper)
-        .navigationTitle("Packing & to-dos")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if canManage {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        isPresentingAdd = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Add packing item")
-                }
+        // Packing is a TripView tab now (not a pushed screen), and TripView
+        // hides the nav bar for its gradient hero — so the add affordance is an
+        // in-content FAB matching the itinerary tab, not a nav-bar button.
+        .overlay(alignment: .bottomTrailing) {
+            if canManage && !packingItems.isEmpty {
+                Fab(action: { isPresentingAdd = true }, accessibilityLabel: "Add packing item")
+                    .padding(.trailing, Spacing.xl)
+                    .padding(.bottom, Spacing.xxl)
             }
         }
         .sheet(isPresented: $isPresentingAdd) {

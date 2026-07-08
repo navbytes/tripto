@@ -28,12 +28,6 @@ struct ShareRoute: Hashable {
 /// per-trip.
 struct SettingsRoute: Hashable {}
 
-/// M4: `PackingListView` (Features/Trip/PackingListView.swift), pushed from
-/// `TripView`'s tab-bar row (this milestone's brief: "Reachable from
-/// TripView via a toolbar 'Packing' button").
-struct PackingRoute: Hashable {
-    let tripId: UUID
-}
 
 /// The trip screen (BUILD_PLAN.md §4.2 — THE core screen): cover-gradient
 /// hero, Itinerary · Bookings sub-tabs (Map/$ Split hidden per §9.4), and
@@ -82,6 +76,7 @@ struct TripView: View {
     enum Tab: String, CaseIterable {
         case itinerary = "Itinerary"
         case bookings = "Bookings"
+        case packing = "Packing"
     }
 
     init(tripId: UUID, initialToast: String? = nil) {
@@ -151,6 +146,9 @@ struct TripView: View {
         if arguments.contains("-uitestOpenBookings") {
             selectedTab = .bookings
         }
+        if arguments.contains("-uitestOpenPacking") {
+            selectedTab = .packing
+        }
         if arguments.contains("-uitestOpenAdd") {
             isPresentingAdd = true
         }
@@ -184,7 +182,7 @@ struct TripView: View {
                 SyncBanner()
             }
 
-            tabBar(for: trip)
+            tabBar()
 
             if selectedTab == .itinerary, !tripProfiles.isEmpty {
                 PersonFilterBar(chips: personFilterChips, selection: $selectedProfileFilter)
@@ -212,6 +210,8 @@ struct TripView: View {
                     )
                 case .bookings:
                     BookingsTabView(items: items)
+                case .packing:
+                    PackingListView(tripId: trip.id)
                 }
 
                 if canAddItems && selectedTab == .itinerary {
@@ -300,13 +300,11 @@ struct TripView: View {
 
     // MARK: - Sub-tabs (Itinerary · Bookings only — Map/$ Split hidden, §9.4)
 
-    /// Sub-tabs plus the M4 "Packing" entry point (this milestone's brief:
-    /// "Reachable from TripView via a toolbar 'Packing' button (sub-tabs
-    /// stay Itinerary·Bookings)") — `TripView`'s hero/body have no native
-    /// `.toolbar` (it's hidden for the custom gradient hero), so this row
-    /// is the closest equivalent surface, matching where the sub-tabs
-    /// already live.
-    private func tabBar(for trip: Trip) -> some View {
+    /// The three content tabs — Itinerary · Bookings · Packing — each swapping
+    /// `selectedTab` in place. Packing was originally a separate pushed screen
+    /// reached from a "button" in this row; it's now a peer tab so all three
+    /// behave consistently (they read as tabs, so they should act as tabs).
+    private func tabBar() -> some View {
         HStack(spacing: Spacing.xl) {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Button {
@@ -336,14 +334,6 @@ struct TripView: View {
                 .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
             }
             Spacer()
-            NavigationLink(value: PackingRoute(tripId: trip.id)) {
-                HStack(spacing: Spacing.xs) {
-                    Image(systemName: "bag.fill").font(.system(size: 13, weight: .semibold))
-                    Text("Packing").font(Typo.body(Typo.Size.caption, weight: .semibold))
-                }
-                .foregroundStyle(Palette.slate)
-            }
-            .accessibilityLabel("Packing list")
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.top, Spacing.md)
