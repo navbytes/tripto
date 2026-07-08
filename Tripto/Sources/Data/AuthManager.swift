@@ -50,12 +50,15 @@ final class AuthManager {
 
     // MARK: - Sign in
 
+    #if DEBUG
     /// DEBUG-only test path (WelcomeView's "Continue (test account)"
     /// button) — anonymous sign-ins are enabled on the backend specifically
-    /// to unblock development (see the M1 brief's backend facts).
+    /// to unblock development (see the M1 brief's backend facts). Compiled out
+    /// of Release so the capability isn't even present in the shipped binary.
     func signInAnonymously() async throws {
         _ = try await Supa.client.auth.signInAnonymously()
     }
+    #endif
 
     /// Generates a fresh nonce for one Sign in with Apple attempt and
     /// returns its SHA256 hash, ready for

@@ -113,6 +113,7 @@ struct WelcomeView: View {
         }
     }
 
+    #if DEBUG
     private func signInAnonymously() async {
         isSigningInAnonymously = true
         defer { isSigningInAnonymously = false }
@@ -123,4 +124,5 @@ struct WelcomeView: View {
             errorMessage = "Couldn't start a test session — try again."
         }
     }
+    #endif
 }

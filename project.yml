@@ -14,7 +14,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1" # iPhone first (BUILD_PLAN.md §3.1, §9.2) — iPad/Mac are fast-follows, not v1.
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     # Xcode's "recommended settings" nudge, pinned here (not via the Xcode UI —
     # the .xcodeproj is generated & gitignored, so UI edits get wiped on the
@@ -54,7 +54,11 @@ targets:
           - SofiaSans-Variable.ttf
         NSCalendarsUsageDescription: "Tripto adds your bookings to your calendar when you ask it to."
         ITSAppUsesNonExemptEncryption: false
-        UILaunchScreen: {}
+        # Branded launch: a solid paper (light) / ink (dark) ground matching the
+        # app's first frame, so there's no white flash on open. Deliberately no
+        # splash imagery — Apple discourages branded launch screens.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         # M3: role-carrying invite links (Support/DeepLink.swift,
         # App/AppRouter.swift). The custom scheme works today with no
         # further setup — this is all it needs.
@@ -81,6 +85,7 @@ targets:
       base:
         PRODUCT_NAME: Tripto
         PRODUCT_BUNDLE_IDENTIFIER: io.navbytes.tripto
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Automatic signing, but no team pinned — keeps the project buildable
         # for anyone on the simulator with no Apple Developer account wired
         # up. CI/verify builds additionally pass CODE_SIGNING_ALLOWED=NO.

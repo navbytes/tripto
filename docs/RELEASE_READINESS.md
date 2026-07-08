@@ -35,7 +35,7 @@ Apple App ID exists, (c) budgeting a support escalation if it 500s.
 | M3a no-app share web page (live at tripto.navbytes.io) | ✅ deployed |
 | M3b in-app collaboration, invites, roles, account deletion | ✅ committed |
 | M4 family layer (profiles, "Just mine", packing) | ⏳ |
-| M5 offline hardening + a11y + perf pass | 🔄 done in main loop (agent spawner was flaky); see §9 |
+| M5 offline hardening + a11y + perf pass | ✅ committed (main loop; see §9) |
 
 ## 2. Submission apparatus
 
