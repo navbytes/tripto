@@ -64,6 +64,24 @@ Must be `#if DEBUG`-only, never in a Release build:
 - Any access-token `print()` used in verification drills.
 - The email-OTP fallback sign-in.
 
+**Audit done 2026-07-08 (read-only pass; fixes belong to the M6 hardening
+milestone).** ✅ All *user-reachable* test surfaces are correctly `#if DEBUG`-
+gated: the "Continue (test account)" button, the "Seed demo trip" menu, every
+`-uitest*` hook, `DemoSeeder` (whole file), and `UITestBridge` (whole file).
+No test UI ships in Release. Minor **dead-code cleanups** to make in M6 (inert
+in Release — unreachable, but should not be in the shipping binary):
+- `AuthManager.signInAnonymously()` — wrap in `#if DEBUG` (only DEBUG callers).
+- `WelcomeView.signInAnonymously()` private wrapper — same.
+- `TripView.uitestBookingDetailItemId` property + its `if let` use in the body
+  (lines ~66/127) — gate the property too, not just the setter.
+- `SyncEngine`'s `-simulateOffline` argument check (line ~61) — gate it
+  (harmless: App Store launches can't pass arguments, so it never fires).
+**Backend hardening (more important):** `enable_anonymous_sign_ins = true` is on
+purely for the DEBUG test path. v1 exposes no anonymous feature, so **disable it
+on the backend before launch** (config.toml in the backend repo → `config push`)
+to shrink the auth attack surface — anonymous sign-in is production auth's job
+via SiwA only.
+
 Release build must: archive under the Release config with no simulator-only
 code, `SWIFT_ACTIVE_COMPILATION_CONDITIONS` excluding DEBUG, a real
 MARKETING_VERSION (1.0.0) + CURRENT_PROJECT_VERSION (1), and the app icon +
