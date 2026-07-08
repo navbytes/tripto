@@ -19,9 +19,45 @@ and hand you an exact click-by-click list (§6). Nothing else blocks.
 
 Second-most-important: **production auth is Sign in with Apple**, and research
 (RESEARCH_FINDINGS §1.1) found a live Supabase bug where hosted projects can
-500 on the Apple token path. We de-risk by (a) keeping the DEBUG anonymous/OTP
-paths for development, (b) testing SiwA against *this* project the moment the
-Apple App ID exists, (c) budgeting a support escalation if it 500s.
+500 on the Apple token path. De-risked: the Supabase Apple provider is enabled
++ verified, and this project runs GoTrue **v2.192.0** (> v2.177.0, the fix), so
+that 500 can't hit us; a real device sign-in confirms it.
+
+---
+
+## 0.5 Where we are (2026-07-08 evening) — and your exact next steps
+
+**Done autonomously — nothing needed from you:**
+- Whole app **M0–M5**, committed, **135 tests**. Release-hardened: app icon,
+  branded launch screen, version 1.0.0, anon-auth compiled out of Release,
+  **Release build verified clean**.
+- Backend live: schema + RLS + RPCs; **Sign in with Apple provider enabled +
+  verified**; the fix I flagged is present (GoTrue v2.192.0).
+- Web (all live): share page, **privacy policy**, **root landing page**
+  (Marketing + Support URL), **AASA** for universal links, **daily keep-alive
+  cron** (kills the free-tier-pause risk).
+- **Account-deletion token revocation** (5.1.1(v)): `apple_refresh_tokens` table
+  + `apple-link-token` + `delete-account` edge functions **deployed**; the app
+  is **wired** to call them; **`delete-account` verified end-to-end** (throwaway
+  user → 204 → auth.users + profile gone). Only the Apple `/auth/revoke` call
+  itself is unverified — it needs a real device sign-in + your `.p8`.
+
+**Your steps when back — each genuinely needs your Apple account / device:**
+1. **Device Sign-in-with-Apple test** (§0's Step 4): run on a real device, tap
+   Sign in with Apple, confirm you land on the trip list.
+2. **Add the `.p8` secret** (NOT set yet — verified):
+   `cd ~/repos/backend/projects/tripto && supabase secrets set APPLE_SIWA_PRIVATE_KEY="$(cat /path/to/AuthKey_5YX6JK6K9A.p8)"`
+3. **Verify delete-with-revoke on device**: delete a throwaway account from
+   Settings; it should sign you out cleanly (revoke now fires with the secret).
+4. *(Optional)* **Universal links**: enable the **Associated Domains** capability
+   on the App ID (same console as SiwA), tell me, and I add the entitlement
+   (`applinks:tripto.navbytes.io`) — the AASA is already served. Custom scheme
+   `tripto://` works without this.
+5. **App Store Connect**: create the app (bundle `io.navbytes.tripto`); paste
+   metadata (§7), screenshots (`/tmp/appstore-*.png`, 6.9"), App Privacy (§4).
+6. **Xcode**: Product → Archive → Distribute → App Store Connect → upload → submit.
+7. **Pre-submission**: disable backend anonymous sign-ins (§3) + purge the
+   accumulated anonymous test trips.
 
 ---
 
@@ -49,8 +85,8 @@ Apple App ID exists, (c) budgeting a support escalation if it 500s.
 | Release-build hygiene (DEBUG gating) | ✅ | all test surfaces `#if DEBUG`; anon-auth compiled out of Release; **Release config builds clean** (verified). One pre-submission flip left: disable backend anon sign-ins once testing's done. §3 |
 | Encryption compliance | ✅ | `ITSAppUsesNonExemptEncryption = false` (standard TLS only) |
 | Permission usage strings | ◑ | Calendar ✅ (`NSCalendarsUsageDescription`); no location/photos/contacts prompts (MKLocalSearchCompleter needs none) |
-| Account deletion (5.1.1(v)) | 🔄 | RPC + UI in M3b; **SiwA token revocation edge function** still owed (§5) |
-| Sign in with Apple entitlement + provider | 🔑/⏳ | entitlement + Supabase Apple provider config; Apple-side is owner (§6) |
+| Account deletion (5.1.1(v)) | ✅ | `delete-account` edge fn (revoke-then-delete) deployed + **verified end-to-end**; app wired. Apple `/auth/revoke` awaits device + `.p8` |
+| Sign in with Apple entitlement + provider | ✅ app / 🔑 device | entitlement in project.yml; Supabase provider enabled + verified (GoTrue v2.192.0). Remaining: device sign-in test |
 | Screenshots (6.9") | ✅ | 1320×2868 set captured (timeline, boarding pass, share) in /tmp/appstore-*.png + milestone captures; owner may reframe/caption |
 | App Store Connect metadata | ⏳ draft | §7 — ready to paste |
 | Distribution archive + upload | 🔑 | needs signing team; §6 |
@@ -125,15 +161,22 @@ third-party data sharing. **App Privacy → Tracking: No.**
 ## 5. Account deletion & Sign in with Apple (compliance detail)
 
 Guideline **5.1.1(v)**: an app with account creation must offer in-app
-deletion. M3b ships the UI + `delete_account()` RPC (verified: removes the
-auth user, cascades trips/memberships). **Additional obligation because we use
-SiwA:** on account deletion the app must call Apple's token-revocation REST
-endpoint. That needs an Apple private key (.p8) + key ID + team ID to mint a
-client secret — server-side, so an **edge function** (`revoke-apple-token`) in
-the backend repo, invoked by `delete_account`. Owner provides the key material
-(§6); I build the function. Until then, data deletion (the core requirement) is
-satisfied; token revocation is the remaining compliance gap and is flagged in
-the Settings code.
+deletion. **Built and deployed** (2026-07-08):
+
+- **App:** Settings "Delete account" → `delete-account` edge function. At
+  sign-in, `WelcomeView`/`AuthManager` capture Apple's `authorizationCode` and
+  (best-effort) POST it to `apple-link-token`.
+- **Backend (navbytes/backend):** `apple_refresh_tokens` table (edge-only,
+  deny-all RLS); `apple-link-token` exchanges the code → stores a refresh token;
+  `delete-account` best-effort-revokes via Apple `/auth/revoke` then
+  `admin.deleteUser` (cascades all data). Client secret is an ES256 JWT signed
+  with the `.p8` (team `59J9RQXYYP`, key `5YX6JK6K9A`, bundle `io.navbytes.tripto`).
+- **Verified:** `delete-account` live end-to-end (throwaway user → 204 →
+  auth.users + profile rows gone). App builds + 135 tests green.
+- **Remaining (device + owner):** set `APPLE_SIWA_PRIVATE_KEY` (the `.p8`) as a
+  Supabase secret — *not set yet*; then a real device sign-in exercises the
+  code-exchange + the Apple revoke. Deletion (the core requirement) already works
+  regardless; a missing secret just skips the revoke.
 
 ## 6. 🔑 Owner-only actions (I cannot do these — they need your Apple account)
 
