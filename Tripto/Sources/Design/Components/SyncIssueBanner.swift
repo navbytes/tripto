@@ -107,8 +107,7 @@ struct SyncIssuesSheet: View {
                     .foregroundStyle(Palette.ink)
                 Spacer()
                 Text(issue.at, style: .relative)
-                    .font(Typo.body(9.5))
-                    .foregroundStyle(Palette.slate.opacity(0.8))
+                    .helperTextStyle()
             }
             Text(SyncIssuePresentation.message(retriable: issue.retriable))
                 .font(Typo.body(Typo.Size.caption))

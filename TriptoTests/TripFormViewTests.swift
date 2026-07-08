@@ -51,4 +51,33 @@ final class TripFormViewTests: XCTestCase {
         XCTAssertEqual(TripFormView.canonicalGradientKey("sunset"), "dusk")
         XCTAssertEqual(TripFormView.canonicalGradientKey(""), "dusk")
     }
+
+    // MARK: - UX audit finding 1: CTA-guidance precedence (save error ->
+    // blank title -> unacceptable country), including the CTA-slot fix that
+    // surfaces an unacceptable country code even off-screen.
+
+    func testCTAGuidancePrefersSaveErrorOverEverythingElse() {
+        let guidance = TripFormView.ctaGuidance(
+            saveError: "Couldn\u{2019}t save the trip. Try again.", title: "", countryCode: "PO", isEditing: false
+        )
+        XCTAssertEqual(guidance?.message, "Couldn\u{2019}t save the trip. Try again.")
+        XCTAssertEqual(guidance?.isError, true)
+    }
+
+    func testCTAGuidanceFallsBackToBlankTitleWhenNoSaveError() {
+        let guidance = TripFormView.ctaGuidance(saveError: nil, title: "  ", countryCode: "", isEditing: false)
+        XCTAssertEqual(guidance?.message, "Enter a trip name to create the trip.")
+        XCTAssertEqual(guidance?.isError, false)
+    }
+
+    func testCTAGuidanceSurfacesUnacceptableCountryWhenTitleIsValid() {
+        let guidance = TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "PO", isEditing: true)
+        XCTAssertEqual(guidance?.message, "Fix the country code \u{2014} or clear it \u{2014} to save changes.")
+        XCTAssertEqual(guidance?.isError, true)
+    }
+
+    func testCTAGuidanceNilWhenEverythingIsAcceptable() {
+        XCTAssertNil(TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "PT", isEditing: false))
+        XCTAssertNil(TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "", isEditing: false))
+    }
 }

@@ -201,6 +201,7 @@ public enum Typo {
         public static let title: CGFloat = 20
         public static let body: CGFloat = 14.5
         public static let caption: CGFloat = 12.5
+        public static let helper: CGFloat = 11
     }
 
     private static let displayFamilyKeyword = "Fraunces"

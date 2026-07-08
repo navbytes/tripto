@@ -235,7 +235,13 @@ struct TripView: View {
             }
         }
         .sheet(isPresented: $isEditingTrip) {
-            TripFormView(mode: .edit(trip))
+            // UX audit finding 7: the context-menu-triggered edit path
+            // through Home has its own toast (`HomeView`'s create/edit
+            // sheets); this is the second entry point — the hero's pencil
+            // button — so it needs the same "action keeps its name" close
+            // ("Save changes" -> "Changes saved") via this screen's own
+            // `$toast`/`.toastOverlay`.
+            TripFormView(mode: .edit(trip)) { _ in toast = "Changes saved" }
         }
     }
 

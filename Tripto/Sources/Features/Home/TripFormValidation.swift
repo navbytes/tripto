@@ -39,4 +39,22 @@ enum TripFormValidation {
             && isCountryCodeAcceptable(countryCode)
             && isDateRangeValid(startDate: startDate, endDate: endDate)
     }
+
+    /// Derives the regional-indicator flag emoji (e.g. "PT" -> "\u{1F1F5}\u{1F1F9}")
+    /// for a 2-letter ISO region code, so a resolved country name reads with
+    /// its flag rather than as plain text that's visually identical to
+    /// passive helper copy (finding F2). `nil` for anything that doesn't
+    /// resolve to a real, assigned region — reuses `countryName(forCode:)`'s
+    /// validation so the two can never disagree.
+    static func flagEmoji(forCode code: String) -> String? {
+        guard countryName(forCode: code) != nil else { return nil }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let base = Unicode.Scalar("A").value
+        var scalars = String.UnicodeScalarView()
+        for character in trimmed.unicodeScalars {
+            guard let regionalIndicator = Unicode.Scalar(0x1F1E6 + (character.value - base)) else { return nil }
+            scalars.append(regionalIndicator)
+        }
+        return String(scalars)
+    }
 }

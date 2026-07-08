@@ -49,7 +49,7 @@ extension AddItemSheet {
                 && !flightEndAfterStart {
                 Text("Arrival must be after departure.")
                     .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Palette.rose)
             }
             ZonePicker(
                 title: "Arrival time zone", selection: $arrivalZone, referenceDate: arrivesTime,
@@ -82,7 +82,7 @@ extension AddItemSheet {
             if !isValid {
                 Text("Check-out must be after check-in.")
                     .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Palette.rose)
             }
             ZonePicker(title: "Hotel time zone", selection: $stayZone, referenceDate: checkInTime)
 
@@ -170,7 +170,7 @@ extension AddItemSheet {
             if transportHasName && !transportEndAfterStart {
                 Text("Drop-off must be after pickup.")
                     .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Palette.rose)
             }
             Toggle("Returns in a different time zone", isOn: $transportDropoffDiffZone)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
@@ -205,8 +205,7 @@ extension AddItemSheet {
                             }
                         }
                         Text("Leave everyone unselected if it\u{2019}s for the whole group.")
-                            .font(Typo.body(9.5))
-                            .foregroundStyle(Palette.slate.opacity(0.8))
+                            .helperTextStyle()
                     }
                 }
 
@@ -324,6 +323,7 @@ struct FormTextField: View {
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.slate)
             TextField(placeholder, text: $text)
+                .font(Typo.body())
                 .keyboardType(keyboardType)
                 .textInputAutocapitalization(autocapitalization)
                 .autocorrectionDisabled()

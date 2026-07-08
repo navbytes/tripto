@@ -102,7 +102,7 @@ struct TripProfileFormSheet: View {
                             } label: {
                                 Text("Remove from trip")
                                     .font(Typo.body(weight: .semibold))
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(Palette.rose)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, Spacing.md)
                             }

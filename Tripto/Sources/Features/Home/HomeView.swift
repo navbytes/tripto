@@ -31,8 +31,11 @@ struct HomeView: View {
     /// Finding 1 (refresh-scoped gap): a manual pull-to-refresh that fails
     /// silently leaves the list unchanged with no feedback. Driven by
     /// `HomeRefreshFeedback.shouldToastAfterRefresh` from `refreshFromPull()`
-    /// so all six `.refreshable` closures share one gated path.
-    @State private var refreshFailedToast: String?
+    /// so all six `.refreshable` closures share one gated path. Also carries
+    /// the create/edit sheets' "Trip created"/"Changes saved" confirmations
+    /// (UX audit finding 7) — one general-purpose toast slot, not a
+    /// dedicated one per source.
+    @State private var toast: String?
     /// Finding 1 (silent retry): `pullFailedState`'s "Try again" button
     /// re-entering an in-flight pull with no feedback and no protection
     /// against a double-tap. Kept local to `HomeView` rather than widening
@@ -111,7 +114,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .toastOverlay($refreshFailedToast)
+            .toastOverlay($toast)
             .navigationBarTitleDisplayMode(.inline)
             // The one route-based nav stack (`TripView.swift`'s doc
             // comment): Home pushes `TripRoute`; `TripView`'s own tabs push
@@ -154,6 +157,7 @@ struct HomeView: View {
                 // somewhere visible.
                 TripFormView(mode: .create) { trip in
                     selectedTab = trip.bucket().isPastTab ? "Past" : "Upcoming"
+                    toast = "Trip created"
                 }
             }
             .sheet(item: $editingTrip) { trip in
@@ -161,6 +165,7 @@ struct HomeView: View {
                 // it to the other tab, where it'd otherwise vanish.
                 TripFormView(mode: .edit(trip)) { savedTrip in
                     selectedTab = savedTrip.bucket().isPastTab ? "Past" : "Upcoming"
+                    toast = "Changes saved"
                 }
             }
             .confirmationDialog(
@@ -284,7 +289,7 @@ struct HomeView: View {
             isOffline: syncStatus.isOffline,
             hasTrips: !trips.isEmpty
         ) {
-            refreshFailedToast = "Couldn\u{2019}t refresh \u{2014} pull to try again"
+            toast = "Couldn\u{2019}t refresh \u{2014} pull to try again"
         }
     }
 

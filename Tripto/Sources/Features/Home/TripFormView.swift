@@ -43,14 +43,24 @@ struct TripFormView: View {
     /// F4: gates the "Discard changes?" confirmation on cancel/swipe-dismiss.
     @State private var showDiscardConfirm = false
 
+    /// UX audit finding 5: Trip name -> Destination -> Country keyboard flow,
+    /// so a user filling the form top-to-bottom never has to reach for the
+    /// keyboard's dismiss key or tap the next field by hand.
+    private enum FocusField {
+        case title, destination, country
+    }
+    @FocusState private var focusedField: FocusField?
+
     /// The three tokens `CoverGradient` defines (`"default"` is just an
     /// alias for `dusk`, not a fourth option) — `dusk` is pre-selected for
     /// new trips, matching the schema's own column default.
     private static let gradientOptions = ["dusk", "plum", "moss"]
 
     /// F4: the field values this sheet opened with, so `hasChanges` can tell
-    /// an untouched form from a dirty one.
-    private struct InitialValues {
+    /// an untouched form from a dirty one. Also `Equatable` (finding 6) so
+    /// `currentValues` below can drive a single `.onChange` that clears a
+    /// stale `saveError` the moment any field is edited.
+    private struct InitialValues: Equatable {
         var title: String
         var destination: String
         var countryCode: String
@@ -122,6 +132,18 @@ struct TripFormView: View {
             || coverGradientKey != initialValues.coverGradientKey
     }
 
+    /// F6: the live snapshot `.onChange` diffs against `initialValues`
+    /// (indirectly, via its own previous value) to clear a stale `saveError`
+    /// the instant the user edits anything — otherwise e.g. the blank-title
+    /// guidance stays stuck on screen after the title is fixed but before
+    /// the CTA is tapped again.
+    private var currentValues: InitialValues {
+        InitialValues(
+            title: title, destination: destination, countryCode: countryCode,
+            startDate: startDate, endDate: endDate, tripType: tripType, coverGradientKey: coverGradientKey
+        )
+    }
+
     /// Bridges `SegmentedControl`'s `String` selection to `tripType` — the
     /// three `TripType` raw values ("family"/"friends"/"solo") capitalized
     /// are exactly the control's option labels.
@@ -162,6 +184,20 @@ struct TripFormView: View {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
+        .onChange(of: currentValues) { _, _ in saveError = nil }
+        .task {
+            // F5, create mode only — editing an existing trip shouldn't pop
+            // the keyboard the moment the sheet appears. A short delay
+            // rather than `.defaultFocus` here: this view is hosted in a
+            // sheet-presented `NavigationStack`, where `.defaultFocus`'s
+            // timing relative to the sheet's own presentation animation is
+            // unreliable; a delayed explicit set is the dependable version
+            // of the same intent.
+            if case .create = mode {
+                try? await Task.sleep(for: .milliseconds(500))
+                focusedField = .title
+            }
+        }
     }
 
     // MARK: - Fields
@@ -169,14 +205,19 @@ struct TripFormView: View {
     private var tripNameField: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             FormTextField(label: "Trip name", text: $title, placeholder: "Lisbon")
+                .focused($focusedField, equals: .title)
+                .submitLabel(.next)
+                .onSubmit { focusedField = .destination }
             Text("This is the big title on your trip card.")
-                .font(Typo.body(9.5))
-                .foregroundStyle(Palette.slate.opacity(0.8))
+                .helperTextStyle()
         }
     }
 
     private var destinationField: some View {
         FormTextField(label: "Destination", text: $destination, placeholder: "Lisbon, Portugal")
+            .focused($focusedField, equals: .destination)
+            .submitLabel(.next)
+            .onSubmit { focusedField = .country }
     }
 
     private var countryField: some View {
@@ -185,21 +226,32 @@ struct TripFormView: View {
                 label: "Country", text: $countryCode, placeholder: "2-letter code, e.g. PT",
                 autocapitalization: .characters
             )
+            .focused($focusedField, equals: .country)
+            .submitLabel(.done)
+            .onSubmit { focusedField = nil }
             .onChange(of: countryCode) { _, newValue in
                 let filtered = String(newValue.uppercased().prefix(2))
                 if filtered != countryCode { countryCode = filtered }
             }
+            // Finding 1: a 1-character code (e.g. mid-type "P") now gets the
+            // same rejection hint as a 2-character one that doesn't resolve,
+            // instead of silently doing nothing until the second keystroke.
             if let countryName = TripFormValidation.countryName(forCode: countryCode) {
-                Text(countryName)
-                    .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(Palette.slate)
-            } else if countryCode.count == 2 {
+                // Finding 2: flag + name in one `Text` (so VoiceOver reads
+                // the country name, not a decorative glyph) and styled loud
+                // — ink/semibold, not passive slate caption — so a
+                // resolved-but-wrong country (e.g. CR instead of HR) reads
+                // as something to double-check, not as inert helper text.
+                Text("\(TripFormValidation.flagEmoji(forCode: countryCode) ?? "") \(countryName)")
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+            } else if !countryCode.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text(
                     "\u{2018}\(countryCode)\u{2019} isn\u{2019}t a country code Tripto recognizes " +
                     "\u{2014} use a 2-letter code like PT for Portugal."
                 )
                 .font(Typo.body(Typo.Size.caption))
-                .foregroundStyle(.red)
+                .foregroundStyle(Palette.rose)
             }
         }
     }
@@ -215,7 +267,7 @@ struct TripFormView: View {
             if !isDateRangeValid {
                 Text("End date must be on or after the start date.")
                     .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Palette.rose)
             }
         }
     }
@@ -228,8 +280,7 @@ struct TripFormView: View {
                 "Sets this trip\u{2019}s defaults as features arrive \u{2014} friends\u{2019} trips will lean " +
                 "toward splitting costs, family trips toward tracking them."
             )
-            .font(Typo.body(9.5))
-            .foregroundStyle(Palette.slate.opacity(0.8))
+            .helperTextStyle()
         }
     }
 
@@ -248,14 +299,12 @@ struct TripFormView: View {
 
     private var ctaSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            if let saveError {
-                Text(saveError)
+            if let guidance = Self.ctaGuidance(
+                saveError: saveError, title: title, countryCode: countryCode, isEditing: isEditing
+            ) {
+                Text(guidance.message)
                     .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(.red)
-            } else if !TripFormValidation.isTitleValid(title) {
-                Text("Enter a trip name to " + (isEditing ? "save changes." : "create the trip."))
-                    .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(Palette.slate)
+                    .foregroundStyle(guidance.isError ? Palette.rose : Palette.slate)
             }
             Button {
                 save()
@@ -278,6 +327,31 @@ struct TripFormView: View {
         Text(text)
             .font(Typo.body(Typo.Size.caption, weight: .semibold))
             .foregroundStyle(Palette.slate)
+    }
+
+    /// Finding 1: the CTA-adjacent guidance text and whether it's
+    /// error-toned (rose) or advisory (slate) — factored out as a `static`,
+    /// like `canonicalGradientKey` below, so the save-error -> blank-title
+    /// -> unacceptable-country precedence is directly testable without a
+    /// view hierarchy. `ctaSection` renders exactly this. A save error takes
+    /// priority (it's the freshest, most specific problem); an unacceptable
+    /// country is checked last so it doesn't upstage a simpler blank-title
+    /// fix, but it still always renders — including when the country field
+    /// itself is scrolled off-screen (§6.6).
+    static func ctaGuidance(
+        saveError: String?, title: String, countryCode: String, isEditing: Bool
+    ) -> (message: String, isError: Bool)? {
+        if let saveError { return (saveError, true) }
+        if !TripFormValidation.isTitleValid(title) {
+            return ("Enter a trip name to " + (isEditing ? "save changes." : "create the trip."), false)
+        }
+        if !TripFormValidation.isCountryCodeAcceptable(countryCode) {
+            return (
+                "Fix the country code \u{2014} or clear it \u{2014} to " + (isEditing ? "save changes." : "create the trip."),
+                true
+            )
+        }
+        return nil
     }
 
     /// F8: the swatch that reads as "selected" — normalized so an unknown or

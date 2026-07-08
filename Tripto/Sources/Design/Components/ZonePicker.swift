@@ -29,8 +29,7 @@ struct ZonePicker: View {
                         .foregroundStyle(Palette.slate)
                     if let hint {
                         Text(hint)
-                            .font(Typo.body(9.5))
-                            .foregroundStyle(Palette.slate.opacity(0.8))
+                            .helperTextStyle()
                     }
                 }
                 Spacer()
