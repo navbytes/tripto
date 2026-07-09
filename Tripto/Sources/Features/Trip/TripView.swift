@@ -153,6 +153,19 @@ struct TripView: View {
         authManager.userId != nil && !syncStatus.isOffline && !syncStatus.completedInitialTripPulls.contains(tripId)
     }
 
+    /// UX audit finding 2 (cross-screen): backs `.refreshable` on all three
+    /// tabs — previously the only manual refresh gesture in the app lived on
+    /// Home; once inside a trip, an organizer/companion (or anyone viewing a
+    /// cached trip) whose pull failed while online had no way to ask again
+    /// short of leaving and reopening the trip. Calls `pullTrip(_:)`
+    /// directly (not the debounced `schedulePullTrip(_:)` the retry buttons
+    /// use) so the native pull-to-refresh spinner stays up until the pull
+    /// actually completes, mirroring `HomeView.refreshFromPull`'s own choice
+    /// to await `pullHome()` rather than `scheduleHomePull()`.
+    private func refreshTrip() async {
+        await syncEngine?.pullTrip(tripId)
+    }
+
     var body: some View {
         ZStack {
             Palette.paper.ignoresSafeArea()
@@ -302,7 +315,8 @@ struct TripView: View {
                             onRetryLoad: {
                                 let id = trip.id
                                 Task { await syncEngine?.schedulePullTrip(id) }
-                            }
+                            },
+                            onRefresh: refreshTrip
                         )
                     }
                     tabContent(.bookings) {
@@ -317,7 +331,8 @@ struct TripView: View {
                             onRetryLoad: {
                                 let id = trip.id
                                 Task { await syncEngine?.schedulePullTrip(id) }
-                            }
+                            },
+                            onRefresh: refreshTrip
                         )
                     }
                     tabContent(.packing) {
@@ -325,7 +340,18 @@ struct TripView: View {
                             tripId: trip.id,
                             tripCreatedBy: trip.createdBy,
                             heroScrollModel: heroScrollModel,
-                            isAwaitingFirstSync: awaitingFirstTripPull
+                            isAwaitingFirstSync: awaitingFirstTripPull,
+                            // UX audit finding 3 (cross-screen): Packing was
+                            // the one tab excluded from sync-state surfacing
+                            // — see `PackingListView`'s own doc comments.
+                            pendingRowIds: syncStatus.pendingRowIds,
+                            isOffline: syncStatus.isOffline,
+                            didLoadFail: syncStatus.tripPullFailures.contains(trip.id),
+                            onRetryLoad: {
+                                let id = trip.id
+                                Task { await syncEngine?.schedulePullTrip(id) }
+                            },
+                            onRefresh: refreshTrip
                         )
                     }
                 }
@@ -367,6 +393,13 @@ struct TripView: View {
                     toast = "Changes saved on this device \u{2014} you\u{2019}re signed out, so they " +
                         "won\u{2019}t sync until you sign back in."
                 }
+            } onDeleted: {
+                // UX audit finding 8: deleting a trip used to only be
+                // reachable from Home's swipe/context menu — this pops
+                // straight back to Home the moment the edit sheet's own
+                // "Delete trip" confirms, instead of leaving the traveler on
+                // a screen for a trip that no longer exists.
+                dismiss()
             }
         }
     }

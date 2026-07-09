@@ -812,10 +812,11 @@ struct ShareTripView: View {
         }
     }
 
+    // UX audit finding 6: routes through the same `ClipboardFeedback` helper
+    // `BookingDetailView`'s code/ticket copy now uses, so both screens'
+    // tap-to-copy affordances share one haptic+toast pattern.
     private func copy(_ url: URL) {
-        UIPasteboard.general.string = url.absoluteString
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        toast = "Link copied"
+        toast = ClipboardFeedback.copy(url.absoluteString, label: "Link")
     }
 
     /// Creates an invite row of `role`, then (unless `presentShareSheet` is

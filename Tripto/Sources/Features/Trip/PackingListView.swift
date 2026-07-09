@@ -25,6 +25,29 @@ struct PackingListView: View {
     /// Finding 2: true while this trip's first pull this session hasn't
     /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
     var isAwaitingFirstSync: Bool = false
+    /// UX audit finding 3 (cross-screen): `item.id`s whose local write
+    /// hasn't been confirmed by the server yet (`SyncStatus.pendingRowIds`
+    /// via `TripView`) — threaded through so a not-yet-synced packing item
+    /// gets the same `PendingSyncChip` treatment its Itinerary/Bookings
+    /// siblings already have.
+    var pendingRowIds: Set<UUID> = []
+    /// UX audit finding 3: whether the device is currently offline —
+    /// `TripView`'s `syncStatus.isOffline`, mirroring `ItineraryTabView`/
+    /// `BookingsTabView`'s own `isOffline` so this tab's empty/unavailable
+    /// copy can tell "haven't heard from the server since going offline"
+    /// apart from "asked, and it failed."
+    var isOffline: Bool = false
+    /// UX audit finding 3: true when this trip's most recent `pullTrip(_:)`
+    /// attempt this session failed — `SyncStatus.tripPullFailures` via
+    /// `TripView`.
+    var didLoadFail: Bool = false
+    /// UX audit finding 3: retries this trip's pull — `TripView` wires this
+    /// to `syncEngine.schedulePullTrip(trip.id)`, matching the sibling tabs.
+    var onRetryLoad: (() -> Void)? = nil
+    /// UX audit finding 2 (cross-screen): backs pull-to-refresh on this tab
+    /// — see `ItineraryTabView.onRefresh`'s doc comment for why this is a
+    /// separate, awaited closure rather than reusing `onRetryLoad`.
+    var onRefresh: (() async -> Void)? = nil
 
     @Query private var packingItems: [PackingItem]
     @Query private var tripProfiles: [TripProfile]
@@ -46,12 +69,27 @@ struct PackingListView: View {
     /// opt-in complement for hiding packed items outright once most of the
     /// list is done.
     @State private var hidePacked = false
+    /// UX audit finding 5: gates the swipe-delete confirmation — a shared
+    /// list where you can delete items other people created deserves the
+    /// same "destructive = confirm" contract as every other delete
+    /// affordance in the app (Home's trip swipe, Booking detail's trash,
+    /// `TripProfileFormSheet`'s remove).
+    @State private var itemPendingDeletion: PackingItem?
 
-    init(tripId: UUID, tripCreatedBy: UUID, heroScrollModel: HeroScrollModel, isAwaitingFirstSync: Bool = false) {
+    init(
+        tripId: UUID, tripCreatedBy: UUID, heroScrollModel: HeroScrollModel, isAwaitingFirstSync: Bool = false,
+        pendingRowIds: Set<UUID> = [], isOffline: Bool = false, didLoadFail: Bool = false,
+        onRetryLoad: (() -> Void)? = nil, onRefresh: (() async -> Void)? = nil
+    ) {
         self.tripId = tripId
         self.tripCreatedBy = tripCreatedBy
         self.heroScrollModel = heroScrollModel
         self.isAwaitingFirstSync = isAwaitingFirstSync
+        self.pendingRowIds = pendingRowIds
+        self.isOffline = isOffline
+        self.didLoadFail = didLoadFail
+        self.onRetryLoad = onRetryLoad
+        self.onRefresh = onRefresh
         _packingItems = Query(filter: #Predicate<PackingItem> { $0.tripId == tripId })
         _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
         _members = Query(filter: #Predicate<TripMember> { $0.tripId == tripId })
@@ -154,6 +192,28 @@ struct PackingListView: View {
             }
             Button("Cancel", role: .cancel) { reassigningItem = nil }
         }
+        // UX audit finding 5: swipe-delete now confirms first — same
+        // "destructive = confirm" contract Home's trip swipe, Booking
+        // detail's trash, and `TripProfileFormSheet`'s remove already use;
+        // this was the one swipe/row delete in the app that skipped it.
+        .confirmationDialog(
+            "Remove this item?",
+            isPresented: Binding(
+                get: { itemPendingDeletion != nil },
+                set: { isPresented in if !isPresented { itemPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let item = itemPendingDeletion { delete(item) }
+                itemPendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { itemPendingDeletion = nil }
+        } message: {
+            if let label = itemPendingDeletion?.label {
+                Text("\u{201C}\(label)\u{201D} will be removed from the packing list for everyone on the trip.")
+            }
+        }
         // UX audit finding 8 (this tab): mirrors TripView.swift's own
         // finding-8 fix — this tab renders its own FAB in the same band, so
         // its toast needs the same constant FAB-clearance inset.
@@ -247,10 +307,19 @@ struct PackingListView: View {
                                     // toggle/reassign/edit but not delete their own item.
                                     canDelete: authManager.userId == nil
                                         || PackingPermissions.canDelete(item: item, role: myRole, userId: authManager.userId),
+                                    // UX audit finding 3: same dashed-border/
+                                    // chip treatment `BookingRow`/
+                                    // `TimelineCardRow` already give a
+                                    // not-yet-synced row.
+                                    isPending: pendingRowIds.contains(item.id),
                                     onToggle: { toggleDone(item) },
                                     onReassign: { reassigningItem = item },
                                     onEdit: { editingItem = item },
-                                    onDelete: { delete(item) }
+                                    // UX audit finding 5: routes through a
+                                    // confirmation instead of deleting on the
+                                    // swipe tap alone — see
+                                    // `itemPendingDeletion`'s doc comment.
+                                    onDelete: { itemPendingDeletion = item }
                                 )
                             }
                         }
@@ -265,6 +334,9 @@ struct PackingListView: View {
             .padding(.bottom, Fab.scrollClearance)
         }
         .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .packing)))
+        // UX audit finding 2: manual pull-to-refresh, matching Home and this
+        // tab's Itinerary/Bookings siblings.
+        .refreshable { await onRefresh?() }
     }
 
     // MARK: - Empty state (§6.6: invitation copy, not blank)
@@ -284,6 +356,16 @@ struct PackingListView: View {
                 Text("Checking the packing list\u{2026}")
                     .font(Typo.body())
                     .foregroundStyle(Palette.slate)
+            } else if !canManage && (isOffline || didLoadFail) {
+                // UX audit finding 3: mirrors `BookingsTabView.unavailableState`
+                // — a viewer whose packing list loaded empty *and* the load
+                // itself is suspect (offline, or this trip's last pull
+                // failed) shouldn't read the settled "no one's added
+                // anything" copy as fact; `!canManage` stands in for the
+                // viewer check the same way `onAdd == nil` does over there
+                // (an editor's "add what this trip needs" invitation stays
+                // correct either way).
+                unavailableState
             } else {
                 Image(systemName: "bag.badge.plus")
                     .font(.system(size: 36))
@@ -328,6 +410,45 @@ struct PackingListView: View {
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// UX audit finding 3: modeled on `BookingsTabView.unavailableState`,
+    /// sized to this tab's simpler empty-state shell.
+    private var unavailableState: some View {
+        VStack(spacing: Spacing.md) {
+            Image(systemName: "bag.badge.plus")
+                .font(.system(size: 36))
+                .foregroundStyle(Palette.slate)
+            Text(isOffline ? "Packing list hasn\u{2019}t loaded yet" : "Couldn\u{2019}t load the packing list")
+                .font(Typo.body())
+                .foregroundStyle(Palette.slate)
+                .multilineTextAlignment(.center)
+            Text(
+                isOffline
+                    ? "You\u{2019}re offline \u{2014} the packing list will appear once you\u{2019}re back online."
+                    : "Check your connection and try again."
+            )
+            .font(Typo.body())
+            .foregroundStyle(Palette.slate)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Spacing.xxl)
+            // Offline has nothing to retry — the pull resumes the moment
+            // connectivity returns, so a CTA here would just be a button
+            // that does nothing new.
+            if !isOffline {
+                Button(action: { onRetryLoad?() }) {
+                    Text("Try again")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.onAmber)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.vertical, Spacing.md)
+                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                        .contentShape(Capsule())
+                        .background(Palette.amber, in: Capsule())
+                }
+                .padding(.top, Spacing.xs)
+            }
+        }
     }
 
     // MARK: - Mutations
@@ -453,6 +574,10 @@ private struct PackingRow: View {
     let canManage: Bool
     let tripProfiles: [TripProfile]
     let canDelete: Bool
+    /// UX audit finding 3 (cross-screen): true while this row's local write
+    /// hasn't been confirmed by the server yet — same signal
+    /// `BookingRow`/`TimelineCardRow` already render a chip for.
+    let isPending: Bool
     let onToggle: () -> Void
     let onReassign: () -> Void
     let onEdit: () -> Void
@@ -463,12 +588,15 @@ private struct PackingRow: View {
             Button(action: onToggle) {
                 HStack(spacing: Spacing.md) {
                     checkbox
-                    Text(item.label)
-                        .font(Typo.body(Typo.Size.body, weight: .semibold))
-                        .foregroundStyle(item.isDone ? Palette.slate : Palette.ink)
-                        .strikethrough(item.isDone)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.label)
+                            .font(Typo.body(Typo.Size.body, weight: .semibold))
+                            .foregroundStyle(item.isDone ? Palette.slate : Palette.ink)
+                            .strikethrough(item.isDone)
+                            .lineLimit(2)
+                        if isPending { PendingSyncChip() }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .contentShape(Rectangle())
             }
@@ -483,7 +611,7 @@ private struct PackingRow: View {
             .accessibilityLabel(item.label)
             .accessibilityValue(item.isDone ? "Packed" : "Not packed")
             .accessibilityAddTraits(item.isDone ? [.isSelected] : [])
-            .accessibilityHint(canManage ? "Double tap to mark packed" : "")
+            .accessibilityHint(accessibilityHintText)
 
             Button(action: onReassign) {
                 assigneeChip
@@ -496,7 +624,13 @@ private struct PackingRow: View {
         .padding(.vertical, Spacing.sm + 2)
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: Radii.card, style: .continuous).stroke(Palette.mist, lineWidth: 1)
+            // UX audit finding 3: same dashed-border treatment `BookingRow`/
+            // `TimelineCardRow` use for a not-yet-synced row.
+            RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                .strokeBorder(
+                    isPending ? Palette.slate.opacity(0.35) : Palette.mist,
+                    style: StrokeStyle(lineWidth: isPending ? 1.25 : 1, dash: isPending ? [5, 4] : [])
+                )
         }
         .opacity(item.isDone ? 0.65 : 1)
         .swipeActions(edge: .trailing) {
@@ -526,6 +660,16 @@ private struct PackingRow: View {
                     Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
                 }
             }
+    }
+
+    /// UX audit finding 3: combines `canManage`'s existing toggle hint with
+    /// a pending-sync note — a single hint string, since `.accessibilityHint`
+    /// calls don't stack (the last one applied wins).
+    private var accessibilityHintText: String {
+        var parts: [String] = []
+        if canManage { parts.append("Double tap to mark packed") }
+        if isPending { parts.append("Waiting to sync") }
+        return parts.joined(separator: ", ")
     }
 
     private var assigneeChip: some View {
@@ -583,6 +727,18 @@ private struct PackingItemFormSheet: View {
     @State private var label: String
     @State private var groupKey: PackingGroupKey
     @State private var assigneeProfileId: UUID?
+    /// UX audit finding 4: gates the "Discard changes?" confirmation on
+    /// Cancel/swipe-dismiss — the same guard `TripFormView`/`AddItemSheet`
+    /// already apply, extended to this sheet and `TripProfileFormSheet`,
+    /// the two form sheets that had been skipping it.
+    @State private var showDiscardConfirm = false
+
+    /// The label/group/assignee this sheet opened with, so `hasChanges` can
+    /// tell an untouched form from a dirty one — same role as
+    /// `TripFormView.initialValues`.
+    private let initialLabel: String
+    private let initialGroupKey: PackingGroupKey
+    private let initialAssigneeProfileId: UUID?
 
     init(
         tripProfiles: [TripProfile], editing: PackingItem? = nil,
@@ -594,9 +750,26 @@ private struct PackingItemFormSheet: View {
         _label = State(initialValue: editing?.label ?? "")
         _groupKey = State(initialValue: editing?.groupKey ?? .shared)
         _assigneeProfileId = State(initialValue: editing?.assigneeProfileId)
+        initialLabel = editing?.label ?? ""
+        initialGroupKey = editing?.groupKey ?? .shared
+        initialAssigneeProfileId = editing?.assigneeProfileId
     }
 
     private var isValid: Bool { !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// UX audit finding 4: whether any field has moved from what the sheet
+    /// opened with.
+    private var hasChanges: Bool {
+        label != initialLabel || groupKey != initialGroupKey || assigneeProfileId != initialAssigneeProfileId
+    }
+
+    private func cancelTapped() {
+        if hasChanges {
+            showDiscardConfirm = true
+        } else {
+            dismiss()
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -657,11 +830,24 @@ private struct PackingItemFormSheet: View {
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
         }
+        // UX audit finding 4: same guard `TripFormView`/`AddItemSheet` use —
+        // a stray swipe-down while naming a packing item used to silently
+        // lose the input.
+        .background(
+            SheetDismissAttemptObserver {
+                if hasChanges { showDiscardConfirm = true }
+            }
+        )
+        .interactiveDismissDisabled(hasChanges)
+        .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Keep editing", role: .cancel) {}
+        }
     }
 
     private var header: some View {
         HStack {
-            Button("Cancel") { dismiss() }
+            Button("Cancel", action: cancelTapped)
                 .font(Typo.body(weight: .semibold))
                 .foregroundStyle(Palette.slate)
                 // Finding 3b: 44pt hit band (§6.5) — same

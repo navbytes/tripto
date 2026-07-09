@@ -35,6 +35,14 @@ struct TripFormView: View {
     /// this hook compile unchanged.
     var onSaved: ((Trip, SaveOutcome) -> Void)?
 
+    /// UX audit finding 8: fires after a confirmed delete, before
+    /// `dismiss()` — lets a caller presenting this sheet from *inside* the
+    /// trip (`TripView`'s hero pencil) pop back to Home too, instead of
+    /// leaving the traveler on a screen for a trip that no longer exists.
+    /// `nil` for callers (Home's own edit sheet) that don't need the extra
+    /// hop: their trip list already reflects the deletion via `@Query`.
+    var onDeleted: (() -> Void)?
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
@@ -84,6 +92,9 @@ struct TripFormView: View {
     @State private var saveError: SaveError?
     /// F4: gates the "Discard changes?" confirmation on cancel/swipe-dismiss.
     @State private var showDiscardConfirm = false
+    /// UX audit finding 8: gates the "Delete trip" confirmation — same
+    /// dialog copy Home's own swipe/context-menu delete uses.
+    @State private var isPresentingDeleteConfirm = false
 
     /// UX audit finding 4: set whenever `startDate`'s `.onChange` silently
     /// snapped `endDate` forward to keep the range valid, so a caption can
@@ -128,9 +139,10 @@ struct TripFormView: View {
     }
     private let initialValues: InitialValues
 
-    init(mode: Mode, onSaved: ((Trip, SaveOutcome) -> Void)? = nil) {
+    init(mode: Mode, onSaved: ((Trip, SaveOutcome) -> Void)? = nil, onDeleted: (() -> Void)? = nil) {
         self.mode = mode
         self.onSaved = onSaved
+        self.onDeleted = onDeleted
         switch mode {
         case .create:
             let start = Calendar.current.startOfDay(for: .now)
@@ -246,6 +258,11 @@ struct TripFormView: View {
                         tripTypeSection
                         coverSection
                         ctaSection
+                        // UX audit finding 8: edit-mode only, see
+                        // `deleteSection`'s doc comment.
+                        if isEditing {
+                            deleteSection
+                        }
                     }
                     .padding(Spacing.xl)
                 }
@@ -265,6 +282,18 @@ struct TripFormView: View {
         .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
+        }
+        // UX audit finding 8: same "Delete trip" copy Home's own swipe/
+        // context-menu delete uses (`HomeView.swift`), so the two entry
+        // points read as one action, not two.
+        .confirmationDialog("Delete trip", isPresented: $isPresentingDeleteConfirm, titleVisibility: .visible) {
+            Button("Delete trip", role: .destructive) { deleteTrip() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // `initialValues.title` (the trip's actual stored title), not
+            // the live `title` field — an in-progress unsaved rename
+            // shouldn't be quoted back as if it were already saved.
+            Text("This removes \u{201C}\(initialValues.title)\u{201D} and everything in it for everyone on the trip.")
         }
         .onChange(of: currentValues) { _, _ in
             if saveError?.isClearedByEditing == true {
@@ -456,6 +485,25 @@ struct TripFormView: View {
         }
     }
 
+    /// UX audit finding 8: an organizer could edit a trip from inside it
+    /// (this sheet, via the hero pencil) but could only ever delete it by
+    /// backing out to Home first — full lifecycle control (edit *and*
+    /// delete) belongs together, the way Booking detail already pairs them.
+    /// Edit-mode only: a trip being created has nothing to delete yet.
+    private var deleteSection: some View {
+        Button(role: .destructive) {
+            isPresentingDeleteConfirm = true
+        } label: {
+            Text("Delete trip")
+                .font(Typo.body(weight: .semibold))
+                .foregroundStyle(Palette.rose)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.md)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, Spacing.xs)
+    }
+
     private func sectionHeading(_ text: String) -> some View {
         Text(text)
             .font(Typo.body(Typo.Size.caption, weight: .semibold))
@@ -637,6 +685,24 @@ struct TripFormView: View {
             onSaved?(trip, outcome)
         }
 
+        dismiss()
+    }
+
+    /// UX audit finding 8: local delete + enqueue, same shape as
+    /// `HomeView.delete(_:)`. Deliberately doesn't re-derive that function's
+    /// local member/profile cascade here — this sheet doesn't hold those
+    /// `@Query`s, and `SyncEngine.pullHome()`'s `store.pruneOrphans()`
+    /// (SYNC_DESIGN.md "Write paths") is already the documented safety net
+    /// for exactly this case: any local rows this trip leaves behind get
+    /// swept on the next home pull, the same as if the trip had been deleted
+    /// server-side by someone else.
+    private func deleteTrip() {
+        guard case .edit(let trip) = mode else { return }
+        let tripId = trip.id
+        modelContext.delete(trip)
+        try? modelContext.save()
+        Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
+        onDeleted?()
         dismiss()
     }
 }

@@ -28,11 +28,19 @@ struct TripProfileFormSheet: View {
     @State private var displayName: String
     @State private var avatarColor: String
     @State private var isPresentingDeleteConfirm = false
+    /// UX audit finding 4: gates the "Discard changes?" confirmation on
+    /// Cancel/swipe-dismiss — same guard `TripFormView`/`AddItemSheet`
+    /// already apply, extended here and to `PackingItemFormSheet`, the two
+    /// form sheets that had been skipping it.
+    @State private var showDiscardConfirm = false
 
-    /// The four named colors `AvatarColor.color(named:)` actually resolves
-    /// (anything else falls back to slate) — matching the palette already
-    /// seeded server-side for `profiles`/`trip_profiles.avatar_color`.
-    static let swatches = ["amber", "moss", "sky", "plum"]
+    /// The name/color this sheet opened with, so `hasChanges` can tell an
+    /// untouched form from a dirty one — same role as
+    /// `TripFormView.initialValues`. In add mode the color starts at
+    /// whatever random swatch the sheet opened with (below), not a fixed
+    /// default, so accepting that random pick isn't itself "dirty."
+    private let initialDisplayName: String
+    private let initialAvatarColor: String
 
     init(mode: Mode, onSave: @escaping (String, String) -> Void, onDelete: (() -> Void)? = nil) {
         self.mode = mode
@@ -40,11 +48,16 @@ struct TripProfileFormSheet: View {
         self.onDelete = onDelete
         switch mode {
         case .add:
+            let randomColor = AvatarColorPicker.swatches.randomElement() ?? "sky"
             _displayName = State(initialValue: "")
-            _avatarColor = State(initialValue: Self.swatches.randomElement() ?? "sky")
+            _avatarColor = State(initialValue: randomColor)
+            initialDisplayName = ""
+            initialAvatarColor = randomColor
         case .edit(let profile):
             _displayName = State(initialValue: profile.displayName)
             _avatarColor = State(initialValue: profile.avatarColor)
+            initialDisplayName = profile.displayName
+            initialAvatarColor = profile.avatarColor
         }
     }
 
@@ -53,6 +66,20 @@ struct TripProfileFormSheet: View {
     private var initials: String {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "?" : trimmed.prefix(1).uppercased()
+    }
+
+    /// UX audit finding 4: whether either field has moved from what the
+    /// sheet opened with.
+    private var hasChanges: Bool {
+        displayName != initialDisplayName || avatarColor != initialAvatarColor
+    }
+
+    private func cancelTapped() {
+        if hasChanges {
+            showDiscardConfirm = true
+        } else {
+            dismiss()
+        }
     }
 
     var body: some View {
@@ -82,10 +109,12 @@ struct TripProfileFormSheet: View {
                             Text("Color")
                                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                                 .foregroundStyle(Palette.slate)
-                            HStack(spacing: Spacing.sm) {
-                                ForEach(Self.swatches, id: \.self) { swatch in
-                                    swatchButton(swatch)
-                                }
+                            // UX audit finding 9: shared `AvatarColorPicker`
+                            // (extracted from this sheet's original swatch
+                            // row) — Settings' own profile section now
+                            // renders the identical control.
+                            HStack(spacing: 0) {
+                                AvatarColorPicker(selection: $avatarColor)
                                 Spacer(minLength: 0)
                             }
                         }
@@ -129,11 +158,24 @@ struct TripProfileFormSheet: View {
         } message: {
             Text("They\u{2019}ll no longer be assignable on plans or packing tasks.")
         }
+        // UX audit finding 4: same guard `TripFormView`/`AddItemSheet` use —
+        // a stray swipe-down while naming a non-app profile used to
+        // silently lose the input.
+        .background(
+            SheetDismissAttemptObserver {
+                if hasChanges { showDiscardConfirm = true }
+            }
+        )
+        .interactiveDismissDisabled(hasChanges)
+        .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Keep editing", role: .cancel) {}
+        }
     }
 
     private var header: some View {
         HStack {
-            Button("Cancel") { dismiss() }
+            Button("Cancel", action: cancelTapped)
                 .font(Typo.body(weight: .semibold))
                 .foregroundStyle(Palette.slate)
             Spacer()
@@ -147,37 +189,6 @@ struct TripProfileFormSheet: View {
         .padding(.horizontal, Spacing.lg)
         .padding(.top, Spacing.md)
         .padding(.bottom, Spacing.sm)
-    }
-
-    /// BUILD_PLAN §6.5's 44pt tap-target floor, matching the sibling
-    /// controls on `ShareTripView` (finding 6) — the swatch stays a 36pt
-    /// circle *visually* (unchanged), but its tappable area grows to 44x44,
-    /// centered on the same circle.
-    private func swatchButton(_ swatch: String) -> some View {
-        let isOn = avatarColor == swatch
-        return Button {
-            avatarColor = swatch
-        } label: {
-            Circle()
-                .fill(AvatarColor.color(named: swatch))
-                .frame(width: 36, height: 36)
-                .overlay {
-                    if isOn {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-                .overlay {
-                    Circle().stroke(isOn ? Palette.ink.opacity(0.25) : Color.clear, lineWidth: 2)
-                        .padding(-3)
-                }
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(swatch.capitalized)
-        .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
     private var saveButton: some View {

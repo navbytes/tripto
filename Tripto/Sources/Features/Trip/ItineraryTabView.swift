@@ -66,6 +66,13 @@ struct ItineraryTabView: View {
     /// to `syncEngine.schedulePullTrip(trip.id)`. `nil` only in previews/
     /// tests that don't wire a live sync engine.
     var onRetryLoad: (() -> Void)? = nil
+    /// UX audit finding 2 (cross-screen): backs pull-to-refresh on this tab
+    /// — `TripView` wires this to an awaited `syncEngine.pullTrip(trip.id)`,
+    /// same trigger `onRetryLoad` uses, but awaited so the native refresh
+    /// spinner stays up until the pull actually finishes (matching Home's
+    /// `.refreshable` gesture, which was previously the only place in the
+    /// app offering a manual refresh). `nil` only in previews/tests.
+    var onRefresh: (() async -> Void)? = nil
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
     /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
@@ -155,6 +162,11 @@ struct ItineraryTabView: View {
                     }
                     .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .itinerary)))
                     .scrollDismissesKeyboard(.immediately)
+                    // UX audit finding 2: manual pull-to-refresh, matching
+                    // Home — previously the only way to recover from a
+                    // failed-while-online pull here was closing and
+                    // reopening the trip.
+                    .refreshable { await onRefresh?() }
                     // UX audit finding 2: a quiet "jump to today" pill,
                     // shown whenever today falls inside the trip's date
                     // range — trade-off deliberately taken to show it
@@ -506,6 +518,11 @@ struct ItineraryTabView: View {
             }
             .padding(.bottom, Fab.scrollClearance)
         }
+        // UX audit finding 2: also available on the empty/unavailable
+        // states — a viewer stuck on `unavailableState` after a failed pull
+        // had only the `Retry` button below, not the pull gesture the rest
+        // of the app trains people to reach for first.
+        .refreshable { await onRefresh?() }
     }
 
     /// UX audit finding 1: shown instead of the settled-empty "Nothing
@@ -547,7 +564,9 @@ struct ItineraryTabView: View {
             // stuck until something asks again.
             if !isOffline {
                 Button(action: { onRetryLoad?() }) {
-                    Text("Retry")
+                    // UX audit finding 7: "Try again" everywhere — matches
+                    // Home and Welcome, was the terser "Retry" here.
+                    Text("Try again")
                         .font(Typo.body(weight: .semibold))
                         .foregroundStyle(Palette.onAmber)
                         .padding(.horizontal, Spacing.xl)

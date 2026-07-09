@@ -382,7 +382,11 @@ struct BookingDetailView: View {
                 .tracking(0.4)
             if label == "Confirmation" || label == "Ticket", value != "—" {
                 Button {
-                    copyToClipboard(value)
+                    // UX audit finding 6: object-specific toast ("Code
+                    // copied"/"Ticket copied"), not a bare "Copied" — matches
+                    // `ShareTripView`'s "Link copied" via the shared
+                    // `ClipboardFeedback` helper.
+                    toast = ClipboardFeedback.copy(value, label: label == "Confirmation" ? "Code" : "Ticket")
                 } label: {
                     HStack(spacing: 4) {
                         Text(value)
@@ -471,12 +475,6 @@ struct BookingDetailView: View {
             return tripProfile.displayName
         }
         return "Traveler"
-    }
-
-    private func copyToClipboard(_ value: String) {
-        UIPasteboard.general.string = value
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        toast = "Copied"
     }
 
     /// The kid-aware tags dropped when this screen was cut over from the

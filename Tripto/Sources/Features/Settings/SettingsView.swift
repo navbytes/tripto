@@ -14,6 +14,12 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var displayName = ""
+    /// UX audit finding 9: the signed-in user's own avatar color, editable
+    /// here with the same four-swatch picker `TripProfileFormSheet` already
+    /// offers for non-app profiles — previously fixed/seeded with no way to
+    /// change it, the one asymmetry between "my own avatar" and "a kid's/
+    /// grandparent's avatar" as the same conceptual object.
+    @State private var avatarColor = ""
     @State private var toast: String?
     @State private var isPresentingDeleteConfirm = false
     @State private var isDeletingAccount = false
@@ -40,12 +46,22 @@ struct SettingsView: View {
         return !trimmed.isEmpty && trimmed != (myProfile?.displayName ?? "")
     }
 
+    /// UX audit finding 9: color-only edits also need a "Save changes"
+    /// affordance and the same dirty-form protection the name field already
+    /// has — `isProfileChanged` is `isNameChanged` widened to cover either
+    /// field.
+    private var isColorChanged: Bool {
+        !avatarColor.isEmpty && avatarColor != (myProfile?.avatarColor ?? "")
+    }
+
+    private var isProfileChanged: Bool { isNameChanged || isColorChanged }
+
     var body: some View {
         Form {
             Section("Profile") {
                 HStack(spacing: Spacing.md) {
                     Circle()
-                        .fill(AvatarColor.color(named: myProfile?.avatarColor ?? "slate"))
+                        .fill(AvatarColor.color(named: avatarColor.isEmpty ? "slate" : avatarColor))
                         .frame(width: 52, height: 52)
                         .overlay {
                             Text(initials(from: displayName))
@@ -58,8 +74,21 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, Spacing.xs)
 
-                if isNameChanged {
-                    Button("Save changes") { saveDisplayName() }
+                // UX audit finding 9: same `AvatarColorPicker`
+                // `TripProfileFormSheet` uses for a non-app profile — the
+                // signed-in user's own avatar was the one avatar in the app
+                // with no way to recolor it.
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("Avatar color")
+                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                        .foregroundStyle(Palette.slate)
+                    AvatarColorPicker(selection: $avatarColor)
+                }
+                .disabled(isDeletingAccount)
+                .opacity(isDeletingAccount ? 0.5 : 1)
+
+                if isProfileChanged {
+                    Button("Save changes") { saveProfile() }
                         .disabled(isDeletingAccount)
                 }
 
@@ -141,6 +170,9 @@ struct SettingsView: View {
             if displayName.isEmpty {
                 displayName = myProfile?.displayName ?? ""
             }
+            if avatarColor.isEmpty {
+                avatarColor = myProfile?.avatarColor ?? ""
+            }
         }
         // Covers a brand-new sign-in: `myProfile` can still be nil at
         // `.onAppear` (the first `pullHome()` hasn't landed yet) — this
@@ -152,9 +184,21 @@ struct SettingsView: View {
                 displayName = newValue
             }
         }
+        // UX audit finding 9: same reactive fill as the name field above,
+        // for the same brand-new-sign-in race.
+        .onChange(of: myProfile?.avatarColor) { _, newValue in
+            if avatarColor.isEmpty, let newValue {
+                avatarColor = newValue
+            }
+        }
         // F2: clears a stale write-failure caption the moment the user
         // edits the field again, same as `TripFormView`'s `isClearedByEditing`.
         .onChange(of: displayName) { _, _ in
+            if nameSaveError != nil {
+                nameSaveError = nil
+            }
+        }
+        .onChange(of: avatarColor) { _, _ in
             if nameSaveError != nil {
                 nameSaveError = nil
             }
@@ -197,7 +241,7 @@ struct SettingsView: View {
     }
 
     private func backTapped() {
-        if isNameChanged {
+        if isProfileChanged {
             showDiscardConfirm = true
         } else {
             dismiss()
@@ -236,12 +280,19 @@ struct SettingsView: View {
         URL(string: "https://tripto.navbytes.io/privacy")!
     }
 
-    private func saveDisplayName() {
+    /// UX audit finding 9: widened from the original `saveDisplayName()` to
+    /// also persist a changed `avatarColor` — one save affordance for both
+    /// fields in the Profile section, same as `TripProfileFormSheet`'s
+    /// single "Save changes" covering its name+color pair.
+    private func saveProfile() {
         guard let profile = myProfile else { return }
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != profile.displayName else { return }
+        let nameChanged = !trimmed.isEmpty && trimmed != profile.displayName
+        let colorChanged = !avatarColor.isEmpty && avatarColor != profile.avatarColor
+        guard nameChanged || colorChanged else { return }
         nameSaveError = nil
-        profile.displayName = trimmed
+        if nameChanged { profile.displayName = trimmed }
+        if colorChanged { profile.avatarColor = avatarColor }
         profile.updatedAt = .now
         // F2: mirrors `TripFormView`'s F6 do/catch — a failed write used to
         // still claim "Name updated" via a silent `try?`. Signed-out edits
@@ -251,13 +302,13 @@ struct SettingsView: View {
         do {
             try modelContext.save()
         } catch {
-            nameSaveError = "Couldn\u{2019}t save your name. Try again."
+            nameSaveError = "Couldn\u{2019}t save your changes. Try again."
             return
         }
         let dto = profile.toDTO()
         let id = profile.id
         Task { await syncEngine?.enqueueUpsert(table: .profiles, rowId: id, tripId: nil, payload: dto) }
-        toast = "Name updated"
+        toast = nameChanged && colorChanged ? "Profile updated" : (nameChanged ? "Name updated" : "Avatar color updated")
     }
 
     /// Apple 5.1.1(v) account deletion. Routes through the `delete-account`

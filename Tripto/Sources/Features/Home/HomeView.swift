@@ -181,6 +181,11 @@ struct HomeView: View {
                         toast = "Changes saved on this device \u{2014} you\u{2019}re signed out, so they " +
                             "won\u{2019}t sync until you sign back in."
                     }
+                } onDeleted: {
+                    // UX audit finding 8: this edit sheet now offers "Delete
+                    // trip" too (previously only reachable via swipe/context
+                    // menu) — same confirmation feedback as those.
+                    toast = "Trip deleted"
                 }
             }
             .confirmationDialog(

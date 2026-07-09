@@ -45,6 +45,10 @@ struct BookingsTabView: View {
     /// to `syncEngine.schedulePullTrip(trip.id)`. `nil` only in previews/
     /// tests that don't wire a live sync engine.
     var onRetryLoad: (() -> Void)? = nil
+    /// UX audit finding 2 (cross-screen): backs pull-to-refresh on this tab
+    /// — see `ItineraryTabView.onRefresh`'s doc comment for why this is a
+    /// separate, awaited closure rather than reusing `onRetryLoad`.
+    var onRefresh: (() async -> Void)? = nil
 
     /// UX audit finding 5: relevance-aware ordering within each category —
     /// each category's items are split into current/upcoming (sorted
@@ -106,6 +110,10 @@ struct BookingsTabView: View {
                     .padding(.bottom, Fab.scrollClearance)
                 }
                 .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .bookings)))
+                // UX audit finding 2: manual pull-to-refresh, matching Home
+                // — previously the only way to recover from a failed-while
+                // -online pull here was closing and reopening the trip.
+                .refreshable { await onRefresh?() }
             }
         }
         .background(Palette.paper)
@@ -205,7 +213,9 @@ struct BookingsTabView: View {
             // that does nothing new.
             if !isOffline {
                 Button(action: { onRetryLoad?() }) {
-                    Text("Retry")
+                    // UX audit finding 7: "Try again" everywhere — matches
+                    // Home and Welcome, was the terser "Retry" here.
+                    Text("Try again")
                         .font(Typo.body(weight: .semibold))
                         .foregroundStyle(Palette.onAmber)
                         .padding(.horizontal, Spacing.xl)
