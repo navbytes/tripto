@@ -56,6 +56,10 @@ struct ShareTripView: View {
     /// has items and its own teaser has stopped rendering.
     @State private var importLoadState: ImportAddressCard.LoadState = .loading
     @State private var hasFetchedImportAddress = false
+    /// TI-2: "Or paste text instead" — the fallback path below
+    /// `importCard`'s email-address card, presenting `PasteImportSheet`
+    /// in `.booking` mode.
+    @State private var isPresentingPasteImport = false
 
     init(tripId: UUID) {
         self.tripId = tripId
@@ -81,6 +85,15 @@ struct ShareTripView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toastOverlay($toast)
         .activityShareSheet(items: $shareSheetItems)
+        // TI-2: the fallback path beside `importCard`'s email-address card.
+        .sheet(isPresented: $isPresentingPasteImport) {
+            PasteImportSheet(
+                kind: .booking, tripId: tripId,
+                onBookingImported: { created in
+                    toast = "\(created) booking\(created == 1 ? "" : "s") added to review"
+                }
+            )
+        }
         .sheet(item: $memberPendingRoleChange) { member in
             RolePickerSheet(currentRole: member.role) { newRole in
                 memberPendingRoleChange = nil
@@ -549,12 +562,31 @@ struct ShareTripView: View {
     @ViewBuilder
     private var importCard: some View {
         if ItemPermissions.canAdd(role: myRole) {
-            ImportAddressCard(state: importLoadState) { address in
-                toast = ClipboardFeedback.copy(address, label: "Import address")
-            } onRetry: {
-                retryImportAddressFetch()
+            VStack(alignment: .center, spacing: Spacing.sm) {
+                ImportAddressCard(state: importLoadState) { address in
+                    toast = ClipboardFeedback.copy(address, label: "Import address")
+                } onRetry: {
+                    retryImportAddressFetch()
+                }
+                pasteImportSecondaryAction
             }
         }
+    }
+
+    /// TI-2: a deliberately lightweight fallback beside the primary
+    /// email-import card — pasting text is the secondary path, so this is a
+    /// plain text button, not another card competing for attention.
+    private var pasteImportSecondaryAction: some View {
+        Button {
+            isPresentingPasteImport = true
+        } label: {
+            Text("Or paste text instead")
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.slate)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Same one-shot-per-visit *shape* as `ItineraryTabView`'s function of
