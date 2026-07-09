@@ -73,6 +73,47 @@ final class PackingProgressTests: XCTestCase {
         XCTAssertEqual(groups.map(\.key), PackingGrouping.order)
     }
 
+    /// UX audit finding 2: within a group, unpacked items sort before packed
+    /// ones so "what's left to pack" always scans from the top.
+    func testGroupsSortsUnpackedBeforePackedWithinAGroup() {
+        let packed = makeItem(label: "Packed", group: .documents, isDone: true)
+        let unpacked = makeItem(label: "Unpacked", group: .documents, isDone: false)
+        let groups = PackingGrouping.groups(for: [packed, unpacked])
+        XCTAssertEqual(groups.first { $0.key == .documents }?.items.map(\.label), ["Unpacked", "Packed"])
+    }
+
+    /// Within each packed/unpacked half, ordering is stable by `createdAt`
+    /// ascending, not insertion order.
+    func testGroupsOrdersEachPackedStateByCreatedAtAscending() {
+        let now = Date.now
+        let unpackedNewer = PackingItem(
+            id: UUID(), tripId: UUID(), label: "Newer unpacked", groupKeyRaw: PackingGroupKey.documents.rawValue,
+            assigneeProfileId: nil, isDone: false, createdBy: UUID(),
+            createdAt: now.addingTimeInterval(60), updatedAt: now, updatedBy: nil
+        )
+        let unpackedOlder = PackingItem(
+            id: UUID(), tripId: UUID(), label: "Older unpacked", groupKeyRaw: PackingGroupKey.documents.rawValue,
+            assigneeProfileId: nil, isDone: false, createdBy: UUID(),
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        let packedNewer = PackingItem(
+            id: UUID(), tripId: UUID(), label: "Newer packed", groupKeyRaw: PackingGroupKey.documents.rawValue,
+            assigneeProfileId: nil, isDone: true, createdBy: UUID(),
+            createdAt: now.addingTimeInterval(120), updatedAt: now, updatedBy: nil
+        )
+        let packedOlder = PackingItem(
+            id: UUID(), tripId: UUID(), label: "Older packed", groupKeyRaw: PackingGroupKey.documents.rawValue,
+            assigneeProfileId: nil, isDone: true, createdBy: UUID(),
+            createdAt: now.addingTimeInterval(30), updatedAt: now, updatedBy: nil
+        )
+        // Shuffled input order to prove the sort isn't just echoing insertion order.
+        let groups = PackingGrouping.groups(for: [packedNewer, unpackedNewer, packedOlder, unpackedOlder])
+        XCTAssertEqual(
+            groups.first { $0.key == .documents }?.items.map(\.label),
+            ["Older unpacked", "Newer unpacked", "Older packed", "Newer packed"]
+        )
+    }
+
     // MARK: - PackingPermissions (live RLS: packing_items_insert/_update/_delete)
 
     func testCanManageIsOrganizerOrCompanionOnly() {

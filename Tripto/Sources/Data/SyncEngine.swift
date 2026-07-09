@@ -181,6 +181,7 @@ actor SyncEngine {
         await stopAllRealtime()
         try? await store.wipeAll()
         await refreshStatusCounts()
+        await status.resetInitialPullState()
     }
 }
 

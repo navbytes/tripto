@@ -129,4 +129,72 @@ final class ItineraryDayBucketingTests: XCTestCase {
             XCTFail(message)
         }
     }
+
+    // MARK: - F2: gap-day sections when `tripEnd` is supplied
+
+    /// Items bracket a free day in the middle of the trip (Day 1 and Day 4)
+    /// — with `tripEnd` set, every day in between still gets its own
+    /// (empty-rowed) section instead of vanishing from the list.
+    func testTripEndFillsGapDaysBetweenItems() {
+        let arrival = TestFixtures.makeItineraryItem(
+            category: .flight, startsAt: instant(2026, 5, 14, 8, 0, tz: "UTC")
+        )
+        let departure = TestFixtures.makeItineraryItem(
+            category: .flight, startsAt: instant(2026, 5, 17, 20, 0, tz: "UTC")
+        )
+        let sections = ItineraryDayBucketing.sections(
+            items: [arrival, departure], tripStart: day(2026, 5, 14), tripEnd: day(2026, 5, 17), calendar: utc
+        )
+
+        XCTAssertEqual(sections.map(\.day), [day(2026, 5, 14), day(2026, 5, 15), day(2026, 5, 16), day(2026, 5, 17)])
+        XCTAssertEqual(sections[0].rows.count, 1, "day 1 keeps its real row")
+        XCTAssertTrue(sections[1].rows.isEmpty, "day 2 is a free gap day")
+        XCTAssertTrue(sections[2].rows.isEmpty, "day 3 is a free gap day")
+        XCTAssertEqual(sections[3].rows.count, 1, "day 4 keeps its real row")
+    }
+
+    /// A trip with no items at all must still hit the view's empty state —
+    /// `tripEnd` alone must never manufacture sections out of nothing.
+    func testTripEndDoesNotFillGapsWhenThereAreNoItemsAtAll() {
+        let sections = ItineraryDayBucketing.sections(
+            items: [], tripStart: day(2026, 5, 14), tripEnd: day(2026, 5, 20), calendar: utc
+        )
+        XCTAssertTrue(sections.isEmpty)
+    }
+
+    /// An item the day before the trip officially starts keeps its own
+    /// section (it's real data), and the in-range gap days around it are
+    /// still filled independently.
+    func testItemBeforeTripStartKeepsItsOwnSectionAlongsideFilledGapDays() {
+        let earlyArrival = TestFixtures.makeItineraryItem(
+            category: .flight, startsAt: instant(2026, 5, 13, 22, 0, tz: "UTC")
+        )
+        let activity = TestFixtures.makeItineraryItem(
+            category: .activity, startsAt: instant(2026, 5, 16, 10, 0, tz: "UTC")
+        )
+        let sections = ItineraryDayBucketing.sections(
+            items: [earlyArrival, activity], tripStart: day(2026, 5, 14), tripEnd: day(2026, 5, 16), calendar: utc
+        )
+
+        XCTAssertEqual(
+            sections.map(\.day),
+            [day(2026, 5, 13), day(2026, 5, 14), day(2026, 5, 15), day(2026, 5, 16)],
+            "the pre-trip day is its own section, and days 14-16 are still fully filled"
+        )
+        XCTAssertEqual(sections[0].dayNumber, 0, "day before the trip is Day 0")
+    }
+
+    /// A corrupt/mistyped `tripEnd` far in the future must not walk the
+    /// gap-fill loop indefinitely — beyond `maxGapFillDays` it's skipped
+    /// entirely, leaving only the days rows actually touch.
+    func testTripEndBeyondTheRangeCapSkipsGapFilling() {
+        let item = TestFixtures.makeItineraryItem(
+            category: .activity, startsAt: instant(2026, 5, 14, 10, 0, tz: "UTC")
+        )
+        let farTripEnd = day(2028, 5, 14) // ~730 days out, well past the 60-day cap
+        let sections = ItineraryDayBucketing.sections(
+            items: [item], tripStart: day(2026, 5, 14), tripEnd: farTripEnd, calendar: utc
+        )
+        XCTAssertEqual(sections.count, 1, "the cap should skip gap-filling rather than emit ~730 empty sections")
+    }
 }

@@ -27,4 +27,72 @@ public extension Palette {
             ? UIColor(hex: "#B23B2E", alpha: 0.22)
             : UIColor(hex: "#F6E1DE")
     })
+
+    /// Amber used as small text ink (eyebrows/labels), not the amber fill
+    /// itself. BUILD_PLAN §6.1 positions amber as an accent/CTA color — at
+    /// the generated `Palette.amber`'s light-mode hex it measures ~2.4:1 on
+    /// `Palette.elevated`, which fails as fine-print ink. This darkened
+    /// light variant is ~5.3:1 on `#FFFFFF`; dark mode keeps the existing
+    /// amber look (~7:1 on `Palette.elevated`'s dark hex), so only light
+    /// mode actually changes.
+    static let amberInk = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(hex: "#E8955A")
+            : UIColor(hex: "#A25A24")
+    })
+
+    /// `TripCard`'s glass pill fill (status pill, "Waiting to sync") — the
+    /// mockup's `.white.opacity(0.22)` measured under WCAG AA on the
+    /// lightest cover gradient stop (UX audit finding 3). Composited over
+    /// dusk's lightest stop (#E8955A) this black-38% yields ~#905C38, ~5.5:1
+    /// against the pill's white caption text (passes the 4.5:1 bar); moss's
+    /// stop (#6E9E7E) composites to ~6.8:1 and the dark indigo/plum ends to
+    /// ~16:1 — every gradient clears AA with the same single fill. Fixed
+    /// (not theme-adaptive) because the cover gradients themselves don't
+    /// change between light and dark, same rationale as `onAmber` above.
+    static let coverPillFill = Color.black.opacity(0.38)
+
+    /// Elevation/depth tint for `.shadow(color:...)` call sites (UX audit
+    /// finding 5) — deliberately distinct from `ink`, which is
+    /// text-semantic and flips to near-white in dark mode; using it as a
+    /// shadow color there rendered card drops as a pale halo instead of a
+    /// dark depth cue. This stays dark in both themes: light mode reuses
+    /// the light-mode `ink` hex (so it renders pixel-identically to the
+    /// pre-fix shadows), dark mode is pure black (a subtle dark drop on
+    /// `Palette.elevated`'s dark paper, rather than a lit-up ink glow).
+    /// Call sites keep supplying their own `.opacity(...)`.
+    static let shadow = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(hex: "#000000")
+            : UIColor(hex: "#1A1B2E")
+    })
+}
+
+// Hand-written companion to the generated `CoverGradient` (Tokens.swift).
+// Kept here for the same reason as the `Palette` extras above — this file
+// is never touched by `gen_tokens.py`.
+public extension CoverGradient {
+    /// `TripCard`'s bottom text scrim (UX audit finding 2) — the mockup lays
+    /// white title/meta text straight over the cover gradient with nothing
+    /// underneath it. Worst case is dusk's bottom-LEFT text position
+    /// (~#DB835B under the title/meta block): plain white on that measures
+    /// ~2.8:1, failing AA for the meta caption outright. This scrim is clear
+    /// until 35% down (so it never dims the top-row status/pending pills —
+    /// `coverPillFill`'s own top-edge contrast fix is unaffected) and ramps
+    /// to 45%-black by the bottom edge. Composited at the meta row's depth
+    /// (~84% down, effective black ~0.34) dusk's bottom-left stop yields
+    /// ~5.3:1 for `.white.opacity(0.92)` caption text; at the title's depth
+    /// (~72% down, effective ~0.26) it yields ~4.8:1 — clearing the 4.5:1 AA
+    /// bar and the 3:1 large-text bar respectively. Plum and moss are darker
+    /// at that corner already, so both only improve. Fixed (not
+    /// theme-adaptive), same rationale as `coverPillFill`: cover gradients
+    /// don't change between light and dark.
+    static let textScrim = LinearGradient(
+        stops: [
+            .init(color: .clear, location: 0.35),
+            .init(color: .black.opacity(0.45), location: 1.0),
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
 }

@@ -16,6 +16,31 @@ final class SyncStatus {
     /// the user hasn't dismissed yet — `SyncIssueBanner`/`SyncIssuesSheet`'s
     /// data source. Newest-first, matching `SyncStore.allIssues()`'s sort.
     private(set) var syncIssues: [SyncIssueSnapshot] = []
+    /// True once `pullHome()` has completed an attempt (success or failure)
+    /// this session — `HomeView`'s signal to show a neutral "Checking for
+    /// your trips…" placeholder instead of the "Plan your first trip" empty
+    /// state while a genuinely-empty account can't yet be told apart from
+    /// "haven't heard from the server yet" (finding 2).
+    private(set) var hasCompletedInitialHomePull = false
+    /// True after a `pullHome()` attempt fails (network/server error), false
+    /// after the next one succeeds — `HomeView`'s signal to show the honest
+    /// "couldn't check for trips" placeholder (with a retry) instead of
+    /// misreading the failure as a genuinely-empty account (finding 1).
+    private(set) var lastHomePullFailed = false
+    /// Per-trip mirror of `hasCompletedInitialHomePull` (finding 2):
+    /// `TripId`s for which `pullTrip(_:)` has completed an attempt (success
+    /// or failure) this session — `TripView`'s signal to show a neutral
+    /// "Checking…" placeholder instead of a tab's real empty state while a
+    /// freshly-claimed (or just-opened) trip's first pull is still in
+    /// flight.
+    private(set) var completedInitialTripPulls: Set<UUID> = []
+    /// Per-trip mirror of `lastHomePullFailed`: `TripId`s whose most recent
+    /// `pullTrip(_:)` attempt this session failed (network/server error),
+    /// cleared the moment a later attempt for that trip succeeds —
+    /// `TripView`/`ItineraryTabView`'s signal to tell "couldn't load this
+    /// trip's plans" apart from "genuinely empty" (finding 1) instead of
+    /// misreading a failed first pull as a settled-empty trip.
+    private(set) var tripPullFailures: Set<UUID> = []
 
     func setOffline(_ offline: Bool) {
         isOffline = offline
@@ -32,5 +57,37 @@ final class SyncStatus {
 
     func setIssues(_ issues: [SyncIssueSnapshot]) {
         syncIssues = issues
+    }
+
+    func markInitialHomePullCompleted() {
+        hasCompletedInitialHomePull = true
+    }
+
+    func setHomePullFailed(_ failed: Bool) {
+        lastHomePullFailed = failed
+    }
+
+    func markInitialTripPullCompleted(_ tripId: UUID) {
+        completedInitialTripPulls.insert(tripId)
+    }
+
+    func setTripPullFailed(_ tripId: UUID, _ failed: Bool) {
+        if failed {
+            tripPullFailures.insert(tripId)
+        } else {
+            tripPullFailures.remove(tripId)
+        }
+    }
+
+    /// Sign-out wipe: the next sign-in (potentially a different account)
+    /// re-enters the first-pull loading state instead of reading an empty
+    /// wiped cache as "you have zero trips," and doesn't carry a stale
+    /// failure flag (or a previous account's completed-trip set) into the
+    /// next account's session.
+    func resetInitialPullState() {
+        hasCompletedInitialHomePull = false
+        lastHomePullFailed = false
+        completedInitialTripPulls = []
+        tripPullFailures = []
     }
 }

@@ -18,12 +18,38 @@ struct HomeView: View {
     @Environment(AppRouter.self) private var appRouter
 
     @State private var selectedTab = "Upcoming"
+    /// Guards `chooseInitialTabIfNeeded()` to a one-time redirect (finding
+    /// 1) — after this fires once, the user's own tab taps are never
+    /// overridden.
+    @State private var didChooseInitialTab = false
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
     @State private var tripPendingDeletion: Trip?
     /// M3: surfaces `AppRouter.errorToast` (an expired/revoked invite link)
-    /// — nothing else on Home toasts today.
+    /// as a persistent `.alert` rather than a toast (finding 6) — a
+    /// two-second auto-dismissing toast can be missed entirely, and this is
+    /// the one Home error worth blocking on. The refresh-failure toast below
+    /// is the deliberate exception: it's advisory, not blocking, and scoped
+    /// to the pull-to-refresh gesture that triggered it (finding 1).
+    @State private var inviteErrorMessage: String?
+    /// Finding 1 (refresh-scoped gap): a manual pull-to-refresh that fails
+    /// silently leaves the list unchanged with no feedback. Driven by
+    /// `HomeRefreshFeedback.shouldToastAfterRefresh` from `refreshFromPull()`
+    /// so all six `.refreshable` closures share one gated path. Also carries
+    /// the create/edit sheets' "Trip created"/"Changes saved" confirmations
+    /// (UX audit finding 7) — one general-purpose toast slot, not a
+    /// dedicated one per source.
     @State private var toast: String?
+    /// Finding 1 (silent retry): `pullFailedState`'s "Try again" button
+    /// re-entering an in-flight pull with no feedback and no protection
+    /// against a double-tap. Kept local to `HomeView` rather than widening
+    /// `SyncStatus` with an in-flight flag — this button is the only
+    /// consumer.
+    @State private var isRetryingPull = false
+    /// Set once a manual retry from `pullFailedState` comes back failed
+    /// again (see `HomeRefreshFeedback.shouldNoteRetryFailure`); drives the
+    /// inline "still couldn't reach the server" caption under the button.
+    @State private var retryFailedAgain = false
     /// The app's one `NavigationPath` (`TripView.swift`'s doc comment: "the
     /// one `NavigationStack` rooted in `HomeView`") — pushing `TripRoute`/
     /// `ItemRoute` values onto this, rather than wrapping each row in a
@@ -44,18 +70,47 @@ struct HomeView: View {
                     if !syncStatus.syncIssues.isEmpty {
                         SyncIssueBanner()
                     }
+                    // The empty-trips case is covered by `initialLoadState`
+                    // below, so this only needs to fire once there's
+                    // already a list to sit above (finding 6).
+                    if appRouter.isJoiningTrip && !trips.isEmpty {
+                        joiningTripBanner
+                    }
 
                     header
                         .padding(.horizontal, Spacing.xl)
                         .padding(.top, Spacing.md)
                         .padding(.bottom, Spacing.sm)
 
-                    SegmentedControl(options: ["Upcoming", "Past"], selection: $selectedTab)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.bottom, Spacing.xs)
+                    // Hidden while trips is empty (finding 9) — an inert
+                    // Upcoming/Past toggle over a single empty/loading
+                    // message isn't a real choice yet.
+                    if !trips.isEmpty {
+                        SegmentedControl(options: ["Upcoming", "Past"], selection: $selectedTab)
+                            .padding(.horizontal, Spacing.xl)
+                            .padding(.bottom, Spacing.xs)
+                    }
 
                     if trips.isEmpty {
-                        emptyState
+                        // First-pull loading vs. genuinely-empty vs.
+                        // pull-failed account (findings 1/2): the resolver
+                        // is the only place this decision table lives now,
+                        // so the regression tests on it are the safety net.
+                        switch HomeEmptyPlaceholder.resolve(
+                            isJoiningTrip: appRouter.isJoiningTrip,
+                            hasCompletedInitialHomePull: syncStatus.hasCompletedInitialHomePull,
+                            lastHomePullFailed: syncStatus.lastHomePullFailed,
+                            isOffline: syncStatus.isOffline
+                        ) {
+                        case .joining, .initialLoad:
+                            initialLoadState
+                        case .offlineFirstLoad:
+                            offlineFirstLoadState
+                        case .pullFailed:
+                            pullFailedState
+                        case .empty:
+                            emptyState
+                        }
                     } else if visibleTrips.isEmpty {
                         emptyTabState
                     } else {
@@ -63,6 +118,7 @@ struct HomeView: View {
                     }
                 }
             }
+            .toastOverlay($toast)
             .navigationBarTitleDisplayMode(.inline)
             // The one route-based nav stack (`TripView.swift`'s doc
             // comment): Home pushes `TripRoute`; `TripView`'s own tabs push
@@ -99,10 +155,38 @@ struct HomeView: View {
                 #endif
             }
             .sheet(isPresented: $isPresentingCreate) {
-                TripFormView(mode: .create)
+                // Finding 2: switches to whichever tab the saved trip
+                // actually files under — `bucket().isPastTab`, not a
+                // hardcoded "Upcoming", so a backdated trip still lands
+                // somewhere visible.
+                TripFormView(mode: .create) { trip, _ in
+                    // Create-mode always reports `.saved` — it hard-stops on
+                    // a nil `userId` before ever reaching a save.
+                    selectedTab = trip.bucket().isPastTab ? "Past" : "Upcoming"
+                    toast = "Trip created"
+                }
             }
             .sheet(item: $editingTrip) { trip in
-                TripFormView(mode: .edit(trip))
+                // Same fix, symmetric case: editing a trip's dates can move
+                // it to the other tab, where it'd otherwise vanish.
+                TripFormView(mode: .edit(trip)) { savedTrip, outcome in
+                    selectedTab = savedTrip.bucket().isPastTab ? "Past" : "Upcoming"
+                    switch outcome {
+                    case .saved:
+                        toast = "Changes saved"
+                    case .savedLocallyWhileSignedOut:
+                        // Finding 5: the write already happened locally —
+                        // this just makes the toast honest about it not
+                        // syncing yet (§6.6: what happened + how to fix it).
+                        toast = "Changes saved on this device \u{2014} you\u{2019}re signed out, so they " +
+                            "won\u{2019}t sync until you sign back in."
+                    }
+                } onDeleted: {
+                    // UX audit finding 8: this edit sheet now offers "Delete
+                    // trip" too (previously only reachable via swipe/context
+                    // menu) — same confirmation feedback as those.
+                    toast = "Trip deleted"
+                }
             }
             .confirmationDialog(
                 "Delete trip",
@@ -115,6 +199,10 @@ struct HomeView: View {
                 Button("Delete trip", role: .destructive) {
                     if let trip = tripPendingDeletion { delete(trip) }
                     tripPendingDeletion = nil
+                    // Finding 2 (partial): closes the feedback loop on a
+                    // hard local delete — the row just vanished from the
+                    // list with no confirmation it actually happened.
+                    toast = "Trip deleted"
                 }
                 Button("Cancel", role: .cancel) { tripPendingDeletion = nil }
             } message: {
@@ -128,6 +216,14 @@ struct HomeView: View {
                 // out, now that Home mounting proves a session exists.
                 await appRouter.claimPendingInviteIfNeeded()
                 await applyUITestAutopilotIfNeeded()
+            }
+            // Covers a warm SwiftData cache where `@Query` is already
+            // populated on first render (finding 1).
+            .onAppear { chooseInitialTabIfNeeded() }
+            // Covers async `@Query` hydration where `trips` populates after
+            // first render, so `.onAppear` alone would've seen `isEmpty`.
+            .onChange(of: trips.isEmpty) { _, isEmpty in
+                if !isEmpty { chooseInitialTabIfNeeded() }
             }
             .onChange(of: appRouter.tripToOpen) { _, tripId in
                 guard let tripId else { return }
@@ -146,10 +242,20 @@ struct HomeView: View {
             }
             .onChange(of: appRouter.errorToast) { _, message in
                 guard let message else { return }
-                toast = message
+                inviteErrorMessage = message
                 appRouter.clearErrorToast()
             }
-            .toastOverlay($toast)
+            .alert(
+                "Couldn\u{2019}t join trip",
+                isPresented: Binding(
+                    get: { inviteErrorMessage != nil },
+                    set: { isPresented in if !isPresented { inviteErrorMessage = nil } }
+                )
+            ) {
+                Button("OK") {}
+            } message: {
+                Text(inviteErrorMessage ?? "")
+            }
         }
     }
 
@@ -200,17 +306,60 @@ struct HomeView: View {
         #endif
     }
 
+    /// Shared path for all six `.refreshable { }` closures on Home (finding
+    /// 1) — routes every pull-to-refresh gesture through the same gate so
+    /// they can't diverge. `pullHome()` itself already drives `SyncStatus`;
+    /// this only decides whether *this* gesture, specifically, should also
+    /// toast. Known accepted edge: a refresh landing while a debounced pull
+    /// is already in flight early-returns from `pullHome()` and reads the
+    /// previous attempt's flag — rare, and the resulting message stays
+    /// truthful either way.
+    private func refreshFromPull() async {
+        await syncEngine?.pullHome()
+        if HomeRefreshFeedback.shouldToastAfterRefresh(
+            lastHomePullFailed: syncStatus.lastHomePullFailed,
+            isOffline: syncStatus.isOffline,
+            hasTrips: !trips.isEmpty
+        ) {
+            toast = "Couldn\u{2019}t refresh \u{2014} pull to try again"
+        }
+    }
+
+    /// One-time initial-tab redirect (finding 1) — a user whose trips are
+    /// all in the past would otherwise land on the default "Upcoming" tab
+    /// and see an empty screen. `didChooseInitialTab` gates this to fire
+    /// once per session so it never overrides a manual tab switch
+    /// afterward. `HomeInitialTab.resolve` is the only place the decision
+    /// lives, so the regression tests on it are the safety net.
+    private func chooseInitialTabIfNeeded() {
+        guard !didChooseInitialTab && !trips.isEmpty else { return }
+        didChooseInitialTab = true
+        selectedTab = HomeInitialTab.resolve(hasUpcoming: !upcomingTrips.isEmpty, hasPast: !pastTrips.isEmpty)
+    }
+
     // MARK: - Header
 
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(greeting)
-                    .font(Typo.body(weight: .medium))
-                    .foregroundStyle(Palette.slate)
+                if myDisplayName == nil {
+                    // Finding 4: no profile has hydrated yet — a redacted
+                    // placeholder keeps the layout height stable without
+                    // asserting a fake "Traveler" identity that reads as
+                    // wrong once the real name lands.
+                    Text("Good morning, Traveler")
+                        .font(Typo.body(weight: .medium))
+                        .foregroundStyle(Palette.slate)
+                        .redacted(reason: .placeholder)
+                } else {
+                    Text(greeting)
+                        .font(Typo.body(weight: .medium))
+                        .foregroundStyle(Palette.slate)
+                }
                 Text("Your trips")
                     .font(Typo.display())
                     .foregroundStyle(Palette.ink)
+                    .accessibilityAddTraits(.isHeader)
             }
             Spacer()
             // NavigationLink(value:), same reasoning as TripView's share
@@ -221,10 +370,21 @@ struct HomeView: View {
                     .fill(Palette.indigo)
                     .frame(width: 42, height: 42)
                     .overlay {
-                        Text(initials(from: myProfile?.displayName ?? "Traveler"))
-                            .font(Typo.display(16))
-                            .foregroundStyle(.white)
+                        if let myDisplayName {
+                            Text(initials(from: myDisplayName))
+                                .font(Typo.display(16))
+                                .foregroundStyle(.white)
+                        } else {
+                            // Finding 4: no bogus "T" initial before the
+                            // profile hydrates.
+                            Image(systemName: "person.fill")
+                                .foregroundStyle(.white)
+                        }
                     }
+                    // 44pt hit target (§6.5) around the 42pt visual circle —
+                    // finding 8.
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("Settings")
         }
@@ -238,13 +398,20 @@ struct HomeView: View {
         case 12..<17: period = "afternoon"
         default: period = "evening"
         }
-        let firstName = firstName(from: myProfile?.displayName ?? "Traveler")
-        return "Good \(period), \(firstName)"
+        guard let myDisplayName else { return "Good \(period)" }
+        return "Good \(period), \(firstName(from: myDisplayName))"
     }
 
     private var myProfile: Profile? {
         guard let userId = authManager.userId else { return nil }
         return profiles.first { $0.id == userId }
+    }
+
+    /// Finding 4: `nil` until the signed-in user's own profile row has
+    /// hydrated locally — driving both the greeting and the avatar so
+    /// neither renders a fake "Traveler" identity in the meantime.
+    private var myDisplayName: String? {
+        myProfile?.displayName
     }
 
     // MARK: - List
@@ -269,19 +436,16 @@ struct HomeView: View {
                 .padding(.bottom, Spacing.lg)
                 .swipeActions(edge: .trailing) {
                     if isOrganizer(of: trip) {
-                        Button("Delete", role: .destructive) {
-                            tripPendingDeletion = trip
-                        }
-                    }
-                }
-                .contextMenu {
-                    Button("Edit trip") { editingTrip = trip }
-                    if isOrganizer(of: trip) {
                         Button("Delete trip", role: .destructive) {
                             tripPendingDeletion = trip
                         }
                     }
                 }
+                .modifier(OrganizerTripMenu(
+                    isOrganizer: isOrganizer(of: trip),
+                    onEdit: { editingTrip = trip },
+                    onDelete: { tripPendingDeletion = trip }
+                ))
             }
 
             planNewTripRow
@@ -291,6 +455,10 @@ struct HomeView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        // User-initiated escape hatch for a missed realtime event (finding
+        // 10) — realtime/debounced pulls are the normal path, this is just
+        // the fallback.
+        .refreshable { await refreshFromPull() }
     }
 
     private var planNewTripRow: some View {
@@ -315,33 +483,38 @@ struct HomeView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: Spacing.lg) {
-            Spacer()
-            Image(systemName: "airplane.departure")
-                .font(.system(size: 40))
-                .foregroundStyle(Palette.amber)
-            VStack(spacing: Spacing.xs) {
-                Text("Plan your first trip")
-                    .font(Typo.display(Typo.Size.title))
-                    .foregroundStyle(Palette.ink)
-                Text("Everyone\u{2019}s bookings in one shared, at-a-glance itinerary.")
-                    .font(Typo.body())
-                    .foregroundStyle(Palette.slate)
-                    .multilineTextAlignment(.center)
-            }
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                valueRow("clock", "Every flight and plan in its own local time")
-                valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
-                valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
-            }
-            .padding(.top, Spacing.xs)
-            planNewTripCTA
+        ScrollView {
+            VStack(spacing: Spacing.lg) {
+                Spacer()
+                Image(systemName: "airplane.departure")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Palette.amber)
+                VStack(spacing: Spacing.xs) {
+                    Text("Plan your first trip")
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(Palette.ink)
+                    Text("Everyone\u{2019}s bookings in one shared, at-a-glance itinerary.")
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                }
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    valueRow("clock", "Every flight and plan in its own local time")
+                    valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
+                    valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
+                }
                 .padding(.top, Spacing.xs)
-            Spacer()
-            Spacer()
+                planNewTripCTA
+                    .padding(.top, Spacing.xs)
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
         }
-        .padding(Spacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // A just-invited user staring at an empty Home needs the same pull
+        // escape hatch as the populated list (finding 10).
+        .refreshable { await refreshFromPull() }
     }
 
     private func valueRow(_ icon: String, _ text: String) -> some View {
@@ -359,26 +532,229 @@ struct HomeView: View {
     /// Shown when the *selected tab* is empty but the other tab has trips —
     /// avoids a near-blank screen with only a lone dashed button.
     private var emptyTabState: some View {
-        VStack(spacing: Spacing.md) {
-            Spacer()
-            Text(selectedTab == "Upcoming" ? "No upcoming trips" : "No past trips yet")
-                .font(Typo.display(Typo.Size.title))
-                .foregroundStyle(Palette.ink)
-            Text(selectedTab == "Upcoming"
-                 ? "Plan the next one \u{2014} everyone\u{2019}s bookings in one shared itinerary."
-                 : "Trips you\u{2019}ve wrapped up will show up here.")
-                .font(Typo.body())
-                .foregroundStyle(Palette.slate)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Spacing.xl)
-            if selectedTab == "Upcoming" {
+        ScrollView {
+            VStack(spacing: Spacing.md) {
+                Spacer()
+                Text(selectedTab == "Upcoming" ? "No upcoming trips" : "No past trips yet")
+                    .font(Typo.display(Typo.Size.title))
+                    .foregroundStyle(Palette.ink)
+                Text(selectedTab == "Upcoming"
+                     ? "Plan the next one \u{2014} everyone\u{2019}s bookings in one shared itinerary."
+                     : "Trips you\u{2019}ve wrapped up will show up here.")
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Spacing.xl)
                 planNewTripCTA.padding(.top, Spacing.xs)
+                Spacer()
+                Spacer()
             }
-            Spacer()
-            Spacer()
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
         }
-        .padding(Spacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .refreshable { await refreshFromPull() }
+    }
+
+    /// First-pull loading placeholder (finding 2) — shown while a
+    /// genuinely-empty account can't yet be told apart from "haven't heard
+    /// from the server yet," and while an invite claim is in flight for a
+    /// brand-new account (finding 6's empty-trips case).
+    private var initialLoadState: some View {
+        ScrollView {
+            VStack(spacing: Spacing.md) {
+                Spacer()
+                ProgressView()
+                Text(appRouter.isJoiningTrip ? "Joining trip\u{2026}" : "Checking for your trips\u{2026}")
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+                // Finding 3: a hanging join while offline has no timeout of
+                // its own — this tells the user why, rather than leaving
+                // them staring at a spinner that may never resolve.
+                if appRouter.isJoiningTrip && syncStatus.isOffline {
+                    Text("You\u{2019}re offline \u{2014} joining needs a connection. If this doesn\u{2019}t finish, open the invite link again when you\u{2019}re back online.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Spacing.xl)
+                }
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
+        }
+        .refreshable { await refreshFromPull() }
+    }
+
+    /// First-launch-while-offline placeholder (finding 5) — distinct from
+    /// `initialLoadState` because there's no pull in flight to wait on yet,
+    /// and distinct from `emptyState` because a genuinely-empty account
+    /// can't be told apart from "trips exist but haven't been pulled" until
+    /// the first pull actually completes. Copy per §6.6: states what
+    /// happened and how it resolves, no apology, and doesn't assert "first
+    /// trip" the way `emptyState` does. `planNewTripCTA` stays present since
+    /// offline trip creation still works via the outbox (§4.1 "always
+    /// present").
+    private var offlineFirstLoadState: some View {
+        ScrollView {
+            VStack(spacing: Spacing.lg) {
+                Spacer()
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Palette.slate)
+                VStack(spacing: Spacing.xs) {
+                    Text("Can\u{2019}t check for trips yet")
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(Palette.ink)
+                    Text("You\u{2019}re offline. Trips already on your account will appear once you\u{2019}re back online.")
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                }
+                planNewTripCTA.padding(.top, Spacing.xs)
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
+        }
+        .refreshable { await refreshFromPull() }
+    }
+
+    /// Failed-first/latest-pull placeholder (finding 1) — distinct from
+    /// `emptyState` because a failed pull can't tell a genuinely-empty
+    /// account apart from one whose trips just haven't been fetched yet;
+    /// copy per §6.6 (states what happened and how it resolves, no
+    /// apology), mirroring `offlineFirstLoadState`'s structure/tokens.
+    /// `planNewTripCTA` stays present since offline/failed trip creation
+    /// still works via the outbox (§4.1 "always present").
+    private var pullFailedState: some View {
+        ScrollView {
+            VStack(spacing: Spacing.lg) {
+                Spacer()
+                Image(systemName: "exclamationmark.arrow.circlepath")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Palette.slate)
+                VStack(spacing: Spacing.xs) {
+                    Text("Couldn\u{2019}t check for trips")
+                        .font(Typo.display(Typo.Size.title))
+                        .foregroundStyle(Palette.ink)
+                    Text("The last check didn\u{2019}t reach the server. Trips on your account will appear once a check goes through.")
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                }
+                Button {
+                    // Guards a double-tap from re-entering the pull while
+                    // one's already in flight.
+                    guard !isRetryingPull else { return }
+                    Task {
+                        retryFailedAgain = false
+                        isRetryingPull = true
+                        await syncEngine?.pullHome()
+                        isRetryingPull = false
+                        // Known accepted edge (same one `refreshFromPull()`
+                        // documents above): a debounced pull already in
+                        // flight makes `pullHome()` early-return, and this
+                        // reads whatever `lastHomePullFailed` was left at by
+                        // that earlier attempt rather than this tap's own
+                        // outcome — rare, and the resulting note stays
+                        // truthful either way.
+                        retryFailedAgain = HomeRefreshFeedback.shouldNoteRetryFailure(
+                            lastHomePullFailed: syncStatus.lastHomePullFailed,
+                            isOffline: syncStatus.isOffline
+                        )
+                    }
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        if isRetryingPull {
+                            ProgressView()
+                                .tint(Palette.onAmber)
+                        }
+                        Text(isRetryingPull ? "Trying again\u{2026}" : "Try again")
+                    }
+                    .font(Typo.body(weight: .semibold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.md)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
+                    .contentShape(Capsule())
+                    .background(Palette.amber, in: Capsule())
+                }
+                .disabled(isRetryingPull)
+                .padding(.top, Spacing.xs)
+                if retryFailedAgain {
+                    Text("Still couldn\u{2019}t reach the server. Check your connection and try again.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Spacing.xl)
+                        .accessibilityAddTraits(.updatesFrequently)
+                        .onAppear {
+                            // Mirrors `ToastOverlay`'s announcement — a
+                            // caption that appears on its own next to an
+                            // already-read button needs an explicit nudge
+                            // for VoiceOver to speak it.
+                            AccessibilityNotification.Announcement(
+                                "Still couldn\u{2019}t reach the server. Check your connection and try again."
+                            ).post()
+                        }
+                }
+                // Finding 4: recovery is the primary action in this one
+                // placeholder, so the emphasis is swapped relative to the
+                // other three states — `planNewTripCTA` (filled amber)
+                // demotes to this outline style here, and "Try again" above
+                // takes the filled treatment instead.
+                planNewTripOutlineButton.padding(.top, Spacing.xs)
+                Spacer()
+                Spacer()
+            }
+            .padding(Spacing.xl)
+            .containerRelativeFrame(.vertical)
+        }
+        .refreshable { await refreshFromPull() }
+        .onChange(of: syncStatus.lastHomePullFailed) { _, failed in
+            // A later re-entry into this placeholder (e.g. after a
+            // background pull recovers, then fails again) shouldn't carry
+            // over a stale note from a previous attempt.
+            if !failed { retryFailedAgain = false }
+        }
+    }
+
+    /// The style `Try again` had before finding 4's emphasis swap — reused
+    /// here for `Plan a new trip` specifically in `pullFailedState`, where
+    /// the filled treatment is reserved for the recovery action instead.
+    private var planNewTripOutlineButton: some View {
+        Button {
+            isPresentingCreate = true
+        } label: {
+            Text("Plan a new trip")
+                .font(Typo.body(weight: .semibold))
+                .foregroundStyle(Palette.ink)
+                .padding(.horizontal, Spacing.xl)
+                .padding(.vertical, Spacing.md)
+                .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
+                .contentShape(Capsule())
+                .background {
+                    Capsule().strokeBorder(Palette.mist, lineWidth: 1.5)
+                }
+        }
+    }
+
+    /// Slim in-progress indicator for an invite claim (finding 6) — shown
+    /// only once there's already a list to sit above; the empty-trips case
+    /// is covered by `initialLoadState`.
+    private var joiningTripBanner: some View {
+        HStack(spacing: Spacing.sm) {
+            ProgressView()
+            Text(syncStatus.isOffline ? "Joining trip\u{2026} \u{2014} waiting for a connection" : "Joining trip\u{2026}")
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+        .background(Palette.amberSoft)
     }
 
     private var planNewTripCTA: some View {
@@ -390,6 +766,8 @@ struct HomeView: View {
                 .foregroundStyle(Palette.onAmber)
                 .padding(.horizontal, Spacing.xl)
                 .padding(.vertical, Spacing.md)
+                .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
+                .contentShape(Capsule())
                 .background(Palette.amber, in: Capsule())
         }
     }
@@ -429,7 +807,13 @@ struct HomeView: View {
     }
 
     private func isOrganizer(of trip: Trip) -> Bool {
-        guard let userId = authManager.userId else { return false }
+        // Finding 2: mirrors `TripView.canAddItems`' documented rule — a
+        // signed-out session only ever contains locally created trips
+        // (`AuthManager.signOut()` wipes the entire local mirror before
+        // clearing the session, `SyncEngine.wipeForSignOut()`), so a
+        // signed-out user is always the legitimately-permitted local
+        // creator/organizer of every trip they can even see here.
+        guard let userId = authManager.userId else { return true }
         return tripMembers.contains {
             $0.tripId == trip.id && $0.userId == userId && $0.role == .organizer
         }
@@ -459,5 +843,30 @@ struct HomeView: View {
         }
         try? modelContext.save()
         Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
+    }
+}
+
+/// Conditionally attaches a trip card's edit/delete context menu (UX audit
+/// finding 1). `.contextMenu { if isOrganizer { ... } }` always attaches the
+/// modifier and just leaves the menu's *contents* empty for non-organizers —
+/// that still gives a companion/viewer the long-press lift/haptic affordance
+/// for a menu that opens to nothing. Gating the modifier itself (rather than
+/// its contents) is the fix; the deprecated `contextMenu(ContextMenu?)`
+/// overload is the only bool-gated variant of this API, so an `if`-based
+/// `ViewModifier` is the supported shape instead.
+private struct OrganizerTripMenu: ViewModifier {
+    let isOrganizer: Bool
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    func body(content: Content) -> some View {
+        if isOrganizer {
+            content.contextMenu {
+                Button("Edit trip", action: onEdit)
+                Button("Delete trip", role: .destructive, action: onDelete)
+            }
+        } else {
+            content
+        }
     }
 }

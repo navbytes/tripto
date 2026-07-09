@@ -32,11 +32,22 @@ enum PackingGrouping {
     /// items at all (this milestone's brief: "only non-empty groups" — the
     /// mockup's 3-group example never shows an empty section, so this is
     /// the rule that generalizes it to all 5 `PackingGroupKey` cases).
+    ///
+    /// UX audit finding 2: within each group, unpacked items sort before
+    /// packed ones (stable by `createdAt` within each half) so "what's left
+    /// to pack" always scans from the top of the group instead of being
+    /// interleaved with items already done. This also gives `@Query`'s
+    /// previously insertion-order results a deterministic order — see the
+    /// `applyUITestAutopilotIfNeeded` doc comment in `PackingListView` that
+    /// already flagged that as unpredictable.
     static func groups(for items: [PackingItem]) -> [(key: PackingGroupKey, items: [PackingItem])] {
         let grouped = Dictionary(grouping: items, by: \.groupKey)
         return order.compactMap { key in
             guard let groupItems = grouped[key], !groupItems.isEmpty else { return nil }
-            return (key, groupItems)
+            let sorted = groupItems.sorted { a, b in
+                a.isDone == b.isDone ? a.createdAt < b.createdAt : (!a.isDone && b.isDone)
+            }
+            return (key, sorted)
         }
     }
 }

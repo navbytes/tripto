@@ -8,9 +8,19 @@ import Foundation
 /// short-circuit actually works; `@Model` references would defeat it).
 struct TimelineDayModel: Identifiable, Equatable {
     let id: String
-    /// "Day 3 · Fri May 16"
+    /// "Day 3 · Fri May 16" (or "Before/After the trip · …" outside the
+    /// trip's own date range — finding F8).
     let title: String
     let rows: [TimelineRowModel]
+    /// True when this section's day is the viewer's device-local "today"
+    /// (finding F1) — the view uses this to render a small "Today" marker
+    /// and to drive the one-shot auto-scroll.
+    let isToday: Bool
+
+    /// Finding F2: a day with no rows at all (a gap day the bucketing layer
+    /// filled in) — the view renders this as a quiet "Free day" row instead
+    /// of an empty section.
+    var isFreeDay: Bool { rows.isEmpty }
 }
 
 enum TimelineRowModel: Identifiable, Equatable {
@@ -90,7 +100,15 @@ enum TimelineBuilder {
         myUserId: UUID?,
         namesById: [UUID: String],
         assigneesByItem: [UUID: [AvatarStack.Person]] = [:],
-        now: Date = .now
+        now: Date = .now,
+        /// Finding F1: the viewer's device-local "today", passed in (rather
+        /// than computed here) so the builder stays pure/testable — the
+        /// caller derives it via `DayDate.from(.now, calendar: .current)`.
+        today: DayDate? = nil,
+        /// Finding F8: total day count of the trip itself (`endDate` -
+        /// `startDate` inclusive) — `nil` keeps the old unconditional
+        /// "Day N" title for existing call sites.
+        tripDayCount: Int? = nil
     ) -> [TimelineDayModel] {
         var previous: ItineraryItem?
 
@@ -145,10 +163,27 @@ enum TimelineBuilder {
 
             return TimelineDayModel(
                 id: section.day.stringValue,
-                title: "Day \(section.dayNumber) · \(Self.dayTitleText(section.day))",
-                rows: rows
+                title: dayTitle(for: section, tripDayCount: tripDayCount),
+                rows: rows,
+                isToday: today != nil && section.day == today
             )
         }
+    }
+
+    /// Finding F8: "Day N" only reads sensibly for days inside the trip's
+    /// own range — a stray item the day before check-in (or after
+    /// check-out) previously rendered as "Day 0" or a negative day number,
+    /// which reads as a bug. Outside the range this labels the day as what
+    /// it is instead of pretending it's part of the numbered itinerary.
+    private static func dayTitle(for section: ItineraryDayBucketing.Section, tripDayCount: Int?) -> String {
+        let dateText = dayTitleText(section.day)
+        if section.dayNumber < 1 {
+            return "Before the trip · \(dateText)"
+        }
+        if let tripDayCount, section.dayNumber > tripDayCount {
+            return "After the trip · \(dateText)"
+        }
+        return "Day \(section.dayNumber) · \(dateText)"
     }
 
     private static func cardModel(

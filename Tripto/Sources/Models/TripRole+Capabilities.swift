@@ -4,6 +4,13 @@ import Foundation
 /// invite-link buttons, and a member's own-role card never drift. The persona
 /// dry-run found a Companion had no way to learn what "Companion" even meant —
 /// the copy previously lived only inside the organizer-only role picker.
+///
+/// Two distinct audiences read this copy, so there are two grant strings:
+/// `inviteGrant` is organizer-facing (third person, "what this link grants,
+/// before you send it"), while `inviteeGrant` is invitee-facing (second
+/// person, shown to the person accepting an invite on `WelcomeView`). Don't
+/// collapse them — the usability dry-run flagged third-person copy ("their
+/// own plans") reading oddly when addressed to the person it describes.
 extension TripRole {
     /// Full sentence, for the role picker and a member's own-role card.
     var capabilityDescription: String {
@@ -20,6 +27,16 @@ extension TripRole {
         switch self {
         case .organizer: return "Full control"
         case .companion: return "Can add & edit their own plans"
+        case .viewer: return "Can view, not edit"
+        }
+    }
+
+    /// Short grant shown to the person accepting an invite (second person,
+    /// addressed to them directly) — `WelcomeView`'s pre-sign-in invite card.
+    var inviteeGrant: String {
+        switch self {
+        case .organizer: return "Full control"
+        case .companion: return "Can add & edit your own plans"
         case .viewer: return "Can view, not edit"
         }
     }

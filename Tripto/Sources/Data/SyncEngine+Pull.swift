@@ -51,10 +51,20 @@ extension SyncEngine {
             try await store.pruneOrphans()
 
             await status.markSynced()
+            await status.setHomePullFailed(false)
             schedulePush()
         } catch {
             logDebug("pullHome failed: \(error)")
+            await status.setHomePullFailed(true)
         }
+        // Deliberately on attempt-completion, not just the success path
+        // above (`markSynced` only fires there) — a failed first pull
+        // should degrade to the pull-failed state, not strand `HomeView`
+        // on an infinite "Checking for your trips…" spinner (finding 2).
+        // The early-return guards above (already pulling, offline) skip
+        // this on purpose: an offline launch leaves the flag false so
+        // `HomeView`'s `!isOffline` condition — not this one — governs it.
+        await status.markInitialHomePullCompleted()
         await refreshStatusCounts()
     }
 
@@ -112,9 +122,20 @@ extension SyncEngine {
             try await store.applyItemAssignees(assigneesResult, tripId: tripId)
 
             await status.markSynced()
+            await status.setTripPullFailed(tripId, false)
         } catch {
             logDebug("pullTrip(\(tripId)) failed: \(error)")
+            await status.setTripPullFailed(tripId, true)
         }
+        // Attempt-completion, not just the success path above — same
+        // rationale as `pullHome`'s `markInitialHomePullCompleted` call
+        // (finding 2): a failed first pull should degrade to this trip's
+        // normal empty states, not strand `TripView` on an infinite
+        // "Checking…" placeholder. The early-return guards above
+        // (already pulling this trip, offline) deliberately skip this, so
+        // the offline case stays governed by `TripView`'s own
+        // `!syncStatus.isOffline` check instead.
+        await status.markInitialTripPullCompleted(tripId)
         await refreshStatusCounts()
     }
 }

@@ -30,8 +30,8 @@ struct SettingsRoute: Hashable {}
 
 
 /// The trip screen (BUILD_PLAN.md §4.2 — THE core screen): cover-gradient
-/// hero, Itinerary · Bookings sub-tabs (Map/$ Split hidden per §9.4), and
-/// the day-grouped timeline. Renders entirely from the local SwiftData
+/// hero, Itinerary · Bookings · Packing sub-tabs (Map/$ Split hidden per
+/// §9.4), and the day-grouped timeline. Renders entirely from the local SwiftData
 /// mirror; `onAppear`/`onDisappear` drive the per-trip realtime channel and
 /// debounced pull (SYNC_DESIGN.md "Realtime").
 struct TripView: View {
@@ -57,13 +57,23 @@ struct TripView: View {
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Finding 4: `tabBar()`'s AX-size horizontal-scroll branch, same
+    /// `isAccessibilitySize` convention as `TripCard.swift`.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
+    @State private var isEditingTrip = false
     @State private var toast: String?
     /// "Just mine" selection (BUILD_PLAN.md §5.4) — `nil` is "Everyone."
     @State private var selectedProfileFilter: UUID?
     @Namespace private var tabUnderline
+
+    /// Backs the hero's scroll-driven collapse — see `HeroScrollModel`'s doc
+    /// comment (HeroCollapse.swift) for why this lives in a reference-type
+    /// `@Observable` instead of a plain `@State` dictionary on `TripView`:
+    /// per-scroll-frame writes to it must not invalidate `TripView.body`.
+    @State private var heroScrollModel = HeroScrollModel()
 
     // M2 verify-drill autopilot only (see `WelcomeView`/`HomeView`'s
     // matching hooks) — a DEBUG-only alternate presentation path for
@@ -100,7 +110,61 @@ struct TripView: View {
 
     /// Role gate for the FAB and all edit affordances — mirrors RLS
     /// convenience-only (CLAUDE.md): viewers see a read-only trip.
-    private var canAddItems: Bool { myRole != .viewer }
+    ///
+    /// Finding 7: `myRole != .viewer` alone can't tell a signed-out local
+    /// creator (whose `TripMember` row only ever exists locally, and is
+    /// therefore always "resolved") apart from a signed-in joiner whose
+    /// membership row simply hasn't arrived from the first pull yet — both
+    /// read as `nil`. Distinguishing the two nil cases: a signed-out user is
+    /// always the legitimately-permitted local creator; a signed-in user
+    /// with no resolved role yet is mid-first-pull and should see a
+    /// read-only trip until RLS would actually let them write.
+    /// `TripFormView.swift`'s trip-creation path inserts a local organizer
+    /// `TripMember` synchronously, so a signed-in creator always has a
+    /// resolved role by the time this is read — only joiners are affected.
+    private var canAddItems: Bool {
+        guard authManager.userId != nil else { return true }
+        guard let myRole else { return false }
+        return myRole != .viewer
+    }
+
+    /// Finding 2: the hero pencil's own gate was `myRole == .organizer`
+    /// only — that reads `nil` for a signed-out local creator (whose
+    /// `TripMember` row is always locally resolved, never fetched), so it
+    /// was hiding the edit affordance for the one person who legitimately
+    /// owns the trip. Same "signed-out = local creator" rule `canAddItems`
+    /// already codifies (see its doc comment above), applied to the
+    /// organizer-only edit surface instead of the broader add/edit-item one.
+    private var canEditTrip: Bool {
+        guard authManager.userId != nil else { return true }
+        return myRole == .organizer
+    }
+
+    /// Finding 2: mirrors `SyncStatus.hasCompletedInitialHomePull`'s
+    /// loading-vs-empty distinction, scoped to this one trip
+    /// (`completedInitialTripPulls`) — a freshly-claimed or just-opened
+    /// trip's genuinely-empty tabs can't yet be told apart from "haven't
+    /// heard from the server yet." Signed-out is excluded: no pull ever
+    /// runs for a signed-out session (their data is local-only), so there's
+    /// nothing to "await." Offline is excluded too: `SyncBanner` already
+    /// explains the state, and the underlying flag can never be set while
+    /// offline (`pullTrip`'s own early-return guard).
+    private var awaitingFirstTripPull: Bool {
+        authManager.userId != nil && !syncStatus.isOffline && !syncStatus.completedInitialTripPulls.contains(tripId)
+    }
+
+    /// UX audit finding 2 (cross-screen): backs `.refreshable` on all three
+    /// tabs — previously the only manual refresh gesture in the app lived on
+    /// Home; once inside a trip, an organizer/companion (or anyone viewing a
+    /// cached trip) whose pull failed while online had no way to ask again
+    /// short of leaving and reopening the trip. Calls `pullTrip(_:)`
+    /// directly (not the debounced `schedulePullTrip(_:)` the retry buttons
+    /// use) so the native pull-to-refresh spinner stays up until the pull
+    /// actually completes, mirroring `HomeView.refreshFromPull`'s own choice
+    /// to await `pullHome()` rather than `scheduleHomePull()`.
+    private func refreshTrip() async {
+        await syncEngine?.pullTrip(tripId)
+    }
 
     var body: some View {
         ZStack {
@@ -108,13 +172,27 @@ struct TripView: View {
 
             if let trip {
                 content(for: trip)
+            } else if awaitingFirstTripPull {
+                loadingTripState
             } else {
                 missingTripState
             }
         }
-        .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .toastOverlay($toast)
+        // Finding 1: `.toolbar(.hidden, for: .navigationBar)` above is the
+        // known killer of the interactive edge-swipe-to-pop gesture on the
+        // app's one shared `UINavigationController` — see
+        // `PopGestureRestorer`'s doc comment for why and how this restores
+        // it.
+        .background(PopGestureRestorer())
+        // Finding 8: the default `Spacing.xxl` inset sits inside the FAB's
+        // band, so a toast (esp. the ~110-character signed-out edit
+        // message) can overlap it. Constant inset — FAB height + its own
+        // bottom padding + a gap — rather than FAB-visibility-conditional:
+        // both `Bookings` and `Packing` render their own FAB in the same
+        // band now (UX audit finding 5), so a toast that jumps position
+        // per tab would be worse than one constant inset used everywhere.
+        .toastOverlay($toast, bottomInset: Fab.scrollClearance)
         .onAppear {
             let id = tripId
             Task {
@@ -136,6 +214,13 @@ struct TripView: View {
             if let uitestBookingDetailItemId {
                 NavigationStack { BookingDetailView(itemId: uitestBookingDetailItemId) }
             }
+        }
+        // Finding 5: if the profile the "Just mine" filter points at is
+        // deleted (locally, or via a realtime pull that drops it), snap
+        // back to "Everyone" instead of silently hiding the rest of the
+        // trip behind a filter for a person who no longer exists.
+        .onChange(of: tripProfiles.map(\.id)) { _, ids in
+            selectedProfileFilter = PersonFilter.reconciledSelection(selectedProfileFilter, profileIds: Set(ids))
         }
     }
 
@@ -176,7 +261,16 @@ struct TripView: View {
 
     private func content(for trip: Trip) -> some View {
         VStack(spacing: 0) {
-            hero(for: trip)
+            TripHeroView(
+                trip: trip,
+                tripProfileCount: tripProfiles.count,
+                selectedTab: selectedTab,
+                reduceMotion: reduceMotion,
+                dynamicTypeSize: dynamicTypeSize,
+                canEditTrip: canEditTrip,
+                isEditingTrip: $isEditingTrip,
+                model: heroScrollModel
+            )
 
             if syncStatus.isOffline {
                 SyncBanner()
@@ -198,26 +292,74 @@ struct TripView: View {
             }
 
             ZStack(alignment: .bottomTrailing) {
-                switch selectedTab {
-                case .itinerary:
-                    ItineraryTabView(
-                        trip: trip,
-                        items: filteredItems,
-                        pendingRowIds: syncStatus.pendingRowIds,
-                        myUserId: authManager.userId,
-                        namesById: profileNames,
-                        canEdit: canAddItems,
-                        assigneesByItem: assigneesByItem,
-                        filteredPersonName: selectedProfileFirstName,
-                        toast: $toast
-                    )
-                case .bookings:
-                    BookingsTabView(items: items)
-                case .packing:
-                    PackingListView(tripId: trip.id)
+                // Finding 5: all three tab views stay alive underneath —
+                // see `tabContent(_:content:)`'s doc comment for why.
+                ZStack {
+                    tabContent(.itinerary) {
+                        ItineraryTabView(
+                            trip: trip,
+                            items: filteredItems,
+                            pendingRowIds: syncStatus.pendingRowIds,
+                            myUserId: authManager.userId,
+                            namesById: profileNames,
+                            canEdit: canAddItems,
+                            heroScrollModel: heroScrollModel,
+                            assigneesByItem: assigneesByItem,
+                            filteredPersonName: selectedProfileFirstName,
+                            toast: $toast,
+                            isAwaitingFirstSync: awaitingFirstTripPull,
+                            hasAnyItems: !items.isEmpty,
+                            hiddenCountByDay: hiddenCountByDay,
+                            isOffline: syncStatus.isOffline,
+                            didLoadFail: syncStatus.tripPullFailures.contains(trip.id),
+                            onRetryLoad: {
+                                let id = trip.id
+                                Task { await syncEngine?.schedulePullTrip(id) }
+                            },
+                            onRefresh: refreshTrip
+                        )
+                    }
+                    tabContent(.bookings) {
+                        BookingsTabView(
+                            items: items,
+                            heroScrollModel: heroScrollModel,
+                            onAdd: canAddItems ? { isPresentingAdd = true } : nil,
+                            isAwaitingFirstSync: awaitingFirstTripPull,
+                            pendingRowIds: syncStatus.pendingRowIds,
+                            isOffline: syncStatus.isOffline,
+                            didLoadFail: syncStatus.tripPullFailures.contains(trip.id),
+                            onRetryLoad: {
+                                let id = trip.id
+                                Task { await syncEngine?.schedulePullTrip(id) }
+                            },
+                            onRefresh: refreshTrip
+                        )
+                    }
+                    tabContent(.packing) {
+                        PackingListView(
+                            tripId: trip.id,
+                            tripCreatedBy: trip.createdBy,
+                            heroScrollModel: heroScrollModel,
+                            isAwaitingFirstSync: awaitingFirstTripPull,
+                            // UX audit finding 3 (cross-screen): Packing was
+                            // the one tab excluded from sync-state surfacing
+                            // — see `PackingListView`'s own doc comments.
+                            pendingRowIds: syncStatus.pendingRowIds,
+                            isOffline: syncStatus.isOffline,
+                            didLoadFail: syncStatus.tripPullFailures.contains(trip.id),
+                            onRetryLoad: {
+                                let id = trip.id
+                                Task { await syncEngine?.schedulePullTrip(id) }
+                            },
+                            onRefresh: refreshTrip
+                        )
+                    }
                 }
 
-                if canAddItems && selectedTab == .itinerary {
+                // UX audit finding 5: FAB shows on Itinerary and Bookings —
+                // Packing owns its own FAB (see `PackingListView`), so it's
+                // excluded here rather than allow-listing just `.itinerary`.
+                if canAddItems && selectedTab != .packing {
                     Fab { isPresentingAdd = true }
                         .padding(.trailing, Spacing.xl)
                         .padding(.bottom, Spacing.xxl)
@@ -228,120 +370,137 @@ struct TripView: View {
             AddItemSheet(
                 tripId: trip.id, tripTitle: trip.title, editing: nil,
                 defaultZone: NewItemZoneDefault.zone(forExistingItemTzIdentifiers: items.map(\.tz)),
-                tripStartDate: trip.startDate
+                tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy
             ) { message in
                 toast = message
             }
         }
-    }
-
-    // MARK: - Hero (§4.2: gradient, glass back/share, city, meta)
-
-    private func hero(for trip: Trip) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                GlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
-                    dismiss()
+        .sheet(isPresented: $isEditingTrip) {
+            // UX audit finding 7: the context-menu-triggered edit path
+            // through Home has its own toast (`HomeView`'s create/edit
+            // sheets); this is the second entry point — the hero's pencil
+            // button — so it needs the same "action keeps its name" close
+            // ("Save changes" -> "Changes saved") via this screen's own
+            // `$toast`/`.toastOverlay`.
+            TripFormView(mode: .edit(trip)) { _, outcome in
+                switch outcome {
+                case .saved:
+                    toast = "Changes saved"
+                case .savedLocallyWhileSignedOut:
+                    // Finding 5: same qualified toast as `HomeView`'s edit
+                    // sheet, so this second entry point (the hero's pencil
+                    // button) gives the identical honest signal.
+                    toast = "Changes saved on this device \u{2014} you\u{2019}re signed out, so they " +
+                        "won\u{2019}t sync until you sign back in."
                 }
-                Spacer()
-                // A `NavigationLink(value:)`, not a `GlassCircleButton`
-                // action closure: `TripView` doesn't own the shared
-                // `NavigationPath` (`HomeView` does), but a value-based
-                // link pushes onto the nearest enclosing `NavigationStack`
-                // regardless of nesting depth — same mechanism
-                // `BookingsTabView`/`TimelineRowViews` already use for
-                // `ItemRoute`. See `HomeView`'s `.navigationDestination(for:
-                // ShareRoute.self)`.
-                NavigationLink(value: ShareRoute(tripId: trip.id)) {
-                    GlassCircleGlyph(systemImage: "square.and.arrow.up")
-                }
-                .accessibilityLabel("Share trip")
+            } onDeleted: {
+                // UX audit finding 8: deleting a trip used to only be
+                // reachable from Home's swipe/context menu — this pops
+                // straight back to Home the moment the edit sheet's own
+                // "Delete trip" confirms, instead of leaving the traveler on
+                // a screen for a trip that no longer exists.
+                dismiss()
             }
-
-            Spacer(minLength: Spacing.sm)
-
-            Text(trip.title)
-                .font(Typo.display(Typo.Size.display))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-
-            HStack(spacing: Spacing.sm) {
-                Text(dateRangeText(for: trip))
-                metaDot
-                Text("\(trip.durationInDays()) days")
-                metaDot
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "person.2.fill").font(.system(size: 10))
-                    Text("\(max(tripProfiles.count, 1))")
-                }
-            }
-            .font(Typo.body(Typo.Size.caption))
-            .foregroundStyle(.white.opacity(0.92))
-            .padding(.top, Spacing.xs)
-        }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.top, Spacing.xs)
-        .padding(.bottom, Spacing.lg)
-        .frame(height: 150, alignment: .bottom)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            CoverGradient.from(key: trip.coverGradient)
-                .overlay(Color.black.opacity(0.08)) // contrast scrim (§7.3)
-                .ignoresSafeArea(edges: .top)
         }
     }
 
-    private var metaDot: some View {
-        Text("·").opacity(0.6)
+    /// Finding 5: keeps all three tab views mounted underneath the visible
+    /// one instead of the old `switch`-driven teardown, which was
+    /// destroying and recreating `ItineraryTabView` (and its `@State
+    /// hasAutoScrolledToToday`, and the `ScrollView`'s own scroll position)
+    /// on every tab switch — a round trip through Bookings or Packing lost
+    /// the traveler's place on the timeline and, worse, let the one-shot
+    /// auto-scroll-to-today re-fire and yank them back to today on return.
+    /// `.opacity` (not a conditional `if`) is what keeps the hidden views'
+    /// state alive; `.allowsHitTesting`/`.accessibilityHidden` make sure a
+    /// hidden tab's fields and buttons can't be focused or tapped while
+    /// another tab is shown. Each tab view writes its own scroll offset
+    /// straight into `heroScrollModel` (passed to it directly, an
+    /// `@Observable` reference type — `TripView.body` never reads
+    /// `heroScrollModel.offsets` itself, so that per-scroll-frame write
+    /// invalidates only `TripHeroView`, the one view that reads it, not
+    /// this whole tab stack) rather than this wrapper relaying a
+    /// `PreferenceKey` value, per `.heroScrollTracking(tab:model:)`'s doc
+    /// comment (HeroCollapse.swift) on why that relay proved unreliable.
+    private func tabContent<Content: View>(_ tab: Tab, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .opacity(selectedTab == tab ? 1 : 0)
+            .allowsHitTesting(selectedTab == tab)
+            .accessibilityHidden(selectedTab != tab)
     }
 
-    private func dateRangeText(for trip: Trip) -> String {
-        let start = trip.startDate.formatted(.dateTime.month(.abbreviated).day())
-        let end = trip.endDate.formatted(.dateTime.month(.abbreviated).day())
-        return "\(start) – \(end)"
-    }
-
-    // MARK: - Sub-tabs (Itinerary · Bookings only — Map/$ Split hidden, §9.4)
+    // MARK: - Sub-tabs (Itinerary · Bookings · Packing — Map/$ Split hidden, §9.4)
 
     /// The three content tabs — Itinerary · Bookings · Packing — each swapping
     /// `selectedTab` in place. Packing was originally a separate pushed screen
     /// reached from a "button" in this row; it's now a peer tab so all three
     /// behave consistently (they read as tabs, so they should act as tabs).
     private func tabBar() -> some View {
-        HStack(spacing: Spacing.xl) {
-            ForEach(Tab.allCases, id: \.self) { tab in
-                Button {
-                    if reduceMotion {
-                        selectedTab = tab
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.18)) { selectedTab = tab }
-                    }
-                } label: {
-                    VStack(spacing: Spacing.sm) {
-                        Text(tab.rawValue)
-                            .font(Typo.body(weight: .semibold))
-                            .foregroundStyle(selectedTab == tab ? Palette.ink : Palette.slate)
-                        ZStack {
-                            Color.clear.frame(height: 2)
-                            if selectedTab == tab {
-                                RoundedRectangle(cornerRadius: 1)
-                                    .fill(Palette.amber)
-                                    .frame(height: 2)
-                                    .matchedGeometryEffect(id: "tab-underline", in: tabUnderline)
-                            }
-                        }
-                    }
-                    .contentShape(Rectangle())
+        Group {
+            // Finding 4: a fixed `HStack` truncates the labels unreadably at
+            // accessibility sizes (`TripCard.swift`'s established
+            // `isAccessibilitySize` convention) — this branches to a
+            // horizontal scroll row there instead, exactly like
+            // `PersonFilterBar`'s row. Non-AX rendering below is untouched.
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Spacing.xl) { tabButtons }
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
+            } else {
+                HStack(spacing: Spacing.xl) {
+                    tabButtons
+                    Spacer()
+                }
             }
-            Spacer()
         }
         .padding(.horizontal, Spacing.xl)
-        .padding(.top, Spacing.md)
+        // Finding 9a: `.isTabBar` (iOS 17+, matches this app's SwiftData/
+        // @Observable baseline) so VoiceOver announces tab role and "tab N
+        // of M" position; `.contain` groups the row as one navigable unit
+        // rather than three unrelated static elements.
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isTabBar)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.mist).frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var tabButtons: some View {
+        ForEach(Tab.allCases, id: \.self) { tab in
+            Button {
+                if reduceMotion {
+                    selectedTab = tab
+                } else {
+                    withAnimation(.easeInOut(duration: 0.18)) { selectedTab = tab }
+                }
+            } label: {
+                // Finding 1a: `minHeight: 44` (not the HStack's old
+                // `.padding(.top, Spacing.md)`) so the full 44pt column
+                // is hit-testable while the text+underline stay
+                // bottom-aligned exactly where they render today — the
+                // padding's ~12pt of headroom is absorbed into this
+                // frame instead.
+                VStack(spacing: Spacing.sm) {
+                    Text(tab.rawValue)
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(selectedTab == tab ? Palette.ink : Palette.slate)
+                    ZStack {
+                        Color.clear.frame(height: 2)
+                        if selectedTab == tab {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(Palette.amber)
+                                .frame(height: 2)
+                                .matchedGeometryEffect(id: "tab-underline", in: tabUnderline)
+                        }
+                    }
+                }
+                .frame(minHeight: 44, alignment: .bottom)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
         }
     }
 
@@ -366,8 +525,33 @@ struct TripView: View {
 
     /// `items` scoped to `selectedProfileFilter` — see `PersonFilter`'s doc
     /// comment for the "no assignees = for everyone" rule.
+    ///
+    /// Reconciles the selection defensively (finding 5) rather than trusting
+    /// `selectedProfileFilter` outright: `.onChange(of: tripProfiles...)`
+    /// handles the steady-state reset, but a single frame between a
+    /// profile's deletion and that `onChange` firing could otherwise render
+    /// a stale-filtered (effectively empty-for-everyone-else) list.
     private var filteredItems: [ItineraryItem] {
-        PersonFilter.filteredItems(items, assignees: itemAssignees, selectedProfileId: selectedProfileFilter)
+        PersonFilter.filteredItems(items, assignees: itemAssignees, selectedProfileId: reconciledProfileFilter)
+    }
+
+    /// UX audit finding 1: how many items each day's "Just mine" filter is
+    /// currently hiding, keyed by `DayDate.stringValue` (==
+    /// `TimelineDayModel.id`) — lets `ItineraryTabView` tell a genuinely
+    /// free day apart from a day that's actually full for everyone else.
+    private var hiddenCountByDay: [String: Int] {
+        guard let trip else { return [:] }
+        return PersonFilter.hiddenDayCounts(
+            items, assignees: itemAssignees, selectedProfileId: reconciledProfileFilter,
+            tripStart: DayDate.from(trip.startDate, calendar: .current)
+        )
+    }
+
+    /// Finding 5's stale-selection guard, shared by `filteredItems` and
+    /// `hiddenCountByDay` so it's computed once per render pass instead of
+    /// twice.
+    private var reconciledProfileFilter: UUID? {
+        PersonFilter.reconciledSelection(selectedProfileFilter, profileIds: Set(tripProfiles.map(\.id)))
     }
 
     /// `itemId` -> resolved assignee avatars, for `ItineraryTabView`'s
@@ -380,22 +564,41 @@ struct TripView: View {
         return idsByItem.mapValues { profileIds in
             profileIds.compactMap { id -> AvatarStack.Person? in
                 guard let profile = profilesById[id] else { return nil }
-                return AvatarStack.Person(id: profile.id, initial: initials(from: profile.displayName), colorName: profile.avatarColor)
+                // Finding F4: same first-name derivation `personFilterChips`/
+                // `selectedProfileFirstName` already use for their own
+                // spoken/visible labels — one truncation rule, not a second
+                // one for the timeline's assignees phrase.
+                return AvatarStack.Person(
+                    id: profile.id, initial: initials(from: profile.displayName),
+                    colorName: profile.avatarColor, name: firstName(from: profile.displayName)
+                )
             }
         }
     }
 
+    /// Finding F12: the viewer's own linked profile sorts first — before,
+    /// "Just mine" was scattered wherever `createdAt` happened to place it,
+    /// so a traveler filtering to themself had to scan the whole row first.
+    /// Everything else keeps the existing `createdAt` order; the
+    /// "Everyone" chip's own position is `PersonFilterBar`'s, untouched.
     private var personFilterChips: [PersonFilterBar.Chip] {
-        tripProfiles
-            .sorted { $0.createdAt < $1.createdAt }
-            .map { profile in
-                PersonFilterBar.Chip(
-                    id: profile.id,
-                    firstName: firstName(from: profile.displayName),
-                    initial: initials(from: profile.displayName),
-                    colorName: profile.avatarColor
-                )
-            }
+        let sorted = tripProfiles.sorted { $0.createdAt < $1.createdAt }
+        // `linkedUserId == nil` means "not an app user" (§3.3) — must not
+        // match a signed-out `authManager.userId == nil` as "mine".
+        let isMine: (TripProfile) -> Bool = { profile in
+            guard let userId = authManager.userId, let linkedUserId = profile.linkedUserId else { return false }
+            return linkedUserId == userId
+        }
+        let mine = sorted.filter(isMine)
+        let others = sorted.filter { !isMine($0) }
+        return (mine + others).map { profile in
+            PersonFilterBar.Chip(
+                id: profile.id,
+                firstName: firstName(from: profile.displayName),
+                initial: initials(from: profile.displayName),
+                colorName: profile.avatarColor
+            )
+        }
     }
 
     private var selectedProfileFirstName: String? {
@@ -412,14 +615,50 @@ struct TripView: View {
         firstName(from: displayName).prefix(1).uppercased()
     }
 
+    /// Finding 3: the old bare-amber-text "Back to trips" button was both
+    /// under AA contrast (~2.3:1 amber-on-paper) and under the 44pt hit
+    /// target. Restyled as the same filled-amber capsule CTA
+    /// `BookingsTabView`'s empty state uses, and the heading now explains
+    /// *why* — §6.6 voice: name the likely cause, then point at where the
+    /// traveler's other trips still are.
+    /// Finding 1: shown instead of `missingTripState` while a signed-in,
+    /// online traveler's first pull for this trip is still in flight — the
+    /// trip row hasn't arrived yet, but that's not the same as "removed by
+    /// the organizer or access ended." Mirrors `BookingsTabView`'s own
+    /// loading state for the same `awaitingFirstTripPull` condition.
+    private var loadingTripState: some View {
+        VStack(spacing: Spacing.md) {
+            ProgressView()
+            Text("Loading this trip\u{2026}")
+                .font(Typo.body())
+                .foregroundStyle(Palette.slate)
+        }
+    }
+
     private var missingTripState: some View {
         VStack(spacing: Spacing.md) {
             Text("This trip is no longer available")
                 .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.slate)
-            Button("Back to trips") { dismiss() }
-                .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.amber)
+                .foregroundStyle(Palette.ink)
+            Text(
+                "It may have been removed by the organizer, or your access may have ended. " +
+                    "Your other trips are still on your trips list."
+            )
+            .font(Typo.body())
+            .foregroundStyle(Palette.slate)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Spacing.xxl)
+            Button(action: { dismiss() }) {
+                Text("Back to trips")
+                    .font(Typo.body(weight: .semibold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.md)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                    .contentShape(Capsule())
+                    .background(Palette.amber, in: Capsule())
+            }
+            .padding(.top, Spacing.xs)
         }
     }
 }

@@ -34,6 +34,15 @@ struct ShareTripView: View {
     @State private var memberPendingRoleChange: TripMember?
     @State private var memberPendingOrganizerConfirm: TripMember?
     @State private var memberPendingRemoval: TripMember?
+    @State private var invitePendingRevoke: Invite?
+    /// Guards the deliberate network-bound share-link create/reset (see the
+    /// "Mutations" doc comment below) — without this, a double-tap on
+    /// "Create view link" fires two concurrent inserts. Kept in the Button
+    /// actions themselves, not inside `createShareLink()`, so the DEBUG
+    /// autopilot and `resetShareLink()` aren't blocked by a reentrancy guard.
+    @State private var busyShareLink = false
+    /// Same as `busyShareLink`, per-role, for the two invite buttons.
+    @State private var busyInviteRoles: Set<TripRole> = []
     /// M4: "Add someone without the app" / edit-existing-profile sheets
     /// (this milestone's brief §2) — both drive `TripProfileFormSheet`.
     @State private var isPresentingAddProfile = false
@@ -70,6 +79,9 @@ struct ShareTripView: View {
                 } else {
                     changeRole(of: member, to: newRole)
                 }
+            } onRemove: {
+                memberPendingRoleChange = nil
+                memberPendingRemoval = member
             }
         }
         .sheet(isPresented: $isPresentingAddProfile) {
@@ -124,6 +136,22 @@ struct ShareTripView: View {
             }
             Button("Cancel", role: .cancel) { memberPendingRemoval = nil }
         }
+        .confirmationDialog(
+            "Revoke this invite link?",
+            isPresented: Binding(
+                get: { invitePendingRevoke != nil },
+                set: { isPresented in if !isPresented { invitePendingRevoke = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Revoke", role: .destructive) {
+                if let invite = invitePendingRevoke { revokeInvite(invite) }
+                invitePendingRevoke = nil
+            }
+            Button("Cancel", role: .cancel) { invitePendingRevoke = nil }
+        } message: {
+            Text("Anyone who hasn\u{2019}t joined with this link will lose access.")
+        }
         .task {
             #if DEBUG
             await applyUITestAutopilotIfNeeded()
@@ -155,11 +183,22 @@ struct ShareTripView: View {
         }
     }
 
+    /// The trip's actual creator — the earliest-joined `TripMember` (a
+    /// server trigger creates the organizer's `trip_members` row at trip
+    /// creation, before anyone else can join). `memberRow`'s caption used to
+    /// read `role == .organizer` as "created the trip", which goes stale the
+    /// moment a co-organizer is promoted (finding 4) — this instead derives
+    /// the one true creator, using the same `createdAt` field `sortedMembers`
+    /// already relies on.
+    private var tripCreatorId: UUID? {
+        members.min(by: { $0.createdAt < $1.createdAt })?.userId
+    }
+
     /// Trip profiles with no linked account yet — the non-app kids/
     /// grandparents (BUILD_PLAN.md §3.3/§5.3). Empty until M4 ships profile
     /// creation; rendered here so the list is ready the moment it does.
     private var unlinkedProfiles: [TripProfile] {
-        tripProfiles.filter { $0.linkedUserId == nil }
+        tripProfiles.filter { $0.linkedUserId == nil }.sorted { $0.createdAt < $1.createdAt }
     }
 
     private enum PersonRow: Identifiable {
@@ -182,8 +221,17 @@ struct ShareTripView: View {
         tripProfiles.first { $0.linkedUserId == member.userId }
     }
 
+    /// The linked `TripProfile.displayName` is the primary source, but a
+    /// pure-offline join (the trip-scoped `TripProfile` a server trigger
+    /// creates hasn't synced down yet, though the account-scoped `Profile`
+    /// has) falls back to the already-`@Query`'d `profiles` before finally
+    /// falling back to "Traveler" — otherwise members read as generic
+    /// "Traveler"s until their next successful sync (finding 6).
     private func displayName(for member: TripMember) -> String {
-        profile(for: member)?.displayName ?? "Traveler"
+        if let name = profile(for: member)?.displayName { return name }
+        if let name = profiles.first(where: { $0.id == member.userId })?.displayName { return name }
+        if member.userId == authManager.userId { return "You" }
+        return "Traveler"
     }
 
     private func initials(from displayName: String) -> String {
@@ -206,6 +254,37 @@ struct ShareTripView: View {
     /// (which flips near-white in dark mode and would sit unreadably on a
     /// white pill; caught in the M3 dark-mode screenshot pass).
     private static let onWhitePillInk = Color(hex: "#1A1B2E")
+
+    /// `shareLinkCard`'s text scrim (UX audit finding 1). Unlike `TripCard`'s
+    /// `CoverGradient.textScrim` — a vertical, bottom-heavy ramp built for
+    /// text that sits at the bottom of that card — this card's title/
+    /// description sit at the TOP-LEADING corner, `CoverGradient.dusk`'s
+    /// lightest stop (#E8955A, ~2.4:1 for white per `Palette.onAmber`'s doc).
+    /// A bottom-heavy scrim would darken the wrong corner, so this is a
+    /// diagonal ramp along `.dusk`'s own axis (`.topLeading` ->
+    /// `.bottomTrailing`) instead. Black 0.45 composited over #E8955A yields
+    /// L~0.108 => ~6.6:1 for full white and ~5.3:1 for the description's
+    /// `.white.opacity(0.9)`, clearing WCAG AA (4.5:1); the bottom fine-print
+    /// already sits over dark indigo/plum and is unaffected. Fixed (not
+    /// theme-adaptive), same rationale as `CoverGradient.textScrim`: cover
+    /// gradients don't change between light and dark.
+    ///
+    /// This would normally live as a `CoverGradient` companion next to
+    /// `textScrim` in `Design/PaletteExtras.swift` (same file/rationale —
+    /// `gen_tokens.py` never touches it), but this pass is scoped to the
+    /// Share screen's own files only (concurrent work on other screens is
+    /// touching `Design/` files elsewhere on this branch), so it's kept
+    /// local here. Worth hoisting into `PaletteExtras.swift` in a later,
+    /// non-concurrent pass if `TripCard` or another cover-gradient card ever
+    /// needs the same top-leading treatment.
+    private static let shareLinkCardScrim = LinearGradient(
+        stops: [
+            .init(color: .black.opacity(0.45), location: 0.0),
+            .init(color: .clear, location: 0.6),
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
     // MARK: - Share link card (top gradient card)
 
@@ -236,9 +315,26 @@ struct ShareTripView: View {
                 Button("Reset link") { isPresentingResetConfirm = true }
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85))
+                    .contentShape(Rectangle())
+                    .frame(minHeight: 44)
+                    .disabled(busyShareLink)
+            } else if busyShareLink {
+                HStack(spacing: Spacing.sm) {
+                    ProgressView().tint(Self.onWhitePillInk)
+                    Text("Creating link\u{2026}")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Self.onWhitePillInk)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.sm)
+                .background(.white, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
             } else {
                 Button {
-                    Task { _ = await createShareLink() }
+                    Task {
+                        busyShareLink = true
+                        _ = await createShareLink()
+                        busyShareLink = false
+                    }
                 } label: {
                     Text("Create view link")
                         .font(Typo.body(weight: .semibold))
@@ -248,6 +344,7 @@ struct ShareTripView: View {
                         .background(.white, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .disabled(busyShareLink)
             }
 
             Text("Booking codes and notes never appear on this link.")
@@ -255,7 +352,12 @@ struct ShareTripView: View {
                 .foregroundStyle(.white.opacity(0.75))
         }
         .padding(Spacing.lg)
-        .background(CoverGradient.dusk, in: RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous)
+                .fill(CoverGradient.dusk)
+                .overlay { Self.shareLinkCardScrim }
+                .clipShape(RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous))
+        }
     }
 
     private func shareLinkRow(_ link: TripShareLink) -> some View {
@@ -275,6 +377,8 @@ struct ShareTripView: View {
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.xs)
                 .background(.white, in: Capsule())
+                .contentShape(Rectangle())
+                .frame(minWidth: 44, minHeight: 44)
 
             ShareLink(item: url) {
                 Image(systemName: "square.and.arrow.up")
@@ -292,18 +396,19 @@ struct ShareTripView: View {
 
     // MARK: - Invite section
 
-    @ViewBuilder
     private var inviteSection: some View {
         // Organizer-only, same RLS reality as the share link (`Invite`'s
         // doc comment) — a non-organizer would only ever see `[]` here, so
-        // the whole section (not just a muted message) is hidden for them.
-        if isOrganizer {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Invite to edit or view")
-                    .font(Typo.body(Typo.Size.caption, weight: .bold))
-                    .foregroundStyle(Palette.slate)
-                    .textCase(.uppercase)
+        // the buttons/rows below are hidden for them, mirroring
+        // `shareLinkCard`'s "muted message instead of vanishing" treatment
+        // rather than hiding the whole section.
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            Text("Invite to edit or view")
+                .font(Typo.body(Typo.Size.caption, weight: .bold))
+                .foregroundStyle(Palette.slate)
+                .textCase(.uppercase)
 
+            if isOrganizer {
                 HStack(spacing: Spacing.md) {
                     inviteButton(role: .companion, title: "Companion link", icon: "pencil", color: CategoryColor.activity.fg)
                     inviteButton(role: .viewer, title: "Viewer link", icon: "eye.fill", color: CategoryColor.flight.fg)
@@ -324,23 +429,54 @@ struct ShareTripView: View {
                     }
                     .padding(.top, Spacing.xs)
                 }
+            } else {
+                Text("Only the organizer can invite people.")
+                    .font(Typo.body(Typo.Size.caption, weight: .medium))
+                    .foregroundStyle(Palette.slate)
             }
         }
     }
 
+    /// The one active invite of `role`, if any — invites are role-scoped
+    /// **reusable** links (`claim_invite`, no single-use field), so tapping
+    /// the button again re-shares the existing link instead of minting a
+    /// duplicate. Per-recipient/named invites are intentionally NOT built
+    /// here (v1.5 scope); one reusable link per role is the correct v1 model.
+    private func activeInvite(role: TripRole) -> Invite? {
+        InvitePermissions.activeInvite(role: role, in: activeInvitesList)
+    }
+
     private func inviteButton(role: TripRole, title: String, icon: String, color: Color) -> some View {
-        Button {
-            Task { _ = await createInvite(role: role) }
+        let existing = activeInvite(role: role)
+        let isBusy = busyInviteRoles.contains(role)
+        return Button {
+            if let existing {
+                let url = DeepLink.inviteURL(token: existing.token)
+                shareSheetItems = ["Join our trip on Tripto: \(url.absoluteString)"]
+            } else {
+                Task {
+                    busyInviteRoles.insert(role)
+                    _ = await createInvite(role: role)
+                    busyInviteRoles.remove(role)
+                }
+            }
         } label: {
             VStack(spacing: 3) {
                 HStack(spacing: Spacing.xs) {
-                    Image(systemName: icon)
+                    Image(systemName: isBusy ? "hourglass" : icon)
                     Text(title).font(Typo.body(weight: .semibold))
                 }
-                Text(role.inviteGrant)
-                    .font(Typo.body(10))
-                    .opacity(0.85)
-                    .multilineTextAlignment(.center)
+                if isBusy {
+                    HStack(spacing: 4) {
+                        ProgressView().tint(color).scaleEffect(0.7)
+                        Text("Creating\u{2026}").font(Typo.body(10)).opacity(0.85)
+                    }
+                } else {
+                    Text(existing != nil ? "Share existing link" : role.inviteGrant)
+                        .font(Typo.body(10))
+                        .opacity(0.85)
+                        .multilineTextAlignment(.center)
+                }
             }
             .foregroundStyle(color)
             .frame(maxWidth: .infinity)
@@ -348,6 +484,7 @@ struct ShareTripView: View {
             .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(isBusy)
     }
 
     private func inviteRow(_ invite: Invite) -> some View {
@@ -365,8 +502,10 @@ struct ShareTripView: View {
                     .foregroundStyle(Palette.slate)
             }
             Spacer(minLength: Spacing.sm)
-            Button("Revoke", role: .destructive) { revokeInvite(invite) }
+            Button("Revoke", role: .destructive) { invitePendingRevoke = invite }
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .contentShape(Rectangle())
+                .frame(minWidth: 44, minHeight: 44)
         }
         .padding(.vertical, Spacing.sm)
     }
@@ -447,12 +586,31 @@ struct ShareTripView: View {
         }
     }
 
+    /// The role pill's visual content, shared between the interactive
+    /// (organizer-viewing-someone-else) and inert (everyone else, including
+    /// the organizer's own row) presentations — finding 5: `.disabled()`
+    /// alone doesn't dim this row's manually-styled `.plain`-button label,
+    /// so a non-organizer's pill read as tappable when it never was.
+    private func roleBadgeLabel(_ info: (icon: String, color: Color, label: String)) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: info.icon).font(.system(size: 11, weight: .semibold))
+            Text(info.label).font(Typo.body(Typo.Size.caption, weight: .bold))
+        }
+        .foregroundStyle(info.color)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.xs)
+        .background(info.color.opacity(0.15), in: Capsule())
+    }
+
     private func memberRow(_ member: TripMember) -> some View {
         let isSelf = member.userId == authManager.userId
         let name = displayName(for: member)
-        let colorName = profile(for: member)?.avatarColor ?? "slate"
+        let colorName = profile(for: member)?.avatarColor ?? profiles.first(where: { $0.id == member.userId })?.avatarColor ?? "slate"
         let info = roleBadge(for: member.role)
         let canManage = MemberRolePermissions.canChangeRole(actingRole: myRole, targetIsSelf: isSelf)
+        // Suppresses a redundant "You · you" once `displayName(for:)`'s own
+        // offline fallback has already resolved to the "You" placeholder.
+        let showsYouSuffix = isSelf && name != "You"
 
         return HStack(spacing: Spacing.md) {
             Circle()
@@ -465,44 +623,39 @@ struct ShareTripView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(name).font(Typo.body(weight: .semibold)).foregroundStyle(Palette.ink)
-                    if isSelf {
+                    if showsYouSuffix {
                         Text("\u{00B7} you").font(Typo.body(weight: .medium)).foregroundStyle(Palette.slate)
                     }
                 }
-                Text(member.role == .organizer ? "created the trip" : "joined")
+                Text(member.userId == tripCreatorId ? "created the trip" : "joined")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
             }
 
             Spacer(minLength: Spacing.sm)
 
-            Button {
-                memberPendingRoleChange = member
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: info.icon).font(.system(size: 11, weight: .semibold))
-                    Text(info.label).font(Typo.body(Typo.Size.caption, weight: .bold))
+            if canManage {
+                Button {
+                    memberPendingRoleChange = member
+                } label: {
+                    roleBadgeLabel(info)
+                        .contentShape(Rectangle())
+                        .frame(minHeight: 44)
                 }
-                .foregroundStyle(info.color)
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.xs)
-                .background(info.color.opacity(0.15), in: Capsule())
+                .buttonStyle(.plain)
+            } else {
+                roleBadgeLabel(info)
             }
-            .buttonStyle(.plain)
-            .disabled(!canManage)
         }
         .padding(.vertical, Spacing.sm)
-        .swipeActions(edge: .trailing) {
-            if canManage {
-                Button("Remove", role: .destructive) { memberPendingRemoval = member }
-            }
-        }
     }
 
-    /// Tappable (opens `TripProfileFormSheet` in edit mode) and swipeable
-    /// only for organizers — `trip_profiles_update`/`_delete` RLS is
-    /// organizer-only (confirmed live), unlike the insert path
-    /// `addProfileButton` gates more permissively.
+    /// Tappable (opens `TripProfileFormSheet` in edit mode) only for
+    /// organizers — `trip_profiles_update`/`_delete` RLS is organizer-only
+    /// (confirmed live), unlike the insert path `addProfileButton` gates
+    /// more permissively. Removal happens from the form sheet's own
+    /// "Remove from trip" button, not a swipe action (finding 1:
+    /// `.swipeActions` never fires on a `VStack` row inside a `ScrollView`).
     private func unlinkedProfileRow(_ profile: TripProfile) -> some View {
         let content = HStack(spacing: Spacing.md) {
             Circle()
@@ -530,9 +683,6 @@ struct ShareTripView: View {
             if isOrganizer {
                 Button { editingProfile = profile } label: { content }
                     .buttonStyle(.plain)
-                    .swipeActions(edge: .trailing) {
-                        Button("Remove", role: .destructive) { deleteProfile(profile) }
-                    }
             } else {
                 content
             }
@@ -630,30 +780,43 @@ struct ShareTripView: View {
             return link
         } catch {
             logDebug("createShareLink failed: \(error)")
-            toast = "Couldn\u{2019}t create a share link \u{2014} check your connection."
+            if let pg = error as? PostgrestError, pg.code == "42501" {
+                toast = "Couldn\u{2019}t create the link yet \u{2014} this trip is still syncing. Try again in a moment."
+            } else {
+                toast = "Couldn\u{2019}t create a share link \u{2014} check your connection."
+            }
             return nil
         }
     }
 
+    /// Creates the replacement link **before** revoking the old one, so
+    /// `activeShareLink` (`shareLinks.first { !revoked }`) never goes empty
+    /// mid-reset — the old create-then-revoke order let `shareLinkCard`
+    /// flash back to its "Create view link" empty state for a frame
+    /// (finding 2/3).
     private func resetShareLink() {
         Task {
-            if let existing = activeShareLink {
-                existing.revoked = true
-                try? modelContext.save()
-                let dto = existing.toDTO()
-                let id = existing.id
-                await syncEngine?.enqueueUpsert(table: .shareLinks, rowId: id, tripId: tripId, payload: dto)
-            }
+            busyShareLink = true
+            defer { busyShareLink = false }
+            let old = activeShareLink
             if await createShareLink() != nil {
+                if let old {
+                    old.revoked = true
+                    try? modelContext.save()
+                    let dto = old.toDTO()
+                    let id = old.id
+                    await syncEngine?.enqueueUpsert(table: .shareLinks, rowId: id, tripId: tripId, payload: dto)
+                }
                 toast = "Link reset"
             }
         }
     }
 
+    // UX audit finding 6: routes through the same `ClipboardFeedback` helper
+    // `BookingDetailView`'s code/ticket copy now uses, so both screens'
+    // tap-to-copy affordances share one haptic+toast pattern.
     private func copy(_ url: URL) {
-        UIPasteboard.general.string = url.absoluteString
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        toast = "Link copied"
+        toast = ClipboardFeedback.copy(url.absoluteString, label: "Link")
     }
 
     /// Creates an invite row of `role`, then (unless `presentShareSheet` is
@@ -681,7 +844,11 @@ struct ShareTripView: View {
             return invite
         } catch {
             logDebug("createInvite failed: \(error)")
-            toast = "Couldn\u{2019}t create an invite link \u{2014} check your connection."
+            if let pg = error as? PostgrestError, pg.code == "42501" {
+                toast = "Couldn\u{2019}t create the link yet \u{2014} this trip is still syncing. Try again in a moment."
+            } else {
+                toast = "Couldn\u{2019}t create an invite link \u{2014} check your connection."
+            }
             return nil
         }
     }
@@ -788,6 +955,12 @@ struct ShareTripView: View {
 private struct RolePickerSheet: View {
     let currentRole: TripRole
     let onSelect: (TripRole) -> Void
+    /// Finding 1: the only reachable path to removing a member — the old
+    /// `.swipeActions` on `memberRow` never fired (attached to a `VStack`
+    /// row inside a `ScrollView`, not a `List`). Defaults to `nil` so a
+    /// future non-removable presentation of this sheet doesn't have to
+    /// thread a callback through just to omit the row.
+    var onRemove: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -806,31 +979,42 @@ private struct RolePickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            List(options, id: \.role) { option in
-                Button {
-                    dismiss()
-                    onSelect(option.role)
-                } label: {
-                    HStack(spacing: Spacing.md) {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(option.color.opacity(0.15))
-                            .frame(width: 34, height: 34)
-                            .overlay { Image(systemName: option.icon).foregroundStyle(option.color) }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(option.role.rawValue.capitalized)
-                                .font(Typo.body(weight: .semibold))
-                                .foregroundStyle(Palette.ink)
-                            Text(option.description)
-                                .font(Typo.body(Typo.Size.caption))
-                                .foregroundStyle(Palette.slate)
-                        }
-                        Spacer(minLength: 0)
-                        if option.role == currentRole {
-                            Image(systemName: "checkmark").foregroundStyle(Palette.amber)
+            List {
+                ForEach(options, id: \.role) { option in
+                    Button {
+                        dismiss()
+                        onSelect(option.role)
+                    } label: {
+                        HStack(spacing: Spacing.md) {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(option.color.opacity(0.15))
+                                .frame(width: 34, height: 34)
+                                .overlay { Image(systemName: option.icon).foregroundStyle(option.color) }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.role.rawValue.capitalized)
+                                    .font(Typo.body(weight: .semibold))
+                                    .foregroundStyle(Palette.ink)
+                                Text(option.description)
+                                    .font(Typo.body(Typo.Size.caption))
+                                    .foregroundStyle(Palette.slate)
+                            }
+                            Spacer(minLength: 0)
+                            if option.role == currentRole {
+                                Image(systemName: "checkmark").foregroundStyle(Palette.amber)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+
+                if let onRemove {
+                    Button(role: .destructive) {
+                        dismiss()
+                        onRemove()
+                    } label: {
+                        Text("Remove from trip")
+                    }
+                }
             }
             .listStyle(.plain)
             .navigationTitle("Change role")

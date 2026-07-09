@@ -301,18 +301,41 @@ def gen_typo(tokens: dict) -> list[str]:
     lines.append("    /// screen titles (BUILD_PLAN.md §6.2). Weights available: "
                   + ", ".join(str(w) for w in families["display"]["weights"]) + ".")
     lines.append("    public static func display(_ size: CGFloat = Size.display, weight: Font.Weight = .semibold) -> Font {")
-    lines.append("        variableFont(familyKeyword: displayFamilyKeyword, size: size, weight: weight)")
+    lines.append("        Font(resolvedUIFont(familyKeyword: displayFamilyKeyword, size: size, weight: weight, textStyle: .title2))")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Body/UI type — Sofia Sans. Weights available: "
                   + ", ".join(str(w) for w in families["body"]["weights"]) + ".")
     lines.append("    public static func body(_ size: CGFloat = Size.body, weight: Font.Weight = .regular) -> Font {")
-    lines.append("        variableFont(familyKeyword: bodyFamilyKeyword, size: size, weight: weight)")
+    lines.append("        Font(resolvedUIFont(familyKeyword: bodyFamilyKeyword, size: size, weight: weight, textStyle: .body))")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Data/confirmation-code type — system monospace (BUILD_PLAN.md §6.2).")
     lines.append("    public static func mono(_ size: CGFloat = Size.body) -> Font {")
-    lines.append("        .system(size: size, design: .monospaced)")
+    lines.append("        Font(resolvedMonoUIFont(size: size))")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    // MARK: - Dynamic Type-aware resolution (internal; exercised by tests)")
+    lines.append("")
+    lines.append("    /// Builds the weight-dialed custom `UIFont`, then scales it for the active")
+    lines.append("    /// Dynamic Type setting via `UIFontMetrics(forTextStyle:)` so Fraunces and")
+    lines.append("    /// Sofia grow with the user's accessibility text size the way the system")
+    lines.append("    /// text styles do. `textStyle` picks the scaling curve (display uses a")
+    lines.append("    /// title style, body uses `.body`). `traits` is injectable for tests.")
+    lines.append("    static func resolvedUIFont(")
+    lines.append("        familyKeyword: String, size: CGFloat, weight: Font.Weight,")
+    lines.append("        textStyle: UIFont.TextStyle, compatibleWith traits: UITraitCollection? = nil")
+    lines.append("    ) -> UIFont {")
+    lines.append("        let base = variableBaseUIFont(familyKeyword: familyKeyword, size: size, weight: weight)")
+    lines.append("        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: base, compatibleWith: traits)")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Monospaced confirmation-code type, likewise Dynamic Type-aware.")
+    lines.append("    static func resolvedMonoUIFont(")
+    lines.append("        size: CGFloat, compatibleWith traits: UITraitCollection? = nil")
+    lines.append("    ) -> UIFont {")
+    lines.append("        let base = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)")
+    lines.append("        return UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traits)")
     lines.append("    }")
     lines += ["}", ""]
     return lines
@@ -333,19 +356,20 @@ def gen_variable_font_helper() -> list[str]:
         f"    static let weight = {WGHT_AXIS}",
         "}",
         "",
-        "private func variableFont(familyKeyword: String, size: CGFloat, weight: Font.Weight) -> Font {",
+        "private func variableBaseUIFont(familyKeyword: String, size: CGFloat, weight: Font.Weight) -> UIFont {",
         "    guard",
         "        let family = UIFont.familyNames.first(where: { $0.localizedCaseInsensitiveContains(familyKeyword) }),",
         "        let postscriptName = UIFont.fontNames(forFamilyName: family).first",
         "    else {",
-        "        // Font not registered (e.g. a plain SwiftUI preview target) — degrade",
-        "        // to the system font rather than crashing.",
-        "        return .system(size: size, weight: weight)",
+        "        // Font not registered (e.g. a plain SwiftUI preview or test target) —",
+        "        // degrade to the system font rather than crashing. Still scaled for",
+        "        // Dynamic Type by the caller.",
+        "        return UIFont.systemFont(ofSize: size, weight: weight.uiKitWeight)",
         "    }",
         "    let variationAttribute = UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String)",
         "    let descriptor = UIFontDescriptor(name: postscriptName, size: size)",
         "        .addingAttributes([variationAttribute: [VariableFontAxis.weight: weight.variableAxisValue]])",
-        "    return Font(UIFont(descriptor: descriptor, size: size))",
+        "    return UIFont(descriptor: descriptor, size: size)",
         "}",
         "",
         "private extension Font.Weight {",
@@ -362,6 +386,23 @@ def gen_variable_font_helper() -> list[str]:
         "        case .heavy: return 800",
         "        case .black: return 900",
         "        default: return 400",
+        "        }",
+        "    }",
+        "",
+        "    /// The `UIFont.Weight` counterpart, used only for the system-font fallback",
+        "    /// when the bundled variable face isn't registered.",
+        "    var uiKitWeight: UIFont.Weight {",
+        "        switch self {",
+        "        case .ultraLight: return .ultraLight",
+        "        case .thin: return .thin",
+        "        case .light: return .light",
+        "        case .regular: return .regular",
+        "        case .medium: return .medium",
+        "        case .semibold: return .semibold",
+        "        case .bold: return .bold",
+        "        case .heavy: return .heavy",
+        "        case .black: return .black",
+        "        default: return .regular",
         "        }",
         "    }",
         "}",

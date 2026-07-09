@@ -65,6 +65,50 @@ enum PersonFilter {
         return FilterSummary(assignedToPerson: assignedToPerson, shared: shared, hiddenForOthers: hidden)
     }
 
+    /// UX audit finding 5: the "Just mine" selection can go stale if the
+    /// filtered-to profile is deleted (locally, or pulled via realtime) —
+    /// `selectedProfileFilter` would keep pointing at a `TripProfile` that
+    /// no longer exists, silently hiding the rest of the trip. Returns
+    /// `selection` unchanged when it's already "Everyone" (`nil`) or still
+    /// present in `profileIds`; otherwise resets to `nil` so the full
+    /// timeline returns and the "Everyone" chip renders selected. A silent
+    /// reset is the honest minimal behavior here — the removed profile's
+    /// name is already gone by the time there'd be anything to toast about.
+    static func reconciledSelection(_ selection: UUID?, profileIds: Set<UUID>) -> UUID? {
+        guard let selection else { return nil }
+        return profileIds.contains(selection) ? selection : nil
+    }
+
+    /// UX audit finding 1: a day that's genuinely full for the *whole trip*
+    /// still read as "Free day" once "Just mine" filtered every one of that
+    /// day's items away — a lie by omission. This is `dayId` (matching
+    /// `TimelineDayModel.id`, i.e. `DayDate.stringValue`) -> how many rows
+    /// on that day are hidden by the current filter, so the view can say so
+    /// instead. `[:]` for "Everyone" (`selectedProfileId == nil`), since
+    /// nothing is hidden there.
+    ///
+    /// Reuses `ItineraryDayBucketing.sections` on just the *hidden* items so
+    /// multi-day hotel spans count correctly on every day they touch
+    /// (check-in, staying, and check-out days), not just the day the item's
+    /// own `startsAt` falls on. `sections` already drops `suggested`-status
+    /// items before bucketing, so these counts only cover rows that would
+    /// actually have rendered had the filter not hidden them.
+    static func hiddenDayCounts(
+        _ items: [ItineraryItem],
+        assignees: [ItemAssignee],
+        selectedProfileId: UUID?,
+        tripStart: DayDate
+    ) -> [String: Int] {
+        guard let selectedProfileId else { return [:] }
+        let visibleIds = Set(filteredItems(items, assignees: assignees, selectedProfileId: selectedProfileId).map(\.id))
+        let hidden = items.filter { !visibleIds.contains($0.id) }
+        guard !hidden.isEmpty else { return [:] }
+        let sections = ItineraryDayBucketing.sections(items: hidden, tripStart: tripStart)
+        return Dictionary(uniqueKeysWithValues: sections.map { section in
+            (section.day.stringValue, Set(section.rows.map { $0.item.id }).count)
+        })
+    }
+
     /// `itemId` -> the `profileId`s assigned to it, restricted to
     /// `itemIds` — the caller's own trip's item ids. `ItemAssignee` carries
     /// no `tripId` of its own (composite PK item_id+profile_id), so scoping
