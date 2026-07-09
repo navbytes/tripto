@@ -9,6 +9,9 @@
 //   - Recipient address doesn't resolve to a token -> reject cleanly
 //     (message.setReject). The sender learns immediately, same as a real
 //     mail server bouncing an unknown mailbox.
+//   - Message exceeds MAX_MESSAGE_BYTES -> reject cleanly, same reasoning --
+//     also cheap: it fires before postal-mime spends CPU/memory decoding a
+//     body this Worker doesn't keep either way.
 //   - MIME body fails to parse, or the POST to ingest-email fails/errors ->
 //     silently drop, log only a non-PII-bearing line. Cloudflare Email
 //     Workers have no retry-later primitive, and bouncing a legitimate
@@ -24,11 +27,24 @@ import type { Env } from "./types";
 import { extractImportToken } from "./token";
 import { buildIngestPayload, postIngest } from "./ingest";
 
+// Real booking confirmations are a few KB (ingest-email truncates the text
+// body to 20000 chars for the LLM call regardless -- see EI-1). This is a
+// generous ceiling meant only to reject the pathological case -- a huge
+// attachment-laden message -- before postal-mime spends Worker CPU/memory
+// decoding a body we're going to discard anyway. Well under Cloudflare's own
+// ~25MB inbound cap, so this fires first and with a clearer signal.
+const MAX_MESSAGE_BYTES = 10 * 1024 * 1024;
+
 export default {
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
     const token = extractImportToken(message.to);
     if (!token) {
       message.setReject("No such mailbox.");
+      return;
+    }
+
+    if (message.rawSize > MAX_MESSAGE_BYTES) {
+      message.setReject("Message too large.");
       return;
     }
 
