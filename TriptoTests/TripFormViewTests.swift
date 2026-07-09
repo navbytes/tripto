@@ -87,20 +87,25 @@ final class TripFormViewTests: XCTestCase {
 
     func testCTAGuidancePrefersSaveErrorOverEverythingElse() {
         let guidance = TripFormView.ctaGuidance(
-            saveError: "Couldn\u{2019}t save the trip. Try again.", title: "", countryCode: "PO", isEditing: false
+            saveError: "Couldn\u{2019}t save the trip. Try again.", title: "", countryCode: "PO", isEditing: false,
+            isSignedOutOnCreate: false
         )
         XCTAssertEqual(guidance?.message, "Couldn\u{2019}t save the trip. Try again.")
         XCTAssertEqual(guidance?.isError, true)
     }
 
     func testCTAGuidanceFallsBackToBlankTitleWhenNoSaveError() {
-        let guidance = TripFormView.ctaGuidance(saveError: nil, title: "  ", countryCode: "", isEditing: false)
+        let guidance = TripFormView.ctaGuidance(
+            saveError: nil, title: "  ", countryCode: "", isEditing: false, isSignedOutOnCreate: false
+        )
         XCTAssertEqual(guidance?.message, "Enter a trip name to create the trip.")
         XCTAssertEqual(guidance?.isError, false)
     }
 
     func testCTAGuidanceSurfacesUnacceptableCountryWhenTitleIsValid() {
-        let guidance = TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "PO", isEditing: true)
+        let guidance = TripFormView.ctaGuidance(
+            saveError: nil, title: "Lisbon", countryCode: "PO", isEditing: true, isSignedOutOnCreate: false
+        )
         XCTAssertEqual(
             guidance?.message,
             "This trip\u{2019}s saved country isn\u{2019}t recognized. Tap Country and pick one \u{2014} or " +
@@ -110,15 +115,33 @@ final class TripFormViewTests: XCTestCase {
     }
 
     func testCTAGuidanceNilWhenEverythingIsAcceptable() {
-        XCTAssertNil(TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "PT", isEditing: false))
-        XCTAssertNil(TripFormView.ctaGuidance(saveError: nil, title: "Lisbon", countryCode: "", isEditing: false))
+        XCTAssertNil(TripFormView.ctaGuidance(
+            saveError: nil, title: "Lisbon", countryCode: "PT", isEditing: false, isSignedOutOnCreate: false
+        ))
+        XCTAssertNil(TripFormView.ctaGuidance(
+            saveError: nil, title: "Lisbon", countryCode: "", isEditing: false, isSignedOutOnCreate: false
+        ))
     }
 
     func testCTAGuidancePrefersSaveErrorOverUnacceptableCountryWhenTitleIsValid() {
         let guidance = TripFormView.ctaGuidance(
-            saveError: "Couldn\u{2019}t save the trip. Try again.", title: "Lisbon", countryCode: "PO", isEditing: true
+            saveError: "Couldn\u{2019}t save the trip. Try again.", title: "Lisbon", countryCode: "PO", isEditing: true,
+            isSignedOutOnCreate: false
         )
         XCTAssertEqual(guidance?.message, "Couldn\u{2019}t save the trip. Try again.")
+        XCTAssertEqual(guidance?.isError, true)
+    }
+
+    // MARK: - UX audit cycle 2 finding 2: signed-out-on-create guidance takes
+    // priority over everything else, including a save error and an otherwise
+    // valid title/country — a signed-out create sheet can't be saved at all.
+
+    func testCTAGuidancePrefersSignedOutOnCreateOverSaveErrorAndValidFields() {
+        let guidance = TripFormView.ctaGuidance(
+            saveError: "Couldn\u{2019}t save the trip. Try again.", title: "Lisbon", countryCode: "PT",
+            isEditing: false, isSignedOutOnCreate: true
+        )
+        XCTAssertEqual(guidance?.message, "You\u{2019}re signed out. Sign back in to create a trip.")
         XCTAssertEqual(guidance?.isError, true)
     }
 

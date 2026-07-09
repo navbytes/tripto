@@ -97,13 +97,14 @@ struct TripFormView: View {
     /// should clear `endDateAutoAdjusted`.
     @State private var suppressEndDateResetOnce = false
 
-    /// UX audit finding 5: Trip name -> Destination keyboard flow, so a user
-    /// filling the form top-to-bottom never has to reach for the keyboard's
-    /// dismiss key or tap the next field by hand. Country dropped out of
-    /// this chain when it became a picker (finding 3) rather than a typed
-    /// field.
+    /// UX audit finding 5: lets the Trip name field's own return key dismiss
+    /// the keyboard directly, rather than requiring the keyboard's dismiss
+    /// key or a tap elsewhere. Country dropped out of the focus chain when
+    /// it became a picker (finding 3) rather than a typed field, and the
+    /// free-text Destination field it used to chain into is gone (UX audit
+    /// cycle 2 finding 1) — Title is now the only focusable field left.
     private enum FocusField {
-        case title, destination
+        case title
     }
     @FocusState private var focusedField: FocusField?
 
@@ -174,6 +175,25 @@ struct TripFormView: View {
         TripFormValidation.isValid(title: title, countryCode: countryCode, startDate: startDate, endDate: endDate)
     }
 
+    /// UX audit cycle 2 finding 2: create-mode's save already hard-stops on a
+    /// nil `userId` (`save()`'s `.signedOut` guard below), but that dead end
+    /// used to only surface after the user filled the whole form and tapped
+    /// Create. Checking it up front — the moment the sheet opens, before
+    /// anything's typed — lets the CTA guidance and disabled state name the
+    /// real blocker immediately instead of after the fact. Edit-mode is
+    /// unaffected: an edit save while signed out still writes locally (see
+    /// `SaveOutcome.savedLocallyWhileSignedOut`), so it isn't blocked here.
+    private var isSignedOutOnCreate: Bool {
+        !isEditing && authManager.userId == nil
+    }
+
+    /// Whether the CTA should actually be tappable — valid fields alone
+    /// aren't enough on a signed-out create sheet, since `save()` would just
+    /// hard-stop on the nil `userId` anyway.
+    private var canSubmit: Bool {
+        isValid && !isSignedOutOnCreate
+    }
+
     /// F4: whether any field has moved from what the sheet opened with.
     /// Dates are compared by calendar day so the create case's default
     /// 7-day range isn't spuriously "dirty."
@@ -221,7 +241,6 @@ struct TripFormView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
                         tripNameField
-                        destinationField
                         countryField
                         datesSection
                         tripTypeSection
@@ -268,8 +287,8 @@ struct TripFormView: View {
             // timing relative to the sheet's own presentation animation is
             // unreliable; a delayed explicit set is the dependable version
             // of the same intent. Guarded by `focusedField == nil` (finding
-            // 1) so a user who's already tapped into Destination within the
-            // delay isn't yanked back to Title.
+            // 1) so a user who's already tapped into Title within the
+            // delay isn't yanked back to it a second time.
             if case .create = mode {
                 try? await Task.sleep(for: .milliseconds(500))
                 if focusedField == nil {
@@ -287,20 +306,11 @@ struct TripFormView: View {
                 label: "Trip name", text: $title, placeholder: "Lisbon",
                 focusBinding: $focusedField, focusValue: .title
             )
-            .submitLabel(.next)
-            .onSubmit { focusedField = .destination }
+            .submitLabel(.done)
+            .onSubmit { focusedField = nil }
             Text("This is the big title on your trip card.")
                 .helperTextStyle()
         }
-    }
-
-    private var destinationField: some View {
-        FormTextField(
-            label: "Destination", text: $destination, placeholder: "Lisbon, Portugal",
-            focusBinding: $focusedField, focusValue: .destination
-        )
-        .submitLabel(.done)
-        .onSubmit { focusedField = nil }
     }
 
     private var countryField: some View {
@@ -376,11 +386,13 @@ struct TripFormView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             sectionHeading("Trip type")
             SegmentedControl(options: ["Family", "Friends", "Solo"], selection: tripTypeSelection)
-            Text(
-                "Sets this trip\u{2019}s defaults as features arrive \u{2014} friends\u{2019} trips will lean " +
-                "toward splitting costs, family trips toward tracking them."
-            )
-            .helperTextStyle()
+            // UX audit cycle 2 finding 3: no longer names "splitting costs"/
+            // "tracking them" — both are v2-scope features (BUILD_PLAN §5.5)
+            // that don't exist yet, and the old copy also didn't describe
+            // Solo. This wording is feature-agnostic and applies to all
+            // three options.
+            Text("A hint about who\u{2019}s traveling \u{2014} Tripto tailors its defaults as more features arrive.")
+                .helperTextStyle()
         }
     }
 
@@ -394,13 +406,19 @@ struct TripFormView: View {
                 Spacer()
             }
             .padding(.vertical, Spacing.xs)
+            // UX audit cycle 2 finding 4: every other section already has a
+            // helper line under its control — Cover was the one section
+            // missing it.
+            Text("Sets the cover on your trip card.")
+                .helperTextStyle()
         }
     }
 
     private var ctaSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             if let guidance = Self.ctaGuidance(
-                saveError: saveError?.message, title: title, countryCode: countryCode, isEditing: isEditing
+                saveError: saveError?.message, title: title, countryCode: countryCode, isEditing: isEditing,
+                isSignedOutOnCreate: isSignedOutOnCreate
             ) {
                 Text(guidance.message)
                     .font(Typo.body(Typo.Size.caption))
@@ -422,12 +440,19 @@ struct TripFormView: View {
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(Palette.onAmber)
                     .padding(.vertical, Spacing.md)
-                    .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-                    .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)
+                    .background(
+                        canSubmit ? Palette.amber : Palette.mist,
+                        in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                    )
+                    // UX audit cycle 2 finding 5: the amber glow only reads
+                    // as "tappable" when the CTA actually is — a disabled
+                    // button that still glows contradicts the adjacent "not
+                    // yet" guidance above it.
+                    .shadow(color: canSubmit ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
-            .disabled(!isValid)
-            .opacity(isValid ? 1 : 0.5)
+            .disabled(!canSubmit)
+            .opacity(canSubmit ? 1 : 0.5)
         }
     }
 
@@ -446,9 +471,17 @@ struct TripFormView: View {
     /// country is checked last so it doesn't upstage a simpler blank-title
     /// fix, but it still always renders — including when the country field
     /// itself is scrolled off-screen (§6.6).
+    ///
+    /// UX audit cycle 2 finding 2: `isSignedOutOnCreate` is checked first,
+    /// ahead of even `saveError` — a signed-out create sheet can't be saved
+    /// no matter what's typed, so that's the freshest, most specific problem
+    /// the moment the sheet opens, before a save has even been attempted.
     static func ctaGuidance(
-        saveError: String?, title: String, countryCode: String, isEditing: Bool
+        saveError: String?, title: String, countryCode: String, isEditing: Bool, isSignedOutOnCreate: Bool
     ) -> (message: String, isError: Bool)? {
+        if isSignedOutOnCreate {
+            return ("You\u{2019}re signed out. Sign back in to create a trip.", true)
+        }
         if let saveError { return (saveError, true) }
         if !TripFormValidation.isTitleValid(title) {
             return ("Enter a trip name to " + (isEditing ? "save changes." : "create the trip."), false)
