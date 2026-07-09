@@ -99,6 +99,7 @@ struct ItineraryTabView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            HeroScrollSentinel()
                             ForEach(models) { day in
                                 Section {
                                     if day.isFreeDay {
@@ -116,6 +117,7 @@ struct ItineraryTabView: View {
                         .padding(.horizontal, Spacing.lg)
                         .padding(.bottom, Fab.scrollClearance)
                     }
+                    .coordinateSpace(.named(HeroCollapse.scrollSpace))
                     .scrollDismissesKeyboard(.immediately)
                     .task {
                         // Finding F1: one-shot scroll to "today"'s section

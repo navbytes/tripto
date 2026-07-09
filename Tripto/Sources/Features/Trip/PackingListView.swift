@@ -159,6 +159,7 @@ struct PackingListView: View {
     private var list: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                HeroScrollSentinel()
                 ForEach(groups, id: \.key) { group in
                     VStack(alignment: .leading, spacing: Spacing.sm) {
                         HStack(spacing: Spacing.xs) {
@@ -184,6 +185,7 @@ struct PackingListView: View {
             // same band, so its last row deserves the same headroom.
             .padding(.bottom, Fab.scrollClearance)
         }
+        .coordinateSpace(.named(HeroCollapse.scrollSpace))
     }
 
     private func row(_ item: PackingItem) -> some View {

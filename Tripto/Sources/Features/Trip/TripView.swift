@@ -69,6 +69,15 @@ struct TripView: View {
     @State private var selectedProfileFilter: UUID?
     @Namespace private var tabUnderline
 
+    /// Per-tab raw scroll offset (`HeroScrollSentinel`'s reported value),
+    /// keyed so switching tabs doesn't blend one tab's scroll position into
+    /// another's hero collapse state.
+    @State private var heroScrollOffsets: [Tab: CGFloat] = [:]
+
+    private var heroProgress: Double {
+        HeroCollapse.progress(for: heroScrollOffsets[selectedTab] ?? 0, reduceMotion: reduceMotion)
+    }
+
     // M2 verify-drill autopilot only (see `WelcomeView`/`HomeView`'s
     // matching hooks) — a DEBUG-only alternate presentation path for
     // `BookingDetailView` so the screenshot pass can reach it with no GUI
@@ -240,7 +249,7 @@ struct TripView: View {
 
     private func content(for trip: Trip) -> some View {
         VStack(spacing: 0) {
-            hero(for: trip)
+            hero(for: trip, progress: heroProgress)
 
             if syncStatus.isOffline {
                 SyncBanner()
@@ -354,11 +363,12 @@ struct TripView: View {
             .opacity(selectedTab == tab ? 1 : 0)
             .allowsHitTesting(selectedTab == tab)
             .accessibilityHidden(selectedTab != tab)
+            .onPreferenceChange(HeroScrollOffsetKey.self) { heroScrollOffsets[tab] = $0 }
     }
 
     // MARK: - Hero (§4.2: gradient, glass back/share, city, meta)
 
-    private func hero(for trip: Trip) -> some View {
+    private func hero(for trip: Trip, progress p: Double) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 GlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
@@ -390,23 +400,38 @@ struct TripView: View {
             Spacer(minLength: Spacing.sm)
 
             Text(trip.title)
-                .font(Typo.display(Typo.Size.display))
+                .font(Typo.display(Typo.Size.display - 10 * p))
                 .foregroundStyle(.white)
-                .lineLimit(2)
+                .lineLimit(p > 0.5 ? 1 : 2)
                 .minimumScaleFactor(0.85)
                 .fixedSize(horizontal: false, vertical: true)
 
-            metaRow(for: trip)
-                .padding(.top, Spacing.xs)
+            // Finding 2 of the collapse risk review: at accessibility
+            // Dynamic Type sizes, skip the fixed-height collapse (it can
+            // clip multi-line meta text mid-fade) and just fade via opacity.
+            if dynamicTypeSize.isAccessibilitySize {
+                metaRow(for: trip)
+                    .padding(.top, Spacing.xs * (1 - p))
+                    .opacity(1 - min(1, p * 1.6))
+            } else {
+                metaRow(for: trip)
+                    .padding(.top, Spacing.xs * (1 - p))
+                    .opacity(1 - min(1, p * 1.6))
+                    .frame(height: 22 * (1 - p), alignment: .top)
+                    .clipped()
+            }
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.top, Spacing.xs)
-        .padding(.bottom, Spacing.lg)
+        .padding(.bottom, Spacing.sm + (Spacing.lg - Spacing.sm) * (1 - p))
         // Finding 2: `minHeight` (not a fixed `height`) so the hero grows
         // instead of clipping when Dynamic Type scales the title/meta —
         // the gradient background and scrim below are `.background`/
-        // `.overlay`, so they scale with it for free.
-        .frame(minHeight: 150, alignment: .bottom)
+        // `.overlay`, so they scale with it for free. The `150 - 54 * p`
+        // term is the scroll-collapse range added on top of that: fully
+        // expanded at `p == 0`, compact (96pt floor — clears the notch +
+        // 44pt button row) at `p == 1`.
+        .frame(minHeight: 150 - 54 * p, alignment: .bottom)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             CoverGradient.from(key: trip.coverGradient)

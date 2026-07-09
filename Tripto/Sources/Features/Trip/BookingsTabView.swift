@@ -33,6 +33,7 @@ struct BookingsTabView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                        HeroScrollSentinel()
                         ForEach(groups, id: \.category) { group in
                             VStack(alignment: .leading, spacing: Spacing.sm) {
                                 Text(group.category.displayName.uppercased())
@@ -53,6 +54,7 @@ struct BookingsTabView: View {
                     .padding(.vertical, Spacing.lg)
                     .padding(.bottom, Fab.scrollClearance)
                 }
+                .coordinateSpace(.named(HeroCollapse.scrollSpace))
             }
         }
         .background(Palette.paper)
