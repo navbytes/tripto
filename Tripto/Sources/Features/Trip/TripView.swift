@@ -308,7 +308,14 @@ struct TripView: View {
                         BookingsTabView(
                             items: items,
                             onAdd: canAddItems ? { isPresentingAdd = true } : nil,
-                            isAwaitingFirstSync: awaitingFirstTripPull
+                            isAwaitingFirstSync: awaitingFirstTripPull,
+                            pendingRowIds: syncStatus.pendingRowIds,
+                            isOffline: syncStatus.isOffline,
+                            didLoadFail: syncStatus.tripPullFailures.contains(trip.id),
+                            onRetryLoad: {
+                                let id = trip.id
+                                Task { await syncEngine?.schedulePullTrip(id) }
+                            }
                         )
                     }
                     tabContent(.packing) {
