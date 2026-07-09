@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tripto-email",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-07",
+  // This Worker has no public HTTP surface at all -- it only exports an
+  // `email()` handler, invoked by Cloudflare Email Routing (dashboard step,
+  // see README). Disabling the default workers.dev URL means there is
+  // nothing to probe/hit directly; there's no `routes` block either, unlike
+  // share-worker, because HTTP routes aren't how mail reaches a Worker.
+  "workers_dev": false,
+  "vars": {
+    // Public: same pattern as share-worker's SUPABASE_URL var. The secret
+    // that actually authorizes calls to it (EMAIL_INGEST_SHARED_SECRET)
+    // is set separately below via `wrangler secret put`.
+    "INGEST_EMAIL_URL": "https://qgtveaqukvbtyunupzhn.supabase.co/functions/v1/ingest-email"
+  }
+  // No `send_email` binding: that binding is only for *composing/sending* an
+  // email from a Worker (forward/reply/new message). This Worker never does
+  // that -- it only receives inbound mail and relays the parsed fields to
+  // ingest-email over a plain `fetch`, so no email-sending binding is needed.
+  //
+  // EMAIL_INGEST_SHARED_SECRET is a secret, not a var -- set it with:
+  //   wrangler secret put EMAIL_INGEST_SHARED_SECRET
+  // (see README's "Owner setup" for the full sequence, including why this
+  // must be the exact same value already configured on the Supabase side).
+}

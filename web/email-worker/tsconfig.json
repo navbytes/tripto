@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2022"],
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"],
+  // *.test.ts run under plain `node --test`, not wrangler/esbuild, and need
+  // Node's ambient types (node:test, node:assert/...) rather than the
+  // Workers-runtime globals this config provides -- which collide (both
+  // declare `fetch`/`Response`/...). Checked separately via
+  // tsconfig.test.json / `npm run typecheck` (runs both).
+  "exclude": ["src/**/*.test.ts"]
+}
