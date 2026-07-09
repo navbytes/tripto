@@ -18,6 +18,10 @@ struct HomeView: View {
     @Environment(AppRouter.self) private var appRouter
 
     @State private var selectedTab = "Upcoming"
+    /// Guards `chooseInitialTabIfNeeded()` to a one-time redirect (finding
+    /// 1) — after this fires once, the user's own tab taps are never
+    /// overridden.
+    @State private var didChooseInitialTab = false
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
     @State private var tripPendingDeletion: Trip?
@@ -190,6 +194,10 @@ struct HomeView: View {
                 Button("Delete trip", role: .destructive) {
                     if let trip = tripPendingDeletion { delete(trip) }
                     tripPendingDeletion = nil
+                    // Finding 2 (partial): closes the feedback loop on a
+                    // hard local delete — the row just vanished from the
+                    // list with no confirmation it actually happened.
+                    toast = "Trip deleted"
                 }
                 Button("Cancel", role: .cancel) { tripPendingDeletion = nil }
             } message: {
@@ -203,6 +211,14 @@ struct HomeView: View {
                 // out, now that Home mounting proves a session exists.
                 await appRouter.claimPendingInviteIfNeeded()
                 await applyUITestAutopilotIfNeeded()
+            }
+            // Covers a warm SwiftData cache where `@Query` is already
+            // populated on first render (finding 1).
+            .onAppear { chooseInitialTabIfNeeded() }
+            // Covers async `@Query` hydration where `trips` populates after
+            // first render, so `.onAppear` alone would've seen `isEmpty`.
+            .onChange(of: trips.isEmpty) { _, isEmpty in
+                if !isEmpty { chooseInitialTabIfNeeded() }
             }
             .onChange(of: appRouter.tripToOpen) { _, tripId in
                 guard let tripId else { return }
@@ -304,14 +320,37 @@ struct HomeView: View {
         }
     }
 
+    /// One-time initial-tab redirect (finding 1) — a user whose trips are
+    /// all in the past would otherwise land on the default "Upcoming" tab
+    /// and see an empty screen. `didChooseInitialTab` gates this to fire
+    /// once per session so it never overrides a manual tab switch
+    /// afterward. `HomeInitialTab.resolve` is the only place the decision
+    /// lives, so the regression tests on it are the safety net.
+    private func chooseInitialTabIfNeeded() {
+        guard !didChooseInitialTab && !trips.isEmpty else { return }
+        didChooseInitialTab = true
+        selectedTab = HomeInitialTab.resolve(hasUpcoming: !upcomingTrips.isEmpty, hasPast: !pastTrips.isEmpty)
+    }
+
     // MARK: - Header
 
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(greeting)
-                    .font(Typo.body(weight: .medium))
-                    .foregroundStyle(Palette.slate)
+                if myDisplayName == nil {
+                    // Finding 4: no profile has hydrated yet — a redacted
+                    // placeholder keeps the layout height stable without
+                    // asserting a fake "Traveler" identity that reads as
+                    // wrong once the real name lands.
+                    Text("Good morning, Traveler")
+                        .font(Typo.body(weight: .medium))
+                        .foregroundStyle(Palette.slate)
+                        .redacted(reason: .placeholder)
+                } else {
+                    Text(greeting)
+                        .font(Typo.body(weight: .medium))
+                        .foregroundStyle(Palette.slate)
+                }
                 Text("Your trips")
                     .font(Typo.display())
                     .foregroundStyle(Palette.ink)
@@ -326,9 +365,16 @@ struct HomeView: View {
                     .fill(Palette.indigo)
                     .frame(width: 42, height: 42)
                     .overlay {
-                        Text(initials(from: myProfile?.displayName ?? "Traveler"))
-                            .font(Typo.display(16))
-                            .foregroundStyle(.white)
+                        if let myDisplayName {
+                            Text(initials(from: myDisplayName))
+                                .font(Typo.display(16))
+                                .foregroundStyle(.white)
+                        } else {
+                            // Finding 4: no bogus "T" initial before the
+                            // profile hydrates.
+                            Image(systemName: "person.fill")
+                                .foregroundStyle(.white)
+                        }
                     }
                     // 44pt hit target (§6.5) around the 42pt visual circle —
                     // finding 8.
@@ -347,13 +393,20 @@ struct HomeView: View {
         case 12..<17: period = "afternoon"
         default: period = "evening"
         }
-        let firstName = firstName(from: myProfile?.displayName ?? "Traveler")
-        return "Good \(period), \(firstName)"
+        guard let myDisplayName else { return "Good \(period)" }
+        return "Good \(period), \(firstName(from: myDisplayName))"
     }
 
     private var myProfile: Profile? {
         guard let userId = authManager.userId else { return nil }
         return profiles.first { $0.id == userId }
+    }
+
+    /// Finding 4: `nil` until the signed-in user's own profile row has
+    /// hydrated locally — driving both the greeting and the avatar so
+    /// neither renders a fake "Traveler" identity in the meantime.
+    private var myDisplayName: String? {
+        myProfile?.displayName
     }
 
     // MARK: - List
