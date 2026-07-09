@@ -10,11 +10,25 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
+    @Environment(SyncStatus.self) private var syncStatus
+    @Environment(\.dismiss) private var dismiss
 
     @State private var displayName = ""
     @State private var toast: String?
     @State private var isPresentingDeleteConfirm = false
     @State private var isDeletingAccount = false
+    /// UX audit finding 1: sign-out now goes through a confirmation instead
+    /// of firing on the first tap — see `signOutMessage` for why it also
+    /// names any not-yet-synced changes that would be lost.
+    @State private var isPresentingSignOutConfirm = false
+    /// F2: surfaced when `saveDisplayName()`'s `modelContext.save()` throws,
+    /// mirroring `TripFormView`'s `saveError` — the old `try?` silently
+    /// claimed success ("Name updated") even on a failed write.
+    @State private var nameSaveError: String?
+    /// F3: gates the "Discard changes?" dialog on the custom back button
+    /// below, since this screen is pushed (not sheet-presented) and so can't
+    /// use `interactiveDismissDisabled`/`SheetDismissAttemptObserver`.
+    @State private var showDiscardConfirm = false
 
     private var myProfile: Profile? {
         guard let userId = authManager.userId else { return nil }
@@ -40,11 +54,19 @@ struct SettingsView: View {
                         }
                     TextField("Display name", text: $displayName)
                         .font(Typo.body(weight: .semibold))
+                        .disabled(isDeletingAccount)
                 }
                 .padding(.vertical, Spacing.xs)
 
                 if isNameChanged {
                     Button("Save changes") { saveDisplayName() }
+                        .disabled(isDeletingAccount)
+                }
+
+                if let nameSaveError {
+                    Text(nameSaveError)
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.rose)
                 }
             }
 
@@ -54,9 +76,14 @@ struct SettingsView: View {
                 } else {
                     LabeledContent("Account", value: "Signed in")
                 }
-                Button("Sign out", role: .destructive) {
-                    Task { await authManager.signOut() }
+                // UX audit finding 6: no longer `.destructive` — sign-out is
+                // a reversible session end, not data loss, so it shouldn't
+                // read identically to "Delete account" below. Finding 1:
+                // routes through a confirmation instead of firing instantly.
+                Button("Sign out") {
+                    isPresentingSignOutConfirm = true
                 }
+                .disabled(isDeletingAccount)
             }
 
             Section {
@@ -93,6 +120,22 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        // F3: this screen is pushed onto the shared `NavigationStack`
+        // (`SettingsRoute`), not sheet-presented, so the default back
+        // button is replaced with a custom one below that can intercept a
+        // dirty display-name edit before it's silently discarded.
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(action: backTapped) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.backward")
+                        Text("Back")
+                    }
+                }
+                .disabled(isDeletingAccount)
+            }
+        }
         .toastOverlay($toast)
         .onAppear {
             if displayName.isEmpty {
@@ -107,6 +150,13 @@ struct SettingsView: View {
         .onChange(of: myProfile?.displayName) { _, newValue in
             if displayName.isEmpty, let newValue {
                 displayName = newValue
+            }
+        }
+        // F2: clears a stale write-failure caption the moment the user
+        // edits the field again, same as `TripFormView`'s `isClearedByEditing`.
+        .onChange(of: displayName) { _, _ in
+            if nameSaveError != nil {
+                nameSaveError = nil
             }
         }
         .confirmationDialog(
@@ -124,6 +174,48 @@ struct SettingsView: View {
                     + "Trips you were invited to will lose you as a member. This can\u{2019}t be undone."
             )
         }
+        .confirmationDialog(
+            "Sign out?",
+            isPresented: $isPresentingSignOutConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Sign out", role: .destructive) {
+                Task { await authManager.signOut() }
+            }
+            Button("Keep me signed in", role: .cancel) {}
+        } message: {
+            Text(signOutMessage)
+        }
+        .confirmationDialog(
+            "Discard changes?",
+            isPresented: $showDiscardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Keep editing", role: .cancel) {}
+        }
+    }
+
+    private func backTapped() {
+        if isNameChanged {
+            showDiscardConfirm = true
+        } else {
+            dismiss()
+        }
+    }
+
+    /// F1: names the actual consequence of signing out — restores the
+    /// protection commit e8f2722 added for permanently-failed syncs
+    /// (`syncIssues`), which an unconfirmed sign-out used to drop silently
+    /// alongside any still-queued (`pendingCount`) changes.
+    private var signOutMessage: String {
+        let unsynced = syncStatus.pendingCount + syncStatus.syncIssues.count
+        guard unsynced > 0 else {
+            return "You\u{2019}ll need to sign in again to see your trips on this device."
+        }
+        let changeWord = unsynced == 1 ? "change" : "changes"
+        return "You have \(unsynced) \(changeWord) that haven\u{2019}t synced yet. Signing out will permanently " +
+            "discard them \u{2014} sign in again first to let them sync."
     }
 
     private func initials(from name: String) -> String {
@@ -148,9 +240,20 @@ struct SettingsView: View {
         guard let profile = myProfile else { return }
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != profile.displayName else { return }
+        nameSaveError = nil
         profile.displayName = trimmed
         profile.updatedAt = .now
-        try? modelContext.save()
+        // F2: mirrors `TripFormView`'s F6 do/catch — a failed write used to
+        // still claim "Name updated" via a silent `try?`. Signed-out edits
+        // need no extra guard here: `myProfile` is keyed on
+        // `authManager.userId`, so it's already nil (and the guard above
+        // already returned) the moment the user signs out.
+        do {
+            try modelContext.save()
+        } catch {
+            nameSaveError = "Couldn\u{2019}t save your name. Try again."
+            return
+        }
         let dto = profile.toDTO()
         let id = profile.id
         Task { await syncEngine?.enqueueUpsert(table: .profiles, rowId: id, tripId: nil, payload: dto) }
@@ -176,7 +279,14 @@ struct SettingsView: View {
             // down this whole pushed screen along with it.
         } catch {
             isDeletingAccount = false
-            toast = "Couldn\u{2019}t delete your account \u{2014} try again."
+            // F5: names the actual cause instead of one generic retry
+            // message for every failure (§6.6) — a dropped connection and a
+            // server-side failure call for different next steps.
+            if error is URLError {
+                toast = "You\u{2019}re offline \u{2014} reconnect and try deleting again."
+            } else {
+                toast = "Something went wrong on our end deleting your account. Try again in a moment."
+            }
         }
     }
 }
