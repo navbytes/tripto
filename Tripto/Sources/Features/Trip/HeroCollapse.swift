@@ -258,6 +258,19 @@ struct TripHeroView: View {
         .padding(.horizontal, Spacing.lg)
         .padding(.top, Spacing.xs)
         .padding(.bottom, Spacing.sm + (Spacing.lg - Spacing.sm) * (1 - p))
+        // Without this, the top `Spacer(minLength:)` reports a flexible
+        // (`.infinity`) max height, making this whole VStack greedy — it
+        // then competes with its sibling tab-content ZStack in
+        // `TripView.content(for:)` for all available vertical space instead
+        // of sizing to its own content, so the `.frame(minHeight:)` floor
+        // below never actually caps it. `fixedSize(vertical:)` collapses
+        // the VStack to its ideal/intrinsic height first (the Spacer down
+        // to its `minLength`, not `.infinity`), and the `minHeight` below
+        // then floors *that* into the collapse range as intended. Ideal
+        // height still grows with Dynamic Type (the title/meta measure
+        // taller), so this stays compatible with the accessibility-size
+        // handling above.
+        .fixedSize(horizontal: false, vertical: true)
         // Finding 2: `minHeight` (not a fixed `height`) so the hero grows
         // instead of clipping when Dynamic Type scales the title/meta —
         // the gradient background and scrim below are `.background`/
