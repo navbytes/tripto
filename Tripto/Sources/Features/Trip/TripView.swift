@@ -290,6 +290,7 @@ struct TripView: View {
                             myUserId: authManager.userId,
                             namesById: profileNames,
                             canEdit: canAddItems,
+                            heroScrollModel: heroScrollModel,
                             assigneesByItem: assigneesByItem,
                             filteredPersonName: selectedProfileFirstName,
                             toast: $toast,
@@ -307,6 +308,7 @@ struct TripView: View {
                     tabContent(.bookings) {
                         BookingsTabView(
                             items: items,
+                            heroScrollModel: heroScrollModel,
                             onAdd: canAddItems ? { isPresentingAdd = true } : nil,
                             isAwaitingFirstSync: awaitingFirstTripPull,
                             pendingRowIds: syncStatus.pendingRowIds,
@@ -322,6 +324,7 @@ struct TripView: View {
                         PackingListView(
                             tripId: trip.id,
                             tripCreatedBy: trip.createdBy,
+                            heroScrollModel: heroScrollModel,
                             isAwaitingFirstSync: awaitingFirstTripPull
                         )
                     }
@@ -378,19 +381,19 @@ struct TripView: View {
     /// `.opacity` (not a conditional `if`) is what keeps the hidden views'
     /// state alive; `.allowsHitTesting`/`.accessibilityHidden` make sure a
     /// hidden tab's fields and buttons can't be focused or tapped while
-    /// another tab is shown.
+    /// another tab is shown. Each tab view writes its own scroll offset
+    /// straight into `heroScrollModel` (passed to it directly, an
+    /// `@Observable` reference type — `TripView.body` never reads
+    /// `heroScrollModel.offsets` itself, so that per-scroll-frame write
+    /// invalidates only `TripHeroView`, the one view that reads it, not
+    /// this whole tab stack) rather than this wrapper relaying a
+    /// `PreferenceKey` value, per `.heroScrollTracking(tab:model:)`'s doc
+    /// comment (HeroCollapse.swift) on why that relay proved unreliable.
     private func tabContent<Content: View>(_ tab: Tab, @ViewBuilder content: () -> Content) -> some View {
         content()
             .opacity(selectedTab == tab ? 1 : 0)
             .allowsHitTesting(selectedTab == tab)
             .accessibilityHidden(selectedTab != tab)
-            // Writes into `heroScrollModel` (an `@Observable` reference
-            // type), not a `TripView`-owned `@State` — `TripView.body`
-            // never reads `heroScrollModel.offsets` itself, so this
-            // per-scroll-frame write invalidates only `TripHeroView` (the
-            // one view that reads it), not this whole tab stack. See
-            // `HeroScrollModel`'s doc comment (HeroCollapse.swift).
-            .onPreferenceChange(HeroScrollOffsetKey.self) { heroScrollModel.offsets[tab] = $0 }
     }
 
     // MARK: - Sub-tabs (Itinerary · Bookings · Packing — Map/$ Split hidden, §9.4)

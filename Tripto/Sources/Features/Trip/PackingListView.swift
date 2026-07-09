@@ -16,6 +16,12 @@ struct PackingListView: View {
     /// satisfy RLS once they sign back in, same story as
     /// `AddItemSheet.tripCreatedBy`.
     let tripCreatedBy: UUID
+    /// Backs the hero's scroll-driven collapse — this tab writes its own
+    /// scroll offset directly into it via `.heroScrollTracking(tab:model:)`.
+    /// See that modifier's doc comment (HeroCollapse.swift) for why it's a
+    /// direct write rather than the `PreferenceKey` bubble-up this view used
+    /// before.
+    let heroScrollModel: HeroScrollModel
     /// Finding 2: true while this trip's first pull this session hasn't
     /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
     var isAwaitingFirstSync: Bool = false
@@ -41,9 +47,10 @@ struct PackingListView: View {
     /// list is done.
     @State private var hidePacked = false
 
-    init(tripId: UUID, tripCreatedBy: UUID, isAwaitingFirstSync: Bool = false) {
+    init(tripId: UUID, tripCreatedBy: UUID, heroScrollModel: HeroScrollModel, isAwaitingFirstSync: Bool = false) {
         self.tripId = tripId
         self.tripCreatedBy = tripCreatedBy
+        self.heroScrollModel = heroScrollModel
         self.isAwaitingFirstSync = isAwaitingFirstSync
         _packingItems = Query(filter: #Predicate<PackingItem> { $0.tripId == tripId })
         _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
@@ -82,6 +89,10 @@ struct PackingListView: View {
         Group {
             if packingItems.isEmpty {
                 emptyState
+                    // See `ItineraryTabView`'s matching `.onAppear` for why
+                    // an empty tab must explicitly reset its offset rather
+                    // than leave a stale one from before it became empty.
+                    .onAppear { heroScrollModel.offsets[.packing] = 0 }
             } else {
                 VStack(spacing: 0) {
                     progressHeader
@@ -214,7 +225,6 @@ struct PackingListView: View {
     private var list: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                HeroScrollSentinel()
                 ForEach(groups, id: \.key) { group in
                     VStack(alignment: .leading, spacing: Spacing.sm) {
                         HStack(spacing: Spacing.xs) {
@@ -247,13 +257,14 @@ struct PackingListView: View {
                     }
                 }
             }
+            .heroScrollTracking(tab: .packing, model: heroScrollModel)
             .padding(Spacing.xl)
             // UX audit finding 4: matches the FAB clearance the itinerary/
             // bookings scroll views use — this tab's own FAB sits in the
             // same band, so its last row deserves the same headroom.
             .padding(.bottom, Fab.scrollClearance)
         }
-        .coordinateSpace(.named(HeroCollapse.scrollSpace))
+        .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .packing)))
     }
 
     // MARK: - Empty state (§6.6: invitation copy, not blank)

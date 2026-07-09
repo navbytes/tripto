@@ -15,6 +15,12 @@ struct ItineraryTabView: View {
     let myUserId: UUID?
     let namesById: [UUID: String]
     let canEdit: Bool
+    /// Backs the hero's scroll-driven collapse — this tab writes its own
+    /// scroll offset directly into it via `.heroScrollTracking(tab:model:)`.
+    /// See that modifier's doc comment (HeroCollapse.swift) for why it's a
+    /// direct write rather than the `PreferenceKey` bubble-up this view used
+    /// before.
+    let heroScrollModel: HeroScrollModel
     /// "Just mine" assignee clusters (BUILD_PLAN.md §5.4), already resolved
     /// to display-ready `AvatarStack.Person`s by `TripView` — this view
     /// stays a pure renderer and never touches `ItemAssignee`/`TripProfile`
@@ -113,11 +119,16 @@ struct ItineraryTabView: View {
         return Group {
             if models.isEmpty {
                 emptyState
+                    // Finding: an empty tab has no scroll content to measure
+                    // — reset explicitly rather than leaving a stale nonzero
+                    // offset from before the tab became empty (e.g. a filter
+                    // clearing every item), which would otherwise leave the
+                    // hero collapsed over nothing to scroll.
+                    .onAppear { heroScrollModel.offsets[.itinerary] = 0 }
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            HeroScrollSentinel()
                             ForEach(models) { day in
                                 Section {
                                     if day.isFreeDay {
@@ -138,10 +149,11 @@ struct ItineraryTabView: View {
                                 }
                             }
                         }
+                        .heroScrollTracking(tab: .itinerary, model: heroScrollModel)
                         .padding(.horizontal, Spacing.lg)
                         .padding(.bottom, Fab.scrollClearance)
                     }
-                    .coordinateSpace(.named(HeroCollapse.scrollSpace))
+                    .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .itinerary)))
                     .scrollDismissesKeyboard(.immediately)
                     // UX audit finding 2: a quiet "jump to today" pill,
                     // shown whenever today falls inside the trip's date

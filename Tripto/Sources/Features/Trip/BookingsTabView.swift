@@ -7,6 +7,12 @@ import SwiftUI
 /// tab's cards do, via the shared `ItemRoute` navigation destination.
 struct BookingsTabView: View {
     let items: [ItineraryItem]
+    /// Backs the hero's scroll-driven collapse — this tab writes its own
+    /// scroll offset directly into it via `.heroScrollTracking(tab:model:)`.
+    /// See that modifier's doc comment (HeroCollapse.swift) for why it's a
+    /// direct write rather than the `PreferenceKey` bubble-up this view used
+    /// before.
+    let heroScrollModel: HeroScrollModel
     /// Invokes `TripView`'s `AddItemSheet` presentation (finding 6) — `nil`
     /// for viewers, who get read-only copy instead of a routing affordance.
     /// Backs the empty state's CTA; `TripView` also shows the shared FAB on
@@ -66,10 +72,13 @@ struct BookingsTabView: View {
         Group {
             if groups.isEmpty {
                 emptyState
+                    // See `ItineraryTabView`'s matching `.onAppear` for why
+                    // an empty tab must explicitly reset its offset rather
+                    // than leave a stale one from before it became empty.
+                    .onAppear { heroScrollModel.offsets[.bookings] = 0 }
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                        HeroScrollSentinel()
                         ForEach(groups, id: \.category) { group in
                             VStack(alignment: .leading, spacing: Spacing.sm) {
                                 Text(group.category.displayName.uppercased())
@@ -92,10 +101,11 @@ struct BookingsTabView: View {
                             }
                         }
                     }
+                    .heroScrollTracking(tab: .bookings, model: heroScrollModel)
                     .padding(.vertical, Spacing.lg)
                     .padding(.bottom, Fab.scrollClearance)
                 }
-                .coordinateSpace(.named(HeroCollapse.scrollSpace))
+                .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .bookings)))
             }
         }
         .background(Palette.paper)

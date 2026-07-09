@@ -5,8 +5,20 @@ enum HeroCollapse {
     static let collapseDistance: CGFloat = 120
     /// Reduced-motion snap point: past this, jump straight to compact.
     static let snapThreshold: CGFloat = 24
-    /// Shared coordinate-space name every tab's ScrollView registers.
-    static let scrollSpace = "tripHeroScroll"
+    /// Per-tab coordinate-space name. Each tab's ScrollView must register a
+    /// *distinct* name here — `TripView` deliberately keeps all three tabs'
+    /// ScrollViews mounted simultaneously (`.opacity`-based tab switching,
+    /// so each tab keeps its own scroll position across switches; see
+    /// `TripView.tabContent`'s doc comment). A single shared literal name
+    /// across three concurrently-mounted `ScrollView`s made SwiftUI's named
+    /// coordinate-space resolution ambiguous, so every tab's
+    /// `GeometryReader.frame(in:)` resolved against the wrong ancestor and
+    /// `HeroScrollModel.offsets` stayed pinned at `0` even while scrolling —
+    /// root-caused via live instrumentation. Keying the name by tab gives
+    /// each ScrollView its own unambiguous space.
+    static func scrollSpace(for tab: TripView.Tab) -> String {
+        "tripHeroScroll-\(tab.rawValue)"
+    }
 
     /// offset: positive = content scrolled up (hero should collapse). 0/negative
     /// (rubber-band at top) = fully expanded. Result clamped 0...1.
@@ -17,17 +29,15 @@ enum HeroCollapse {
     }
 }
 
-/// Set by each tab's ScrollView sentinel; read per-tab in TripView.tabContent.
-struct HeroScrollOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 /// Set by `TripHeroView`'s non-accessibility meta row; read there to size its
 /// own collapse frame off the row's true natural (fully-expanded) height
 /// instead of a stale hardcoded guess — see that call site's doc comment.
+/// (Scroll-offset tracking itself no longer uses a `PreferenceKey` — see
+/// `heroScrollTracking(tab:model:)`'s doc comment — but this one is
+/// unrelated: a single, non-scroll-driven measurement inside `TripHeroView`
+/// itself, where `PreferenceKey`'s usual "measure a descendant, read it in
+/// an ancestor one hop up" shape is exactly what's needed and isn't affected
+/// by the propagation gap described there.)
 struct HeroMetaHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -35,38 +45,84 @@ struct HeroMetaHeightKey: PreferenceKey {
     }
 }
 
-/// Zero-height sentinel placed as the FIRST child inside a tab's scroll content.
-/// Reports how far that content has scrolled up, in the shared coordinate space.
-struct HeroScrollSentinel: View {
-    var body: some View {
-        GeometryReader { geo in
-            Color.clear.preference(
-                key: HeroScrollOffsetKey.self,
-                value: -geo.frame(in: .named(HeroCollapse.scrollSpace)).minY
+extension View {
+    /// Attaches hero-scroll-offset tracking to a tab's scroll content (its
+    /// `LazyVStack`), writing straight into `model.offsets[tab]` on every
+    /// layout pass. Deliberately *not* built on `PreferenceKey`/
+    /// `.onPreferenceChange` (the standard recipe, and this file's own
+    /// earlier approach) — live instrumentation root-caused a real gap in
+    /// how this SwiftUI/OS combination delivers preference changes: a
+    /// `.preference(key:value:)` set here was measured (via raw
+    /// `GeometryReader`/`onGeometryChange` logging, bypassing
+    /// `.onPreferenceChange` entirely) to update correctly and continuously
+    /// as a tab scrolled, but `TripView.tabContent`'s
+    /// `.onPreferenceChange(HeroScrollOffsetKey.self)` several modifier
+    /// hops up never saw more than the initial mount value. Bisecting
+    /// modifier-by-modifier isolated the exact break: `ItineraryTabView`'s
+    /// `.overlay(alignment:) { if let todayTargetId { todayPill(...) } }` —
+    /// an `.overlay` whose content is conditional on an `Optional` — silently
+    /// swallows preference propagation for everything upstream of it once
+    /// crossed, even though the overlay renders nothing (`todayTargetId ==
+    /// nil`) for most of this trip's lifetime. That's a `PreferenceKey`-
+    /// specific failure mode, not something a coordinate-space or
+    /// measurement-placement fix (this file's other two fixes) can address,
+    /// and not safe to route around by relocating one `.overlay` today only
+    /// to hit the same class of bug from some future modifier in the same
+    /// chain. Writing directly into the shared `HeroScrollModel` (a
+    /// reference type every tab already has access to once threaded
+    /// through) sidesteps `PreferenceKey` propagation for this path
+    /// entirely instead.
+    ///
+    /// Uses `onGeometryChange(for:of:action:)` (iOS 18+) where available —
+    /// confirmed via the same instrumentation to fire reliably on every
+    /// layout pass, including ones driven by `ScrollViewReader.scrollTo`
+    /// rather than a touch-driven pan — falling back to a
+    /// `.background(GeometryReader{...})` read through `.onChange(of:)` (no
+    /// `PreferenceKey` there either) on iOS 17, this app's actual
+    /// deployment target.
+    ///
+    /// Apply this only inside the populated (non-empty-state) branch of a
+    /// tab — an empty state must call `model.offsets[tab] = 0` itself (or
+    /// simply never call this), so the hero stays expanded — and pair it
+    /// with `.coordinateSpace(.named(HeroCollapse.scrollSpace(for: tab)))`
+    /// on that tab's enclosing `ScrollView`.
+    @ViewBuilder
+    func heroScrollTracking(tab: TripView.Tab, model: HeroScrollModel) -> some View {
+        if #available(iOS 18, *) {
+            onGeometryChange(for: CGFloat.self) { geo in
+                -geo.frame(in: .named(HeroCollapse.scrollSpace(for: tab))).minY
+            } action: { newValue in
+                model.offsets[tab] = newValue
+            }
+        } else {
+            background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onChange(of: geo.frame(in: .named(HeroCollapse.scrollSpace(for: tab))).minY, initial: true) { _, minY in
+                            model.offsets[tab] = -minY
+                        }
+                }
             )
         }
-        .frame(height: 0)
     }
 }
 
 /// Owns the per-tab scroll offsets that drive the hero's collapse. A
 /// reference type (`@Observable`), not a value held in `TripView`'s own
 /// `@State`, is deliberate: `TripView` creates one instance and hands it to
-/// `TripHeroView`, but never itself reads `offsets` — Swift's Observation
-/// framework only invalidates a view whose `body` actually accesses a
-/// changed property, so `tabContent(_:content:)`'s per-scroll-frame
-/// `.onPreferenceChange` write (still attached inside `TripView`, since
-/// that's the only place that sees all three tabs' sentinels) lands here
-/// without re-invalidating `TripView.body` and its O(n) computed
-/// itinerary/assignee inputs. Only `TripHeroView`, which reads
-/// `offsets[selectedTab]` in `progress`, re-renders per frame. Fixes the
-/// review finding on commit 3e58efc ("Collapse trip hero header on scroll
-/// across all three tabs").
+/// `TripHeroView` (to read) and to each of the three tab views (to write,
+/// via `.heroScrollTracking(tab:model:)`) — Swift's Observation framework
+/// only invalidates a view whose `body` actually accesses a changed
+/// property, so a tab's per-scroll-frame write here lands without
+/// re-invalidating `TripView.body` and its O(n) computed itinerary/assignee
+/// inputs. Only `TripHeroView`, which reads `offsets[selectedTab]` in
+/// `progress`, re-renders per frame. Fixes the review finding on commit
+/// 3e58efc ("Collapse trip hero header on scroll across all three tabs").
 @Observable
 final class HeroScrollModel {
-    /// Per-tab raw scroll offset (`HeroScrollSentinel`'s reported value),
-    /// keyed so switching tabs doesn't blend one tab's scroll position into
-    /// another's hero collapse state.
+    /// Per-tab raw scroll offset (written directly by that tab's
+    /// `.heroScrollTracking(tab:model:)`), keyed so switching tabs doesn't
+    /// blend one tab's scroll position into another's hero collapse state.
     var offsets: [TripView.Tab: CGFloat] = [:]
 
     func progress(for tab: TripView.Tab, reduceMotion: Bool) -> Double {
