@@ -122,8 +122,89 @@ struct AddItemSheet: View {
     @State var locationLng: Double?
     @State var address: String?
 
+    /// Finding 2 (companion fix): mirrors `TripFormView`'s `SaveError` — a
+    /// failed `modelContext.save()` used to be swallowed by `try?`, so the
+    /// sheet dismissed and toasted success even though nothing was actually
+    /// persisted. Single-case (unlike `TripFormView`'s `.signedOut` variant)
+    /// since this sheet has no equivalent unrecoverable state; every write
+    /// failure here is presumed transient/retryable.
+    private enum SaveError: Equatable {
+        case writeFailed
+        var message: String { "Couldn\u{2019}t save this item. Try again." }
+    }
+    @State private var saveError: SaveError?
+
+    /// Finding 3: gates the "Discard changes?" confirmation on cancel/swipe-
+    /// dismiss, same as `TripFormView`.
+    @State private var showDiscardConfirm = false
+
     private static let lastDepartureTZKey = "lastDepartureTZ"
     private static func lastArrivalTZKey(_ tripId: UUID) -> String { "lastArrivalTZ.\(tripId.uuidString)" }
+
+    /// Finding 3: every editable per-category `@State` field plus the shared
+    /// confirmation/location fields and family tags — captured once as
+    /// `initialSnapshot` at the end of `init` (after either branch has set
+    /// every field) so `hasChanges` can tell an untouched form from a dirty
+    /// one, exactly like `TripFormView.InitialValues`. Assignees are tracked
+    /// separately via `originalAssigneeProfileIds` (seeded later, from
+    /// `.task`) rather than folded in here.
+    private struct EditSnapshot: Equatable {
+        var category: ItemCategory
+        var selectedTags: Set<String>
+
+        var airline: String
+        var flightNo: String
+        var fromIATA: String
+        var toIATA: String
+        var flightDate: Date
+        var departsTime: Date
+        var departureZone: TimeZone
+        var arrivesTime: Date
+        var arrivalZone: TimeZone
+        var arrivalDayOffsetOverride: Bool?
+        var seat: String
+        var terminal: String
+        var gate: String
+
+        var stayName: String
+        var checkInDate: Date
+        var checkInTime: Date
+        var checkOutDate: Date
+        var checkOutTime: Date
+        var stayZone: TimeZone
+        var room: String
+
+        var activityTitle: String
+        var activityDate: Date
+        var activityTime: Date
+        var activityZone: TimeZone
+        var ticketRef: String
+
+        var foodName: String
+        var foodDate: Date
+        var foodTime: Date
+        var foodZone: TimeZone
+        var partySize: String
+        var reservationName: String
+
+        var transportTitle: String
+        var provider: String
+        var transportDate: Date
+        var pickupTime: Date
+        var pickupZone: TimeZone
+        var dropoffText: String
+        var dropoffDate: Date
+        var dropoffTime: Date
+        var dropoffZone: TimeZone
+        var transportDropoffDiffZone: Bool
+
+        var confirmation: String
+        var locationText: String
+        var locationLat: Double?
+        var locationLng: Double?
+        var address: String?
+    }
+    private let initialSnapshot: EditSnapshot
 
     init(
         tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current,
@@ -243,16 +324,87 @@ struct AddItemSheet: View {
             _checkOutTime = State(initialValue: Self.timeOfDay(hour: 11, minute: 0))
             _checkOutDate = State(initialValue: Calendar.current.date(byAdding: .day, value: 1, to: dateDefault) ?? dateDefault)
         }
+
+        // Captured last, after either branch above has set every field —
+        // reading the underscored `@State` wrappers' `wrappedValue` here
+        // (rather than the plain properties) is what makes this legal inside
+        // `init`, same as `TripFormView.initialValues`.
+        initialSnapshot = EditSnapshot(
+            category: _category.wrappedValue, selectedTags: _selectedTags.wrappedValue,
+            airline: _airline.wrappedValue, flightNo: _flightNo.wrappedValue,
+            fromIATA: _fromIATA.wrappedValue, toIATA: _toIATA.wrappedValue,
+            flightDate: _flightDate.wrappedValue, departsTime: _departsTime.wrappedValue,
+            departureZone: _departureZone.wrappedValue, arrivesTime: _arrivesTime.wrappedValue,
+            arrivalZone: _arrivalZone.wrappedValue, arrivalDayOffsetOverride: _arrivalDayOffsetOverride.wrappedValue,
+            seat: _seat.wrappedValue, terminal: _terminal.wrappedValue, gate: _gate.wrappedValue,
+            stayName: _stayName.wrappedValue, checkInDate: _checkInDate.wrappedValue,
+            checkInTime: _checkInTime.wrappedValue, checkOutDate: _checkOutDate.wrappedValue,
+            checkOutTime: _checkOutTime.wrappedValue, stayZone: _stayZone.wrappedValue, room: _room.wrappedValue,
+            activityTitle: _activityTitle.wrappedValue, activityDate: _activityDate.wrappedValue,
+            activityTime: _activityTime.wrappedValue, activityZone: _activityZone.wrappedValue,
+            ticketRef: _ticketRef.wrappedValue,
+            foodName: _foodName.wrappedValue, foodDate: _foodDate.wrappedValue, foodTime: _foodTime.wrappedValue,
+            foodZone: _foodZone.wrappedValue, partySize: _partySize.wrappedValue,
+            reservationName: _reservationName.wrappedValue,
+            transportTitle: _transportTitle.wrappedValue, provider: _provider.wrappedValue,
+            transportDate: _transportDate.wrappedValue, pickupTime: _pickupTime.wrappedValue,
+            pickupZone: _pickupZone.wrappedValue, dropoffText: _dropoffText.wrappedValue,
+            dropoffDate: _dropoffDate.wrappedValue, dropoffTime: _dropoffTime.wrappedValue,
+            dropoffZone: _dropoffZone.wrappedValue, transportDropoffDiffZone: _transportDropoffDiffZone.wrappedValue,
+            confirmation: _confirmation.wrappedValue, locationText: _locationText.wrappedValue,
+            locationLat: _locationLat.wrappedValue, locationLng: _locationLng.wrappedValue,
+            address: _address.wrappedValue
+        )
     }
 
     private var isEditing: Bool { editing != nil }
+
+    /// Finding 3: the live counterpart to `initialSnapshot` — diffed against
+    /// it (plus the separately-tracked assignee set) by `hasChanges`.
+    private var currentSnapshot: EditSnapshot {
+        EditSnapshot(
+            category: category, selectedTags: selectedTags,
+            airline: airline, flightNo: flightNo, fromIATA: fromIATA, toIATA: toIATA,
+            flightDate: flightDate, departsTime: departsTime, departureZone: departureZone,
+            arrivesTime: arrivesTime, arrivalZone: arrivalZone, arrivalDayOffsetOverride: arrivalDayOffsetOverride,
+            seat: seat, terminal: terminal, gate: gate,
+            stayName: stayName, checkInDate: checkInDate, checkInTime: checkInTime,
+            checkOutDate: checkOutDate, checkOutTime: checkOutTime, stayZone: stayZone, room: room,
+            activityTitle: activityTitle, activityDate: activityDate, activityTime: activityTime,
+            activityZone: activityZone, ticketRef: ticketRef,
+            foodName: foodName, foodDate: foodDate, foodTime: foodTime, foodZone: foodZone,
+            partySize: partySize, reservationName: reservationName,
+            transportTitle: transportTitle, provider: provider, transportDate: transportDate,
+            pickupTime: pickupTime, pickupZone: pickupZone, dropoffText: dropoffText,
+            dropoffDate: dropoffDate, dropoffTime: dropoffTime, dropoffZone: dropoffZone,
+            transportDropoffDiffZone: transportDropoffDiffZone,
+            confirmation: confirmation, locationText: locationText, locationLat: locationLat,
+            locationLng: locationLng, address: address
+        )
+    }
+
+    /// Finding 3: whether any field has moved from what the sheet opened
+    /// with — gates Cancel/swipe-dismiss's "Discard changes?" prompt, same
+    /// as `TripFormView.hasChanges`. Assignees are compared separately since
+    /// they're seeded asynchronously (`.task`), not captured in `init`.
+    private var hasChanges: Bool {
+        currentSnapshot != initialSnapshot || selectedAssigneeProfileIds != originalAssigneeProfileIds
+    }
+
+    private func cancelTapped() {
+        if hasChanges {
+            showDiscardConfirm = true
+        } else {
+            dismiss()
+        }
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 SheetHeader(
                     title: isEditing ? "Edit \(category.displayName.lowercased())" : "Add to \(tripTitle)",
-                    onCancel: { dismiss() }
+                    onCancel: cancelTapped
                 )
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -292,6 +444,23 @@ struct AddItemSheet: View {
             }
             #endif
         }
+        .background(
+            // Finding 3: surfaces the same "Discard changes?" dialog Cancel
+            // uses when a dirty form's swipe-down is blocked by
+            // `.interactiveDismissDisabled` below, mirroring `TripFormView`.
+            SheetDismissAttemptObserver {
+                if hasChanges {
+                    showDiscardConfirm = true
+                } else {
+                    dismiss()
+                }
+            }
+        )
+        .interactiveDismissDisabled(hasChanges)
+        .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
+            Button("Discard changes", role: .destructive) { dismiss() }
+            Button("Keep editing", role: .cancel) {}
+        }
     }
 
     private var categorySelector: some View {
@@ -326,21 +495,60 @@ struct AddItemSheet: View {
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
     }
 
+    /// Findings 2 & 7: the CTA-adjacent guidance line, mirroring
+    /// `TripFormView.ctaSection` — a save failure (freshest, most specific
+    /// problem) takes priority over the advisory "what's missing" hint, and
+    /// either replaces the old fully-silent disabled state.
     private var saveButton: some View {
-        Button {
-            save()
-        } label: {
-            Text(isEditing ? "Save changes" : "Add \(category.displayName.lowercased()) to itinerary")
-                .font(Typo.body(weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .foregroundStyle(Palette.onAmber)
-                .padding(.vertical, Spacing.md)
-                .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-                .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            if let saveError {
+                Text(saveError.message)
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.rose)
+            } else if let hint = missingNameHint {
+                Text(hint)
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
+            }
+            Button {
+                save()
+            } label: {
+                Text(isEditing ? "Save changes" : "Add \(category.displayName.lowercased()) to itinerary")
+                    .font(Typo.body(weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.vertical, Spacing.md)
+                    .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                    .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isValid)
+            .opacity(isValid ? 1 : 0.5)
         }
-        .buttonStyle(.plain)
-        .disabled(!isValid)
-        .opacity(isValid ? 1 : 0.5)
+    }
+
+    /// Finding 7: names the specific missing field driving a disabled Save,
+    /// instead of leaving the dimmed button as the only signal. `nil` once
+    /// that category's name/code requirement is met — the date-order hints
+    /// (`flightEndAfterStart` etc.) stay on their own section-local captions,
+    /// this only covers the "nothing typed yet" case.
+    private var missingNameHint: String? {
+        switch category {
+        case .flight:
+            let hasFrom = !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
+            let hasTo = !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
+            return (hasFrom && hasTo) ? nil : "Enter both airport codes to add this flight."
+        case .hotel:
+            return stayHasName ? nil : "Enter a hotel name to add this stay."
+        case .activity:
+            return activityTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Enter a title to add this activity." : nil
+        case .food:
+            return foodName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Enter a restaurant name to add this reservation." : nil
+        case .transport:
+            return transportHasName ? nil : "Enter a title or provider to add this transport."
+        }
     }
 
     // MARK: - Validation
@@ -352,10 +560,7 @@ struct AddItemSheet: View {
                 && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
                 && flightEndAfterStart
         case .hotel:
-            guard !stayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-            let start = ItemTimeCombining.combine(date: checkInDate, timeOfDay: checkInTime, targetTz: stayZone)
-            let end = ItemTimeCombining.combine(date: checkOutDate, timeOfDay: checkOutTime, targetTz: stayZone)
-            return end > start
+            return stayHasName && stayEndAfterStart
         case .activity:
             return !activityTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .food:
@@ -377,6 +582,7 @@ struct AddItemSheet: View {
     /// creator" rule.
     private func save() {
         guard isValid else { return }
+        saveError = nil
         let now = Date()
         var fields = composedFields()
         fields.details.tags = Array(selectedTags)
@@ -396,7 +602,15 @@ struct AddItemSheet: View {
             // `nil` while signed out — honest: this device's edit hasn't
             // been attributed to a signed-in account yet.
             editing.updatedBy = authManager.userId
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+            } catch {
+                // Finding 2: the write failed — stop here, before enqueuing
+                // sync, reconciling assignees, toasting, or dismissing, so a
+                // failed save never reads to the user as a successful one.
+                saveError = .writeFailed
+                return
+            }
             let dto = editing.toDTO()
             let rowId = editing.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
@@ -414,7 +628,12 @@ struct AddItemSheet: View {
             )
             item.details = fields.details
             modelContext.insert(item)
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+            } catch {
+                saveError = .writeFailed
+                return
+            }
             let dto = item.toDTO()
             let rowId = item.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
@@ -485,7 +704,15 @@ struct AddItemSheet: View {
         for profileId in toAdd {
             let assignee = ItemAssignee(itemId: itemId, profileId: profileId)
             modelContext.insert(assignee)
-            try? modelContext.save()
+            // Finding 2 (companion hardening): the item itself is already
+            // safely persisted by this point, so a failure here isn't worth
+            // the CTA-level `saveError` treatment — but it shouldn't be
+            // silent either, hence the assert instead of a bare `try?`.
+            do {
+                try modelContext.save()
+            } catch {
+                assertionFailure("assignee persist failed: \(error)")
+            }
             let dto = assignee.toDTO()
             let rowId = assignee.id
             Task { await syncEngine?.enqueueUpsert(table: .itemAssignees, rowId: rowId, tripId: tripId, payload: dto) }
@@ -495,7 +722,11 @@ struct AddItemSheet: View {
             let compositeId = ItemAssignee.compositeId(itemId: itemId, profileId: profileId)
             if let existing = existingAssignees.first(where: { $0.id == compositeId }) {
                 modelContext.delete(existing)
-                try? modelContext.save()
+                do {
+                    try modelContext.save()
+                } catch {
+                    assertionFailure("assignee persist failed: \(error)")
+                }
             }
             Task { await syncEngine?.enqueueDeleteItemAssignee(itemId: itemId, profileId: profileId, tripId: tripId) }
         }
@@ -620,6 +851,22 @@ struct AddItemSheet: View {
         return end > start
     }
 
+    /// Finding 1: whether a stay's hotel name has been entered — factored
+    /// out so `staySection`'s date-order hint can gate on it first, the same
+    /// way `transportHasName` already gates transport's hint (see
+    /// `transportEndAfterStart` above), instead of showing "Check-out must
+    /// be after check-in" on a blank, untouched form.
+    var stayHasName: Bool { !stayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Whether a stay's check-out is strictly after check-in — the same "end
+    /// after start" rule flight/transport enforce. Drives both `isValid` and
+    /// the form's hint (gated on `stayHasName` there).
+    var stayEndAfterStart: Bool {
+        let start = ItemTimeCombining.combine(date: checkInDate, timeOfDay: checkInTime, targetTz: stayZone)
+        let end = ItemTimeCombining.combine(date: checkOutDate, timeOfDay: checkOutTime, targetTz: stayZone)
+        return end > start
+    }
+
     /// Composes a flight item's departure and arrival instants — the same
     /// math `flightFields()` needs to actually save the item, factored out
     /// (mirroring `transportInstants` above) so validation and the save path
@@ -713,7 +960,11 @@ struct AddItemSheet: View {
         return ComposedFields(
             title: Self.trimmedOrNil(foodName) ?? "Food",
             startsAt: start, endsAt: nil, tz: foodZone.identifier,
-            details: details, confirmation: nil,
+            // Finding 5: Food now has its own confirmation-code field
+            // (`foodSection`) — mirrored onto the top-level `confirmation`
+            // column, same as flight/stay/transport, so it earns the ticket
+            // glyph and shows up in Bookings/the boarding-pass grid.
+            details: details, confirmation: Self.trimmedOrNil(confirmation),
             locationName: locationText, locationLat: locationLat, locationLng: locationLng
         )
     }

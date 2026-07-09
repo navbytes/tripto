@@ -38,6 +38,14 @@ extension AddItemSheet {
                 title: "Departure time zone", selection: $departureZone, referenceDate: departsTime,
                 hint: isDepartureZoneAutoSet ? "Set by departure airport" : nil
             )
+            if isDepartureAirportUnknown {
+                // Finding 6: advisory (slate), not an error — the zone
+                // default is still usable, this just flags that it wasn't
+                // actually detected from the code typed.
+                Text("We couldn\u{2019}t detect this airport \u{2014} double-check the time zone.")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
+            }
 
             LabeledDatePicker(label: "Arrives", date: $arrivesTime, displayedComponents: .hourAndMinute)
             HStack {
@@ -55,6 +63,11 @@ extension AddItemSheet {
                 title: "Arrival time zone", selection: $arrivalZone, referenceDate: arrivesTime,
                 hint: isArrivalZoneAutoSet ? "Set by arrival airport" : nil
             )
+            if isArrivalAirportUnknown {
+                Text("We couldn\u{2019}t detect this airport \u{2014} double-check the time zone.")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
+            }
 
             HStack(spacing: Spacing.md) {
                 FormTextField(label: "Seat", text: $seat, placeholder: "14C", autocapitalization: .characters)
@@ -79,7 +92,7 @@ extension AddItemSheet {
                 LabeledDatePicker(label: "Check-out date", date: $checkOutDate, displayedComponents: .date)
                 LabeledDatePicker(label: "Time", date: $checkOutTime, displayedComponents: .hourAndMinute)
             }
-            if !isValid {
+            if stayHasName && !stayEndAfterStart {
                 Text("Check-out must be after check-in.")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.rose)
@@ -139,6 +152,13 @@ extension AddItemSheet {
                 locationLng = coordinate?.longitude
                 address = resolvedAddress
             }
+
+            // Finding 5: Food was the one category with no confirmation
+            // field, so a Resy/OpenTable code had nowhere to go and could
+            // never earn the §4.2 ticket glyph like every other category.
+            FormTextField(
+                label: "Confirmation code", text: $confirmation, placeholder: "RESY-88213", autocapitalization: .characters
+            )
         }
     }
 
@@ -252,6 +272,9 @@ extension AddItemSheet {
             .overlay {
                 Capsule().stroke(isOn ? Color.clear : Palette.mist, lineWidth: 1)
             }
+            // Finding 4 (§6.5 44pt floor) — see `nextDayChip`'s comment.
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
@@ -272,6 +295,9 @@ extension AddItemSheet {
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.xs + 2)
             .background(isOn ? CategoryColor.activity.fg : CategoryColor.activity.soft, in: Capsule())
+            // Finding 4 (§6.5 44pt floor) — see `nextDayChip`'s comment.
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
@@ -285,9 +311,26 @@ extension AddItemSheet {
         return id == departureZone.identifier
     }
 
+    /// Finding 6: a complete-looking (3-letter) code that `AirportTimeZones`
+    /// still can't resolve — the departure zone quietly falls back to
+    /// whatever it was defaulted to (last-used or trip zone), which is
+    /// usually wrong for an unrecognized airport. This flags that the zone
+    /// picker's value needs a manual check (§7.4 time-correctness), without
+    /// blocking save — the default is still a usable starting point.
+    var isDepartureAirportUnknown: Bool {
+        let code = fromIATA.trimmingCharacters(in: .whitespaces)
+        return code.count == 3 && AirportTimeZones.tzIdentifier(for: code) == nil
+    }
+
     var isArrivalZoneAutoSet: Bool {
         guard let id = AirportTimeZones.tzIdentifier(for: toIATA) else { return false }
         return id == arrivalZone.identifier
+    }
+
+    /// Finding 6, arrival counterpart to `isDepartureAirportUnknown`.
+    var isArrivalAirportUnknown: Bool {
+        let code = toIATA.trimmingCharacters(in: .whitespaces)
+        return code.count == 3 && AirportTimeZones.tzIdentifier(for: code) == nil
     }
 
     var nextDayChip: some View {
@@ -300,6 +343,12 @@ extension AddItemSheet {
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xs)
                 .background(effectiveNextDay ? Palette.amber : Palette.mist, in: Capsule())
+                // Finding 4 (§6.5 44pt floor): applied after the background
+                // so the visual pill stays compact at its natural size —
+                // this only grows the invisible tappable frame around it,
+                // with `.contentShape` extending hit-testing to match.
+                .frame(minHeight: 44)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Arrives next day")
