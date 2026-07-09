@@ -69,14 +69,11 @@ struct TripView: View {
     @State private var selectedProfileFilter: UUID?
     @Namespace private var tabUnderline
 
-    /// Per-tab raw scroll offset (`HeroScrollSentinel`'s reported value),
-    /// keyed so switching tabs doesn't blend one tab's scroll position into
-    /// another's hero collapse state.
-    @State private var heroScrollOffsets: [Tab: CGFloat] = [:]
-
-    private var heroProgress: Double {
-        HeroCollapse.progress(for: heroScrollOffsets[selectedTab] ?? 0, reduceMotion: reduceMotion)
-    }
+    /// Backs the hero's scroll-driven collapse — see `HeroScrollModel`'s doc
+    /// comment (HeroCollapse.swift) for why this lives in a reference-type
+    /// `@Observable` instead of a plain `@State` dictionary on `TripView`:
+    /// per-scroll-frame writes to it must not invalidate `TripView.body`.
+    @State private var heroScrollModel = HeroScrollModel()
 
     // M2 verify-drill autopilot only (see `WelcomeView`/`HomeView`'s
     // matching hooks) — a DEBUG-only alternate presentation path for
@@ -251,7 +248,16 @@ struct TripView: View {
 
     private func content(for trip: Trip) -> some View {
         VStack(spacing: 0) {
-            hero(for: trip, progress: heroProgress)
+            TripHeroView(
+                trip: trip,
+                tripProfileCount: tripProfiles.count,
+                selectedTab: selectedTab,
+                reduceMotion: reduceMotion,
+                dynamicTypeSize: dynamicTypeSize,
+                canEditTrip: canEditTrip,
+                isEditingTrip: $isEditingTrip,
+                model: heroScrollModel
+            )
 
             if syncStatus.isOffline {
                 SyncBanner()
@@ -365,161 +371,13 @@ struct TripView: View {
             .opacity(selectedTab == tab ? 1 : 0)
             .allowsHitTesting(selectedTab == tab)
             .accessibilityHidden(selectedTab != tab)
-            .onPreferenceChange(HeroScrollOffsetKey.self) { heroScrollOffsets[tab] = $0 }
-    }
-
-    // MARK: - Hero (§4.2: gradient, glass back/share, city, meta)
-
-    private func hero(for trip: Trip, progress p: Double) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                GlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
-                    dismiss()
-                }
-                Spacer()
-                // Discoverable organizer edit entry point (finding 4): the
-                // Home context menu's "Edit trip" is a shortcut, not the
-                // sole route (HIG). Gated on the same `myRole` the FAB uses.
-                if canEditTrip {
-                    GlassCircleButton(systemImage: "pencil", accessibilityLabel: "Edit trip") {
-                        isEditingTrip = true
-                    }
-                }
-                // A `NavigationLink(value:)`, not a `GlassCircleButton`
-                // action closure: `TripView` doesn't own the shared
-                // `NavigationPath` (`HomeView` does), but a value-based
-                // link pushes onto the nearest enclosing `NavigationStack`
-                // regardless of nesting depth — same mechanism
-                // `BookingsTabView`/`TimelineRowViews` already use for
-                // `ItemRoute`. See `HomeView`'s `.navigationDestination(for:
-                // ShareRoute.self)`.
-                NavigationLink(value: ShareRoute(tripId: trip.id)) {
-                    GlassCircleGlyph(systemImage: "square.and.arrow.up")
-                }
-                .accessibilityLabel("Share trip")
-            }
-
-            Spacer(minLength: Spacing.sm)
-
-            Text(trip.title)
-                .font(Typo.display(Typo.Size.display - 10 * p))
-                .foregroundStyle(.white)
-                .lineLimit(p > 0.5 ? 1 : 2)
-                .minimumScaleFactor(0.85)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Finding 2 of the collapse risk review: at accessibility
-            // Dynamic Type sizes, skip the fixed-height collapse (it can
-            // clip multi-line meta text mid-fade) and just fade via opacity.
-            if dynamicTypeSize.isAccessibilitySize {
-                metaRow(for: trip)
-                    .padding(.top, Spacing.xs * (1 - p))
-                    .opacity(1 - min(1, p * 1.6))
-            } else {
-                metaRow(for: trip)
-                    .padding(.top, Spacing.xs * (1 - p))
-                    .opacity(1 - min(1, p * 1.6))
-                    .frame(height: 22 * (1 - p), alignment: .top)
-                    .clipped()
-            }
-        }
-        .padding(.horizontal, Spacing.lg)
-        .padding(.top, Spacing.xs)
-        .padding(.bottom, Spacing.sm + (Spacing.lg - Spacing.sm) * (1 - p))
-        // Finding 2: `minHeight` (not a fixed `height`) so the hero grows
-        // instead of clipping when Dynamic Type scales the title/meta —
-        // the gradient background and scrim below are `.background`/
-        // `.overlay`, so they scale with it for free. The `150 - 54 * p`
-        // term is the scroll-collapse range added on top of that: fully
-        // expanded at `p == 0`, compact (96pt floor — clears the notch +
-        // 44pt button row) at `p == 1`.
-        .frame(minHeight: 150 - 54 * p, alignment: .bottom)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            CoverGradient.from(key: trip.coverGradient)
-                // Finding 3: swapped the flat 8%-black scrim for the same
-                // bottom-anchored `textScrim` `TripCard` uses for the
-                // identical white-text-on-gradient problem (clear until 35%
-                // down, ramping to 45%-black at the bottom — see
-                // `PaletteExtras.swift`). The hero's title/meta sit
-                // bottom-anchored in the densest band: the meta row at
-                // ~85% depth composites to ~4.5-5:1, the 30pt display title
-                // at ~70% depth to ~4+:1 — clearing AA's 4.5:1 and 3:1
-                // large-text bars respectively on all three gradients' worst
-                // corners. The top-row glyph buttons no longer need this
-                // scrim now that their own fill is `coverPillFill`.
-                .overlay(CoverGradient.textScrim)
-                .ignoresSafeArea(edges: .top)
-        }
-    }
-
-    /// Finding 4 + 9b: two VoiceOver-distinct pieces instead of one run-on
-    /// row of literal "·" fragments — dates/duration read as a single
-    /// sentence, and the traveler count is a real tappable route (not just
-    /// decorative text) to `ShareRoute`'s "who's coming" screen.
-    private func metaRow(for trip: Trip) -> some View {
-        HStack(spacing: Spacing.sm) {
-            HStack(spacing: Spacing.sm) {
-                Text(dateRangeText(for: trip))
-                metaDot
-                Text("\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")")
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                "\(accessibleDateRangeText(for: trip)), \(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")"
-            )
-
-            metaDot
-
-            NavigationLink(value: ShareRoute(tripId: trip.id)) {
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "person.2.fill").font(.system(size: 10))
-                    Text("\(max(tripProfiles.count, 1))")
-                    // Finding 5: a small tappability cue for sighted users —
-                    // VoiceOver already gets the same signal from the
-                    // `.accessibilityHint` below, so this glyph adds nothing
-                    // there and is hidden from it.
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9))
-                        .accessibilityHidden(true)
-                }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xxs)
-                .background(Palette.coverPillFill, in: Capsule())
-                // Finding 4: the visual capsule (a `.background`, so it
-                // doesn't grow with the frame) was rendering under 44pt
-                // wide — `minWidth` added alongside the existing
-                // `minHeight` so the hit target meets the 44pt floor on
-                // both axes; `.contentShape(Rectangle())` below already
-                // extends hit-testing to the enlarged frame, which only
-                // borders non-interactive text.
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .accessibilityLabel("\(max(tripProfiles.count, 1)) traveler\(max(tripProfiles.count, 1) == 1 ? "" : "s")")
-            .accessibilityHint("Manage people and invites")
-        }
-        .font(Typo.body(Typo.Size.caption))
-        .foregroundStyle(.white.opacity(0.92))
-    }
-
-    private var metaDot: some View {
-        Text("·").opacity(0.6)
-            .accessibilityHidden(true)
-    }
-
-    /// Finding 5: delegates to `TripDateRangeFormat` so a trip outside the
-    /// current year (or spanning two) shows a year instead of the old
-    /// always-year-less "Mar 14 – Mar 20."
-    private func dateRangeText(for trip: Trip) -> String {
-        TripDateRangeFormat.text(start: trip.startDate, end: trip.endDate)
-    }
-
-    /// Same rules as `dateRangeText`, joined with a spoken "to" instead of
-    /// the visual en-dash — VoiceOver reads punctuation like "–" and "·"
-    /// as literal fragments, not implied connectors (finding 9b).
-    private func accessibleDateRangeText(for trip: Trip) -> String {
-        TripDateRangeFormat.spokenText(start: trip.startDate, end: trip.endDate)
+            // Writes into `heroScrollModel` (an `@Observable` reference
+            // type), not a `TripView`-owned `@State` — `TripView.body`
+            // never reads `heroScrollModel.offsets` itself, so this
+            // per-scroll-frame write invalidates only `TripHeroView` (the
+            // one view that reads it), not this whole tab stack. See
+            // `HeroScrollModel`'s doc comment (HeroCollapse.swift).
+            .onPreferenceChange(HeroScrollOffsetKey.self) { heroScrollModel.offsets[tab] = $0 }
     }
 
     // MARK: - Sub-tabs (Itinerary · Bookings · Packing — Map/$ Split hidden, §9.4)
