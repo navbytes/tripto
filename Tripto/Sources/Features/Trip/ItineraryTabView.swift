@@ -43,6 +43,23 @@ struct ItineraryTabView: View {
     /// day that's actually full for someone else (`TripView.hiddenCountByDay`
     /// via `PersonFilter.hiddenDayCounts`).
     var hiddenCountByDay: [String: Int] = [:]
+    /// UX audit finding 1: whether the device is currently offline —
+    /// `TripView`'s `syncStatus.isOffline`, threaded through so
+    /// `unavailableState` can tell "haven't heard from the server since
+    /// going offline" apart from "asked, and it failed" and phrase the
+    /// viewer's empty-state copy accordingly.
+    var isOffline: Bool = false
+    /// UX audit finding 1: true when this trip's most recent `pullTrip(_:)`
+    /// attempt this session failed — `SyncStatus.tripPullFailures` via
+    /// `TripView`. Distinguishes a settled-but-failed load from a settled
+    /// -and-genuinely-empty one, so a viewer whose trip cached but whose
+    /// items didn't never sees the false "the organizer hasn't added
+    /// anything yet" assertion.
+    var didLoadFail: Bool = false
+    /// UX audit finding 1: retries this trip's pull — `TripView` wires this
+    /// to `syncEngine.schedulePullTrip(trip.id)`. `nil` only in previews/
+    /// tests that don't wire a live sync engine.
+    var onRetryLoad: (() -> Void)? = nil
 
     @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
     /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
@@ -92,6 +109,7 @@ struct ItineraryTabView: View {
     var body: some View {
         let models = dayModels
         let hintDayId = firstFreeDayId(in: models)
+        let todayTargetId = todayScrollTargetId(in: models)
         return Group {
             if models.isEmpty {
                 emptyState
@@ -103,7 +121,13 @@ struct ItineraryTabView: View {
                             ForEach(models) { day in
                                 Section {
                                     if day.isFreeDay {
-                                        freeDayRow(day, showsAddHint: canEdit && day.id == hintDayId)
+                                        // UX audit finding 7: also gated on
+                                        // the filter being inactive — see
+                                        // `freeDayRow`'s doc comment.
+                                        freeDayRow(
+                                            day,
+                                            showsAddHint: canEdit && filteredPersonName == nil && day.id == hintDayId
+                                        )
                                     } else {
                                         ForEach(day.rows) { row in
                                             rowView(for: row)
@@ -119,6 +143,21 @@ struct ItineraryTabView: View {
                     }
                     .coordinateSpace(.named(HeroCollapse.scrollSpace))
                     .scrollDismissesKeyboard(.immediately)
+                    // UX audit finding 2: a quiet "jump to today" pill,
+                    // shown whenever today falls inside the trip's date
+                    // range — trade-off deliberately taken to show it
+                    // regardless of current scroll position (not just after
+                    // the user has scrolled away from today's section),
+                    // since tracking scroll offset just to hide it while
+                    // already there isn't justified for this pass; a
+                    // possible later refinement.
+                    .overlay(alignment: .bottomLeading) {
+                        if let todayTargetId {
+                            todayPill(proxy: proxy, targetId: todayTargetId)
+                                .padding(.leading, Spacing.xl)
+                                .padding(.bottom, Spacing.xxl)
+                        }
+                    }
                     .task {
                         // Finding F1: one-shot scroll to "today"'s section
                         // on first appearance, skipped when a DEBUG uitest
@@ -135,13 +174,15 @@ struct ItineraryTabView: View {
                             let today = DayDate.from(.now, calendar: .current)
                             if today >= tripStartDay, today <= tripEndDay,
                                 let target = models.first(where: { $0.id >= today.stringValue }) {
-                                try? await Task.sleep(nanoseconds: 300_000_000)
-                                let headerId = "day-header-\(target.id)"
-                                if reduceMotion {
-                                    proxy.scrollTo(headerId, anchor: .top)
-                                } else {
-                                    withAnimation { proxy.scrollTo(headerId, anchor: .top) }
-                                }
+                                // Finding 4: always an instant jump, not an
+                                // animated one — a `withAnimation` slide
+                                // here used to yank content out from under a
+                                // user who'd already started reading Day 1
+                                // during the brief pre-jump flash. The
+                                // shorter sleep below (was 300ms) minimizes
+                                // that flash instead of animating over it.
+                                try? await Task.sleep(nanoseconds: 120_000_000)
+                                proxy.scrollTo("day-header-\(target.id)", anchor: .top)
                             }
                         }
                         #if DEBUG
@@ -271,6 +312,14 @@ struct ItineraryTabView: View {
     /// someone the filter is hiding — `hiddenCountByDay` tells the two
     /// apart. A single `Text` either way, so VoiceOver still reads it as
     /// one stop.
+    ///
+    /// UX audit finding 7: `showsAddHint` is now also `false` whenever a
+    /// person filter is active (see the call site in `body`) — a
+    /// genuinely-free day (`hiddenCount == 0`) under an active filter still
+    /// renders the plain "Free day" label, not the "tap + to add a plan"
+    /// hint, since a plan added right now would default to unassigned/
+    /// shared and immediately vanish from *this* filtered view once the
+    /// filter reasserts.
     private func freeDayRow(_ day: TimelineDayModel, showsAddHint: Bool) -> some View {
         let hiddenCount = hiddenCountByDay[day.id, default: 0]
         let text: String
@@ -305,10 +354,61 @@ struct ItineraryTabView: View {
     /// Finding F5: takes the already-computed `models` snapshot (rather than
     /// re-reading `dayModels` itself) so `body`'s single evaluation per
     /// render pass covers this too.
+    ///
+    /// UX audit finding 7: eligibility here is still purely about which
+    /// days are hidden by the filter (`hiddenCountByDay`) — the filter
+    /// *itself* being active is a separate, additional gate applied at the
+    /// `freeDayRow` call site in `body`, not here, since this id is also
+    /// used as the fallback anchor for "genuinely free" days independent of
+    /// whether the hint actually renders.
     private func firstFreeDayId(in models: [TimelineDayModel]) -> String? {
         let genuinelyFree = models.filter { $0.isFreeDay && hiddenCountByDay[$0.id, default: 0] == 0 }
         let todayId = DayDate.from(.now, calendar: .current).stringValue
         return genuinelyFree.first(where: { $0.id >= todayId })?.id ?? genuinelyFree.first?.id
+    }
+
+    /// UX audit finding 2: the id (`TimelineDayModel.id`, i.e. a
+    /// `DayDate.stringValue`) the "jump to today" pill scrolls to, or `nil`
+    /// to hide the pill entirely — only shown while today falls inside the
+    /// trip's own date range, mirroring the auto-scroll-on-open check in
+    /// `body`'s `.task`. Prefers the model actually flagged `isToday`
+    /// (`TimelineBuilder`'s own today-detection), falling back to the first
+    /// day on or after today by sortable id for the (rare) case a
+    /// same-day bucketing edge leaves no row flagged.
+    private func todayScrollTargetId(in models: [TimelineDayModel]) -> String? {
+        let today = DayDate.from(.now, calendar: .current)
+        guard today >= tripStartDay, today <= tripEndDay else { return nil }
+        return models.first(where: { $0.isToday })?.id ?? models.first(where: { $0.id >= today.stringValue })?.id
+    }
+
+    /// UX audit finding 2: the pill itself — same resting-chip look as
+    /// `PersonFilterBar`'s unselected chips (`Palette.elevated` capsule,
+    /// `Palette.mist` stroke, `Palette.ink` label, 44pt hit band) so it
+    /// reads as part of the same filter/navigation chip family rather than
+    /// a one-off control.
+    private func todayPill(proxy: ScrollViewProxy, targetId: String) -> some View {
+        Button {
+            let headerId = "day-header-\(targetId)"
+            if reduceMotion {
+                proxy.scrollTo(headerId, anchor: .top)
+            } else {
+                withAnimation { proxy.scrollTo(headerId, anchor: .top) }
+            }
+        } label: {
+            Text("Today")
+                .font(Typo.body(13, weight: .bold))
+                .foregroundStyle(Palette.ink)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .background(Palette.elevated, in: Capsule())
+                .overlay {
+                    Capsule().stroke(Palette.mist, lineWidth: 1)
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Jump to today")
     }
 
     // MARK: - Empty state (BUILD_PLAN.md §4.2, §6.6)
@@ -326,6 +426,18 @@ struct ItineraryTabView: View {
     /// `filteredEmptyGuidance`'s own `hasAnyItems` guard (below) is only
     /// ever reached post-settle, where "Add a plan with the + button first"
     /// is a fact rather than a guess.
+    ///
+    /// UX audit finding 1: a new `unavailableState` branch sits between the
+    /// loading branch and the filter branch — after loading (its own
+    /// ambiguity has already been handled above), before the filter (which
+    /// only makes sense once something actually loaded). It's gated
+    /// `!canEdit && !hasAnyItems && (isOffline || didLoadFail)`:
+    /// `!hasAnyItems` because it only fires when nothing actually loaded —
+    /// once even one item is present the filter branch's own honest copy
+    /// already covers it and the filter selection is no longer moot;
+    /// `!canEdit` because an editor's settled-empty copy ("Add your first
+    /// flight, stay, or plan") is an invitation, not an assertion about the
+    /// trip's contents, so it stays correct even mid-outage.
     private var emptyState: some View {
         ScrollView {
             VStack(spacing: Spacing.xl) {
@@ -346,6 +458,8 @@ struct ItineraryTabView: View {
                             .font(Typo.body())
                             .foregroundStyle(Palette.slate)
                     }
+                } else if !canEdit && !hasAnyItems && (isOffline || didLoadFail) {
+                    unavailableState
                 } else if let filteredPersonName {
                     filteredEmptyState(personName: filteredPersonName)
                 } else {
@@ -379,6 +493,58 @@ struct ItineraryTabView: View {
                 }
             }
             .padding(.bottom, Fab.scrollClearance)
+        }
+    }
+
+    /// UX audit finding 1: shown instead of the settled-empty "Nothing
+    /// planned yet" copy to a viewer (`!canEdit`) whose trip loaded with
+    /// nothing in it *and* the load itself is suspect — either the device
+    /// is offline (`isOffline`) or this trip's last pull attempt failed
+    /// (`didLoadFail`). Without this branch, that viewer would read "The
+    /// organizer hasn't added anything yet," which is a guess dressed up as
+    /// a fact: the organizer may well have added plans that just haven't
+    /// arrived on this device yet. Same serif-headline/body/day-skeleton
+    /// shape as the settled-empty block above, so switching between the two
+    /// once a retry resolves doesn't feel like a different screen — only
+    /// the copy (and, when a retry is actionable, the CTA) changes.
+    private var unavailableState: some View {
+        VStack(spacing: Spacing.xl) {
+            daySkeleton
+                .padding(.top, Spacing.xl)
+
+            VStack(spacing: Spacing.xs) {
+                Text(isOffline ? "Plans haven\u{2019}t loaded yet" : "Couldn\u{2019}t load this trip\u{2019}s plans")
+                    .font(Typo.display(Typo.Size.title))
+                    .foregroundStyle(Palette.ink)
+                    .multilineTextAlignment(.center)
+                Text(
+                    isOffline
+                        ? "You\u{2019}re offline \u{2014} the itinerary will appear once you\u{2019}re back online."
+                        : "Check your connection and try again."
+                )
+                .font(Typo.body())
+                .foregroundStyle(Palette.slate)
+                .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, Spacing.xl)
+
+            // Offline has nothing to retry — the pull will resume the
+            // moment connectivity returns (`SyncEngine`'s own reachability
+            // hook), so a CTA here would just be a button that does
+            // nothing new. A failed-while-online pull is different: it's
+            // stuck until something asks again.
+            if !isOffline {
+                Button(action: { onRetryLoad?() }) {
+                    Text("Retry")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.onAmber)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.vertical, Spacing.md)
+                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                        .contentShape(Capsule())
+                        .background(Palette.amber, in: Capsule())
+                }
+            }
         }
     }
 

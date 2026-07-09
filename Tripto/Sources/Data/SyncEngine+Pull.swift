@@ -122,8 +122,10 @@ extension SyncEngine {
             try await store.applyItemAssignees(assigneesResult, tripId: tripId)
 
             await status.markSynced()
+            await status.setTripPullFailed(tripId, false)
         } catch {
             logDebug("pullTrip(\(tripId)) failed: \(error)")
+            await status.setTripPullFailed(tripId, true)
         }
         // Attempt-completion, not just the success path above — same
         // rationale as `pullHome`'s `markInitialHomePullCompleted` call

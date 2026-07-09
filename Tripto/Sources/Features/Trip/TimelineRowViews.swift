@@ -137,8 +137,16 @@ struct TimelineCardRow: View, Equatable {
                 Text(zoneLabel)
                     .font(Typo.body(9.5, weight: .medium))
                     .foregroundStyle(Palette.slate)
-                    .lineLimit(1)
-                    .minimumScaleFactor(isAXSize ? 0.6 : 0.8)
+                    // UX audit finding 3: this zone label is
+                    // safety-critical (it's a flight/transit's
+                    // departure/arrival time zone), so it must stay legible
+                    // rather than shrink toward illegibility at
+                    // accessibility sizes. `isAXSize` already widens the
+                    // gutter to 76pt (`TimelineLayout.gutterWidth`), which
+                    // gives a second line room to wrap into instead of
+                    // scaling the text down further.
+                    .lineLimit(isAXSize ? 2 : 1)
+                    .minimumScaleFactor(isAXSize ? 0.85 : 0.8)
                     .allowsTightening(true)
             }
         }
@@ -332,8 +340,12 @@ struct CheckOutRow: View, Equatable {
                 Text(zoneLabel)
                     .font(Typo.body(9, weight: .medium))
                     .foregroundStyle(Palette.slate)
-                    .lineLimit(1)
-                    .minimumScaleFactor(isAXSize ? 0.6 : 0.8)
+                    // UX audit finding 3: see `TimelineCardRow.timeGutter`'s
+                    // matching comment — same safety-critical
+                    // wrap-not-shrink treatment for the check-out row's own
+                    // zone label.
+                    .lineLimit(isAXSize ? 2 : 1)
+                    .minimumScaleFactor(isAXSize ? 0.85 : 0.8)
                     .allowsTightening(true)
             }
         }
@@ -467,5 +479,30 @@ struct TZShiftChipRow: View, Equatable {
         .padding(Spacing.lg)
     }
     .dynamicTypeSize(.xxLarge)
+    .background(Palette.paper)
+}
+
+/// UX audit finding 3's validate-first artifact: the same half-hour-zone
+/// flight, at an accessibility Dynamic Type size where the 76pt AX gutter
+/// (`TimelineLayout.gutterWidth`) kicks in. The zone label must wrap onto a
+/// second line rather than shrink below its base size — confirms the
+/// `lineLimit(isAXSize ? 2 : 1)` / `minimumScaleFactor(isAXSize ? 0.85 : 0.8)`
+/// pairing above actually gives it room to do that.
+#Preview("Gutter at accessibility2") {
+    ScrollView {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            TimelineCardRow(
+                model: TimelineCardModel(
+                    id: UUID(), category: .flight, timeText: "08:20", zoneLabel: "GMT+5:30",
+                    title: "Flight to Delhi", subtitle: "JFK → DEL · Seat 14C", hasTicket: true,
+                    isPending: false, editedBy: nil, assignees: [], tags: []
+                ),
+                typeSize: .accessibility2
+            )
+            .equatable()
+        }
+        .padding(Spacing.lg)
+    }
+    .dynamicTypeSize(.accessibility2)
     .background(Palette.paper)
 }

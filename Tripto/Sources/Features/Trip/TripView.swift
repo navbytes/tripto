@@ -295,7 +295,13 @@ struct TripView: View {
                             toast: $toast,
                             isAwaitingFirstSync: awaitingFirstTripPull,
                             hasAnyItems: !items.isEmpty,
-                            hiddenCountByDay: hiddenCountByDay
+                            hiddenCountByDay: hiddenCountByDay,
+                            isOffline: syncStatus.isOffline,
+                            didLoadFail: syncStatus.tripPullFailures.contains(trip.id),
+                            onRetryLoad: {
+                                let id = trip.id
+                                Task { await syncEngine?.schedulePullTrip(id) }
+                            }
                         )
                     }
                     tabContent(.bookings) {
