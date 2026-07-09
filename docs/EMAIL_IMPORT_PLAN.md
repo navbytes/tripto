@@ -6,7 +6,7 @@ waitlist stub) and universal links (currently deferred pending an Apple
 capability). Same status keys: ✅ done · 🔄 in progress · ⏳ queued (I can do
 it) · 🔑 **owner-only**.
 
-Last updated: 2026-07-09.
+Last updated: 2026-07-09 (EI-0 through EI-3 done; LLM routing moved to Cloudflare AI Gateway).
 
 ---
 
@@ -42,7 +42,9 @@ Last updated: 2026-07-09.
 | Email receiving | **Cloudflare Email Routing → a new Email Worker** | Same platform as the existing `share-worker`; no public HTTP endpoint to secure (unlike an inbound webhook from SendGrid/Mailgun); no new vendor. |
 | MX | **Dedicated subdomain `plans.tripto.navbytes.io`** | `tripto@navbytes.io`'s MX is iCloud+ mail today — must not hijack the apex. |
 | Addressing | **One token per trip**: `t-<token>@plans.tripto.navbytes.io`, shown/copyable on the Add-Item screen | Unambiguous routing — the token *is* the trip. Rejected per-user "current trip" heuristics (fragile with overlapping trips) and shared-address-with-sender-matching-for-routing (`From` is trivially spoofed). |
-| Where the LLM call happens | **A new Supabase edge function (`ingest-email`)**, not the Cloudflare Worker | The privileged DB write already has to live in an edge function (service role can't be in this repo); putting the Anthropic call there too keeps both the service-role key and the Anthropic key out of the app repo. The Worker stays "dumb": parse MIME, extract token/From/Subject/body, POST to the edge function with a shared secret. |
+| Where the LLM call happens | **A new Supabase edge function (`ingest-email`)**, not the Cloudflare Worker | The privileged DB write already has to live in an edge function (service role can't be in this repo); putting the LLM call there too keeps both the service-role key and any provider credentials out of the app repo. The Worker stays "dumb": parse MIME, extract token/From/Subject/body, POST to the edge function with a shared secret. |
+| **LLM routing & billing** | **Cloudflare AI Gateway's unified REST API** (`api.cloudflare.com/.../ai/v1/chat/completions`), not a direct call to Anthropic's API | OpenAI-compatible tool-calling that Gateway translates to whichever provider is configured — `LLM_MODEL` is a plain `"{provider}/{model}"` config string (`anthropic/claude-haiku-4-5` today), so switching to Sonnet or a different provider (Gemini, etc.) later is a secret value change, not a code change. Auth is a single Cloudflare API token via **Unified Billing** (one Cloudflare bill covers whichever provider is in use, pass-through per-token pricing, no per-provider key to manage) — replaces the originally-planned `ANTHROPIC_API_KEY` secret entirely. |
+| **Default model** | **`anthropic/claude-haiku-4-5`** | Bounded structured-extraction task, not open-ended reasoning — cheapest capable tier is the right default, and Haiku is on Anthropic's officially-supported structured-output model list. The confidence-gate/review-inbox safety net absorbs the accuracy tradeoff vs. a larger model. |
 | **Confidence threshold** | **Balanced** — suggest whenever reasonably confident it's a real booking | Nothing auto-confirms; a human always reviews. A wrong suggestion costs one dismiss tap; a missed real booking defeats the feature. Errs toward catching more. |
 | **Raw email retention** | **7 days**, then purge `raw_text`/`raw_html` (keep metadata for audit) | Matches the app's existing minimal-retention, no-tracking posture. Tighter than typical — means the reprocess-after-a-prompt-fix window is short; design EI-1 so low-confidence/rejected rows are easy to act on quickly rather than assuming a long runway. |
 | **Who can confirm/dismiss a suggested item** | **Any companion or organizer** | The review inbox is a shared triage queue for the whole trip, not gated to whoever forwarded the original email — matches how families actually split "who forwards vs. who cleans up." |
@@ -66,19 +68,20 @@ Last updated: 2026-07-09.
 
 | Stage | Repo | Gate |
 |---|---|---|
-| **EI-0** — schema: two new tables, two new `itinerary_items` columns, RLS, an RPC to read/rotate a trip's import address, an RPC to dismiss/mark an import | backend | — |
-| **EI-1** — `ingest-email` edge function: shared-secret auth, token→trip resolve, land raw row, Anthropic structured-parse (balanced confidence gating), insert suggested item(s), rate-limit | backend | 🔑 set `ANTHROPIC_API_KEY` + `EMAIL_INGEST_SHARED_SECRET` secrets |
-| **EI-2** — app: status-aware queries, review banner + inbox, `AddItemSheet` confirm/dismiss mode, real import address in the UI | app | **must land before EI-3 opens the door** |
-| **EI-3** — the actual email Worker (`web/email-worker`): MIME parse, extract token/From/Subject/body, forward to `ingest-email` | app repo (Cloudflare) | 🔑 enable Cloudflare Email Routing on `plans.tripto.navbytes.io` (DNS MX), catch-all rule → Worker, set the shared secret |
+| **EI-0** ✅ — schema: two new tables, two new `itinerary_items` columns, RLS, an RPC to read/rotate a trip's import address, an RPC to dismiss/mark an import | backend | done, live |
+| **EI-1** ✅ — `ingest-email` edge function: shared-secret auth, token→trip resolve, land raw row, LLM structured-parse via Cloudflare AI Gateway (balanced confidence gating), insert suggested item(s), rate-limit | backend | 🔑 set `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` (AI Gateway Unified Billing — see below) + `EMAIL_INGEST_SHARED_SECRET`; optionally `LLM_MODEL` to override the default |
+| **EI-2** ✅ — app: status-aware queries, review banner + inbox, `AddItemSheet` confirm/dismiss mode, real import address in the UI | app | done, on branch `email-import-app` ([PR #4](https://github.com/navbytes/tripto/pull/4)) |
+| **EI-3** ✅ — the actual email Worker (`web/email-worker`): MIME parse, extract token/From/Subject/body, forward to `ingest-email` | app repo (Cloudflare) | code done; 🔑 owner still needs to enable Cloudflare Email Routing on `plans.tripto.navbytes.io` (DNS MX), add a catch-all rule → Worker, set the shared secret (same value as EI-1's), and `wrangler deploy` |
 | **EI-4** — hardening: 7-day retention cron, reprocessing path, rate-limit tests, unverified-sender UX | both | — |
 | **EI-5** (deferred to v1.1) — push notifications on suggested-item insert | both | 🔑 APNs key |
 
-Dependency order: **EI-0 → (EI-1 ∥ EI-2) → EI-2 gates EI-3 → EI-4**.
+Dependency order: **EI-0 → (EI-1 ∥ EI-2) → EI-2 gates EI-3 → EI-4**. All satisfied.
 
-**First concrete step:** write the EI-0 migration in
-`~/repos/backend/projects/tripto/supabase/migrations/`
-(`supabase migration new tripto_email_import`) — everything else depends on
-that schema existing.
+**Remaining before this is live end-to-end (all owner steps, nothing left to build):**
+1. 🔑 Load Unified Billing credits in the Cloudflare dashboard (AI Gateway → Credits Available → top up) — this is what actually pays for LLM calls; no Anthropic/Gemini account needed.
+2. 🔑 Create a Cloudflare API token with `AI Gateway Run` permission; set it as `CLOUDFLARE_API_TOKEN` and the account ID as `CLOUDFLARE_ACCOUNT_ID` on the `ingest-email` function (`supabase secrets set ...`).
+3. 🔑 Generate one shared-secret value; set it as `EMAIL_INGEST_SHARED_SECRET` on both `ingest-email` (Supabase) and the email Worker (`wrangler secret put`) — must match exactly.
+4. 🔑 Enable Cloudflare Email Routing on `navbytes.io`, DNS MX scoped to the `plans` subdomain only, catch-all rule → the email Worker, then `wrangler deploy` from `web/email-worker`.
 
 ---
 
@@ -126,4 +129,5 @@ signing team is already set) should be corrected in the same pass.
 - `supabase/migrations/20260707161358_tripto_core_schema.sql` — `status` column, item RLS, public-read filter (reference).
 - `supabase/migrations/20260708074827_tripto_apple_refresh_tokens.sql` — deny-all edge-only table pattern to copy for `email_imports`.
 - `functions/apple-link-token/index.ts` — edge-function + secret pattern to copy for `ingest-email`.
-- New: `supabase/migrations/<ts>_tripto_email_import.sql`, `functions/ingest-email/`.
+- `functions/ingest-email/index.ts` — the parse/insert function; its `callLLM()` is the Cloudflare AI Gateway call, `DEFAULT_LLM_MODEL` the fallback model string.
+- `supabase/migrations/<ts>_tripto_email_import.sql` — EI-0 schema.
