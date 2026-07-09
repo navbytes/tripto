@@ -31,6 +31,15 @@ struct PackingListView: View {
     @State private var isPresentingAdd = false
     @State private var toast: String?
     @State private var reassigningItem: PackingItem?
+    /// Finding 3: drives `PackingItemFormSheet` in edit mode — set from the
+    /// row's leading swipe action, `nil` means the add sheet (driven by
+    /// `isPresentingAdd`) is showing instead.
+    @State private var editingItem: PackingItem?
+    /// Finding 2: an always-on packed-to-bottom sort (`PackingGrouping`)
+    /// already answers "what's left to pack"; this is the lightweight,
+    /// opt-in complement for hiding packed items outright once most of the
+    /// list is done.
+    @State private var hidePacked = false
 
     init(tripId: UUID, tripCreatedBy: UUID, isAwaitingFirstSync: Bool = false) {
         self.tripId = tripId
@@ -63,8 +72,11 @@ struct PackingListView: View {
         return PackingPermissions.canManage(role: myRole)
     }
 
+    // Finding 2: the header's counts stay over the *full* list even when
+    // `hidePacked` is on — only `groups` (what actually renders) is filtered.
     private var summary: PackingProgress.Summary { PackingProgress.summary(for: packingItems) }
-    private var groups: [(key: PackingGroupKey, items: [PackingItem])] { PackingGrouping.groups(for: packingItems) }
+    private var visibleItems: [PackingItem] { hidePacked ? packingItems.filter { !$0.isDone } : packingItems }
+    private var groups: [(key: PackingGroupKey, items: [PackingItem])] { PackingGrouping.groups(for: visibleItems) }
 
     var body: some View {
         Group {
@@ -95,20 +107,36 @@ struct PackingListView: View {
                 addItem(label: label, groupKey: groupKey, assigneeProfileId: assigneeProfileId)
             }
         }
+        // Finding 3: same form, driven by the item being edited — the sheet
+        // decides add-vs-edit copy internally (see its `editing` init), and
+        // the closure signature is unchanged so this call site just routes
+        // to `updateItem` instead of `addItem`.
+        .sheet(item: $editingItem) { item in
+            PackingItemFormSheet(tripProfiles: tripProfiles, editing: item) { label, groupKey, assigneeProfileId in
+                updateItem(item, label: label, groupKey: groupKey, assigneeProfileId: assigneeProfileId)
+            }
+        }
         .confirmationDialog(
-            "Reassign to",
+            // Finding 7: "Assign to" for a never-assigned item, "Reassign
+            // to" once it already has someone — read at render time so it
+            // tracks whichever item triggered the dialog.
+            reassigningItem?.assigneeProfileId == nil ? "Assign to" : "Reassign to",
             isPresented: Binding(
                 get: { reassigningItem != nil },
                 set: { isPresented in if !isPresented { reassigningItem = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("Unassigned") {
+            // Finding 5: a checkmark suffix on the current assignee so the
+            // dialog itself shows who's already on the hook, instead of
+            // requiring a round-trip back to the row to check.
+            Button("Unassigned" + (reassigningItem?.assigneeProfileId == nil ? "  \u{2713}" : "")) {
                 if let item = reassigningItem { reassign(item, to: nil) }
                 reassigningItem = nil
             }
             ForEach(tripProfiles) { profile in
-                Button(profile.displayName) {
+                let isCurrent = reassigningItem?.assigneeProfileId == profile.id
+                Button(profile.displayName + (isCurrent ? "  \u{2713}" : "")) {
                     if let item = reassigningItem { reassign(item, to: profile.id) }
                     reassigningItem = nil
                 }
@@ -136,6 +164,20 @@ struct PackingListView: View {
                     .font(Typo.display(20))
                     .foregroundStyle(Palette.ink)
                 Spacer(minLength: Spacing.sm)
+                // Finding 2: opt-in complement to the always-on
+                // packed-to-bottom sort — only worth surfacing once there's
+                // at least one packed item to hide.
+                if summary.done > 0 {
+                    Button {
+                        withAnimation { hidePacked.toggle() }
+                    } label: {
+                        Text(hidePacked ? "Show packed" : "Hide packed")
+                            .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                            .foregroundStyle(hidePacked ? Palette.amber : Palette.slate)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, Spacing.sm)
+                }
                 Text("\(summary.percent)%")
                     .font(Typo.body(Typo.Size.caption, weight: .bold))
                     .foregroundStyle(Palette.amber)
@@ -149,6 +191,19 @@ struct PackingListView: View {
                 }
             }
             .frame(height: 8)
+
+            // Finding 1: mirrors `BookingDetailView`'s read-only notice —
+            // a plain-language signal (not just disabled-looking controls)
+            // that this list can't be changed from this account/role.
+            if !canManage && !packingItems.isEmpty {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "lock.fill").font(.system(size: 11))
+                    Text("Only an organizer or companion can change the packing list.")
+                }
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+                .padding(.top, Spacing.xs)
+            }
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.lg)
@@ -173,7 +228,20 @@ struct PackingListView: View {
 
                         VStack(spacing: Spacing.sm) {
                             ForEach(group.items) { item in
-                                row(item)
+                                PackingRow(
+                                    item: item,
+                                    canManage: canManage,
+                                    tripProfiles: tripProfiles,
+                                    // Finding 1: same signed-out-creator override `canManage`
+                                    // already applies — without it a signed-out creator could
+                                    // toggle/reassign/edit but not delete their own item.
+                                    canDelete: authManager.userId == nil
+                                        || PackingPermissions.canDelete(item: item, role: myRole, userId: authManager.userId),
+                                    onToggle: { toggleDone(item) },
+                                    onReassign: { reassigningItem = item },
+                                    onEdit: { editingItem = item },
+                                    onDelete: { delete(item) }
+                                )
                             }
                         }
                     }
@@ -186,94 +254,6 @@ struct PackingListView: View {
             .padding(.bottom, Fab.scrollClearance)
         }
         .coordinateSpace(.named(HeroCollapse.scrollSpace))
-    }
-
-    private func row(_ item: PackingItem) -> some View {
-        HStack(spacing: Spacing.md) {
-            Button {
-                toggleDone(item)
-            } label: {
-                HStack(spacing: Spacing.md) {
-                    checkbox(for: item)
-                    Text(item.label)
-                        .font(Typo.body(Typo.Size.body, weight: .semibold))
-                        .foregroundStyle(item.isDone ? Palette.slate : Palette.ink)
-                        .strikethrough(item.isDone)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canManage)
-
-            Button {
-                reassigningItem = item
-            } label: {
-                assigneeChip(for: item)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canManage)
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm + 2)
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: Radii.card, style: .continuous).stroke(Palette.mist, lineWidth: 1)
-        }
-        .opacity(item.isDone ? 0.65 : 1)
-        .swipeActions(edge: .trailing) {
-            // Finding 1: same signed-out-creator override as `canManage` —
-            // without it, a signed-out creator could add/toggle/reassign an
-            // item but not delete it, recreating the same inconsistency one
-            // level down.
-            if authManager.userId == nil || PackingPermissions.canDelete(item: item, role: myRole, userId: authManager.userId) {
-                Button("Delete", role: .destructive) { delete(item) }
-            }
-        }
-    }
-
-    private func checkbox(for item: PackingItem) -> some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(item.isDone ? CategoryColor.activity.fg : Color.clear)
-            .frame(width: 24, height: 24)
-            .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(item.isDone ? Color.clear : Palette.mist, lineWidth: 2)
-            }
-            .overlay {
-                if item.isDone {
-                    Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                }
-            }
-    }
-
-    private func assigneeChip(for item: PackingItem) -> some View {
-        let profile = item.assigneeProfileId.flatMap { id in tripProfiles.first { $0.id == id } }
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(profile.map { AvatarColor.color(named: $0.avatarColor) } ?? Palette.mist)
-                .frame(width: 22, height: 22)
-                .overlay {
-                    if let profile {
-                        Text(initials(from: profile.displayName))
-                            .font(Typo.body(10, weight: .bold))
-                            .foregroundStyle(.white)
-                    } else {
-                        Image(systemName: "person.fill.questionmark")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Palette.slate)
-                    }
-                }
-            Text(profile.map { firstName(from: $0.displayName) } ?? "Unassigned")
-                .font(Typo.body(11.5, weight: .semibold))
-                .foregroundStyle(Palette.slate)
-                .lineLimit(1)
-        }
-        .padding(.leading, 4)
-        .padding(.trailing, Spacing.sm)
-        .padding(.vertical, 4)
-        .background(Palette.paper, in: Capsule())
     }
 
     // MARK: - Empty state (§6.6: invitation copy, not blank)
@@ -305,7 +285,11 @@ struct PackingListView: View {
                     Text(
                         canManage
                             ? "Passports, the car seat, chargers everyone forgets \u{2014} add what this trip needs."
-                            : "The organizer hasn\u{2019}t added anything yet."
+                            // Finding 6: neutral, non-misattributing —
+                            // §6.6's "empty screens are invitations, not
+                            // blame" (the organizer isn't necessarily the
+                            // one who'd add packing items).
+                            : "No one\u{2019}s added anything to the packing list yet."
                     )
                     .font(Typo.body())
                     .foregroundStyle(Palette.slate)
@@ -335,21 +319,16 @@ struct PackingListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Derived
-
-    private func firstName(from displayName: String) -> String {
-        displayName.split(separator: " ").first.map(String.init) ?? displayName
-    }
-
-    private func initials(from displayName: String) -> String {
-        firstName(from: displayName).prefix(1).uppercased()
-    }
-
     // MARK: - Mutations
 
     private func toggleDone(_ item: PackingItem) {
         guard canManage else { return }
-        item.isDone.toggle()
+        // Finding 2: so a checked item visibly sinks to the bottom of its
+        // group (`PackingGrouping.groups(for:)`'s new packed-to-bottom
+        // sort) instead of just snapping there.
+        withAnimation {
+            item.isDone.toggle()
+        }
         item.updatedAt = .now
         item.updatedBy = authManager.userId
         try? modelContext.save()
@@ -360,6 +339,27 @@ struct PackingListView: View {
     private func reassign(_ item: PackingItem, to profileId: UUID?) {
         guard canManage else { return }
         item.assigneeProfileId = profileId
+        item.updatedAt = .now
+        item.updatedBy = authManager.userId
+        try? modelContext.save()
+        enqueue(item)
+        // Finding 9: parity with `addItem`'s toast + `toggleDone`'s haptic —
+        // reassigning previously gave no feedback at all.
+        let firstName = profileId
+            .flatMap { id in tripProfiles.first { $0.id == id } }
+            .map { $0.displayName.split(separator: " ").first.map(String.init) ?? $0.displayName }
+        toast = firstName.map { "Assigned to \($0)" } ?? "Marked unassigned"
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    /// Finding 3: preserves `isDone`/`assigneeProfileId` — a label/group
+    /// typo fix is one sync op instead of the old delete-and-re-add, which
+    /// silently dropped both.
+    private func updateItem(_ item: PackingItem, label: String, groupKey: PackingGroupKey, assigneeProfileId: UUID?) {
+        guard canManage, !label.isEmpty else { return }
+        item.label = label
+        item.groupKeyRaw = groupKey.rawValue
+        item.assigneeProfileId = assigneeProfileId
         item.updatedAt = .now
         item.updatedBy = authManager.userId
         try? modelContext.save()
@@ -394,6 +394,10 @@ struct PackingListView: View {
         modelContext.delete(item)
         try? modelContext.save()
         Task { await syncEngine?.enqueueDelete(table: .packingItems, rowId: rowId, tripId: tripId) }
+        // Finding 9: parity with `addItem`'s toast + `toggleDone`'s haptic —
+        // deleting previously gave no feedback at all.
+        toast = "Removed from packing list"
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     private func enqueue(_ item: PackingItem) {
@@ -427,18 +431,159 @@ struct PackingListView: View {
     #endif
 }
 
+/// One packing-list row: checkbox/label toggle, assignee chip, and the
+/// trailing delete / leading edit swipe actions — extracted opportunistically
+/// (UX audit finding 8, deferred as its own formal fix per iPhone-first) once
+/// findings 1/3/4 already touched every part of it. A plain callback-driven
+/// leaf, same shape as `PackingItemFormSheet`, so `PackingListView` still
+/// owns all the SwiftData/sync state.
+private struct PackingRow: View {
+    let item: PackingItem
+    let canManage: Bool
+    let tripProfiles: [TripProfile]
+    let canDelete: Bool
+    let onToggle: () -> Void
+    let onReassign: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            Button(action: onToggle) {
+                HStack(spacing: Spacing.md) {
+                    checkbox
+                    Text(item.label)
+                        .font(Typo.body(Typo.Size.body, weight: .semibold))
+                        .foregroundStyle(item.isDone ? Palette.slate : Palette.ink)
+                        .strikethrough(item.isDone)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canManage)
+            // Finding 1: dims the checkbox/label so it no longer *looks*
+            // tappable for a read-only viewer — `.disabled` above is the
+            // real gate, this is just matching affordance to reality.
+            .opacity(canManage ? 1 : 0.5)
+            // Finding 4: VoiceOver only heard "Button" with no indication of
+            // what it toggled or its current state.
+            .accessibilityLabel(item.label)
+            .accessibilityValue(item.isDone ? "Packed" : "Not packed")
+            .accessibilityAddTraits(item.isDone ? [.isSelected] : [])
+            .accessibilityHint(canManage ? "Double tap to mark packed" : "")
+
+            Button(action: onReassign) {
+                assigneeChip
+            }
+            .buttonStyle(.plain)
+            .disabled(!canManage)
+            .opacity(canManage ? 1 : 0.5)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm + 2)
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Radii.card, style: .continuous).stroke(Palette.mist, lineWidth: 1)
+        }
+        .opacity(item.isDone ? 0.65 : 1)
+        .swipeActions(edge: .trailing) {
+            if canDelete {
+                Button("Delete", role: .destructive, action: onDelete)
+            }
+        }
+        .swipeActions(edge: .leading) {
+            // Finding 3: a typo/wrong-category fix no longer has to go
+            // through delete-and-re-add.
+            if canManage {
+                Button("Edit", action: onEdit).tint(Palette.indigo)
+            }
+        }
+    }
+
+    private var checkbox: some View {
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .fill(item.isDone ? CategoryColor.activity.fg : Color.clear)
+            .frame(width: 24, height: 24)
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(item.isDone ? Color.clear : Palette.mist, lineWidth: 2)
+            }
+            .overlay {
+                if item.isDone {
+                    Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                }
+            }
+    }
+
+    private var assigneeChip: some View {
+        let profile = item.assigneeProfileId.flatMap { id in tripProfiles.first { $0.id == id } }
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(profile.map { AvatarColor.color(named: $0.avatarColor) } ?? Palette.mist)
+                .frame(width: 22, height: 22)
+                .overlay {
+                    if let profile {
+                        Text(initials(from: profile.displayName))
+                            .font(Typo.body(10, weight: .bold))
+                            .foregroundStyle(.white)
+                    } else {
+                        Image(systemName: "person.fill.questionmark")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Palette.slate)
+                    }
+                }
+            Text(profile.map { firstName(from: $0.displayName) } ?? "Unassigned")
+                .font(Typo.body(11.5, weight: .semibold))
+                .foregroundStyle(Palette.slate)
+                .lineLimit(1)
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, Spacing.sm)
+        .padding(.vertical, 4)
+        .background(Palette.paper, in: Capsule())
+    }
+
+    private func firstName(from displayName: String) -> String {
+        displayName.split(separator: " ").first.map(String.init) ?? displayName
+    }
+
+    private func initials(from displayName: String) -> String {
+        firstName(from: displayName).prefix(1).uppercased()
+    }
+}
+
 /// Add-item sheet (this milestone's brief: "Add-item affordance (label +
 /// group + optional assignee)"). A plain closure callback (`onSave`), not a
 /// direct SwiftData/sync dependency, so this stays a dumb form the same way
 /// `RolePickerSheet` (ShareTripView.swift) does.
 private struct PackingItemFormSheet: View {
     let tripProfiles: [TripProfile]
+    /// Finding 3: reused for edit — `nil` (the default) is the add flow this
+    /// sheet already had; a non-nil item seeds the form's initial state and
+    /// switches the header/button copy below. `onSave`'s signature is
+    /// unchanged either way; the caller (`PackingListView`) decides whether
+    /// that's an add or an update from which state var drove the sheet.
+    var editing: PackingItem?
     let onSave: (_ label: String, _ groupKey: PackingGroupKey, _ assigneeProfileId: UUID?) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var label = ""
-    @State private var groupKey: PackingGroupKey = .shared
+    @State private var label: String
+    @State private var groupKey: PackingGroupKey
     @State private var assigneeProfileId: UUID?
+
+    init(
+        tripProfiles: [TripProfile], editing: PackingItem? = nil,
+        onSave: @escaping (_ label: String, _ groupKey: PackingGroupKey, _ assigneeProfileId: UUID?) -> Void
+    ) {
+        self.tripProfiles = tripProfiles
+        self.editing = editing
+        self.onSave = onSave
+        _label = State(initialValue: editing?.label ?? "")
+        _groupKey = State(initialValue: editing?.groupKey ?? .shared)
+        _assigneeProfileId = State(initialValue: editing?.assigneeProfileId)
+    }
 
     private var isValid: Bool { !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -482,7 +627,7 @@ private struct PackingItemFormSheet: View {
                             onSave(label.trimmingCharacters(in: .whitespacesAndNewlines), groupKey, assigneeProfileId)
                             dismiss()
                         } label: {
-                            Text("Add to packing list")
+                            Text(editing == nil ? "Add to packing list" : "Save changes")
                                 .font(Typo.body(weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .foregroundStyle(Palette.onAmber)
@@ -513,7 +658,7 @@ private struct PackingItemFormSheet: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             Spacer()
-            Text("Add packing item")
+            Text(editing == nil ? "Add packing item" : "Edit packing item")
                 .font(Typo.body(weight: .bold))
                 .foregroundStyle(Palette.ink)
             Spacer()
