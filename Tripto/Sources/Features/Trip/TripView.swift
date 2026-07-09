@@ -30,8 +30,8 @@ struct SettingsRoute: Hashable {}
 
 
 /// The trip screen (BUILD_PLAN.md §4.2 — THE core screen): cover-gradient
-/// hero, Itinerary · Bookings sub-tabs (Map/$ Split hidden per §9.4), and
-/// the day-grouped timeline. Renders entirely from the local SwiftData
+/// hero, Itinerary · Bookings · Packing sub-tabs (Map/$ Split hidden per
+/// §9.4), and the day-grouped timeline. Renders entirely from the local SwiftData
 /// mirror; `onAppear`/`onDisappear` drive the per-trip realtime channel and
 /// debounced pull (SYNC_DESIGN.md "Realtime").
 struct TripView: View {
@@ -162,6 +162,8 @@ struct TripView: View {
 
             if let trip {
                 content(for: trip)
+            } else if awaitingFirstTripPull {
+                loadingTripState
             } else {
                 missingTripState
             }
@@ -473,6 +475,13 @@ struct TripView: View {
                 HStack(spacing: Spacing.xxs) {
                     Image(systemName: "person.2.fill").font(.system(size: 10))
                     Text("\(max(tripProfiles.count, 1))")
+                    // Finding 5: a small tappability cue for sighted users —
+                    // VoiceOver already gets the same signal from the
+                    // `.accessibilityHint` below, so this glyph adds nothing
+                    // there and is hidden from it.
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9))
+                        .accessibilityHidden(true)
                 }
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xxs)
@@ -513,7 +522,7 @@ struct TripView: View {
         TripDateRangeFormat.spokenText(start: trip.startDate, end: trip.endDate)
     }
 
-    // MARK: - Sub-tabs (Itinerary · Bookings only — Map/$ Split hidden, §9.4)
+    // MARK: - Sub-tabs (Itinerary · Bookings · Packing — Map/$ Split hidden, §9.4)
 
     /// The three content tabs — Itinerary · Bookings · Packing — each swapping
     /// `selectedTab` in place. Packing was originally a separate pushed screen
@@ -705,6 +714,20 @@ struct TripView: View {
     /// `BookingsTabView`'s empty state uses, and the heading now explains
     /// *why* — §6.6 voice: name the likely cause, then point at where the
     /// traveler's other trips still are.
+    /// Finding 1: shown instead of `missingTripState` while a signed-in,
+    /// online traveler's first pull for this trip is still in flight — the
+    /// trip row hasn't arrived yet, but that's not the same as "removed by
+    /// the organizer or access ended." Mirrors `BookingsTabView`'s own
+    /// loading state for the same `awaitingFirstTripPull` condition.
+    private var loadingTripState: some View {
+        VStack(spacing: Spacing.md) {
+            ProgressView()
+            Text("Loading this trip\u{2026}")
+                .font(Typo.body())
+                .foregroundStyle(Palette.slate)
+        }
+    }
+
     private var missingTripState: some View {
         VStack(spacing: Spacing.md) {
             Text("This trip is no longer available")
