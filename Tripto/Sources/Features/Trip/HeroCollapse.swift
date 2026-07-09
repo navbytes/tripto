@@ -25,6 +25,16 @@ struct HeroScrollOffsetKey: PreferenceKey {
     }
 }
 
+/// Set by `TripHeroView`'s non-accessibility meta row; read there to size its
+/// own collapse frame off the row's true natural (fully-expanded) height
+/// instead of a stale hardcoded guess — see that call site's doc comment.
+struct HeroMetaHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// Zero-height sentinel placed as the FIRST child inside a tab's scroll content.
 /// Reports how far that content has scrolled up, in the shared coordinate space.
 struct HeroScrollSentinel: View {
@@ -82,6 +92,15 @@ struct TripHeroView: View {
     let model: HeroScrollModel
 
     @Environment(\.dismiss) private var dismiss
+
+    /// The meta row's true, fully-expanded natural height — measured (see
+    /// `metaRow`'s `.background`/`.onPreferenceChange` below) rather than
+    /// assumed, since the traveler-count pill's 44pt tap target (finding 4)
+    /// makes the row taller than its text alone. 44 is only the sane
+    /// first-frame fallback before the first measurement lands, chosen to
+    /// match that pill's real height so the row is never clipped even on
+    /// frame one.
+    @State private var metaNaturalHeight: CGFloat = 44
 
     private var progress: Double {
         model.progress(for: selectedTab, reduceMotion: reduceMotion)
@@ -142,7 +161,41 @@ struct TripHeroView: View {
                 metaRow
                     .padding(.top, Spacing.xs * (1 - p))
                     .opacity(1 - min(1, p * 1.6))
-                    .frame(height: 22 * (1 - p), alignment: .top)
+                    // Measured BEFORE the `.frame(height:)` below clamps
+                    // this view's size — `.background` sizes to fit its
+                    // parent's layout here, so this `GeometryReader` reports
+                    // the row's true natural height (including the
+                    // traveler-count pill's 44pt tap target, finding 4).
+                    // Measuring after the clamp would instead report the
+                    // already-clamped size, which would self-reinforce down
+                    // to 0 rather than the row's real height.
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(key: HeroMetaHeightKey.self, value: geo.size.height)
+                        }
+                    )
+                    .onPreferenceChange(HeroMetaHeightKey.self) { height in
+                        // Only trust a measurement taken while the row is
+                        // fully expanded/unclamped (`p == 0`) — otherwise
+                        // this would capture an already-clamped-smaller
+                        // height mid-collapse and lock the row into it.
+                        // `height > 0` additionally guards a real
+                        // GeometryReader quirk verified on-device: its very
+                        // first reported value inside a `.background` can
+                        // land as a bogus `0` before the surrounding layout
+                        // has settled — trusting that zero (even though
+                        // `p == 0` at that moment too) would permanently
+                        // latch the row's frame to 0pt, since every later
+                        // render then multiplies that 0 by `(1 - p)`.
+                        if p == 0, height > 0 { metaNaturalHeight = height }
+                    }
+                    // The row's real natural height includes the
+                    // traveler-count pill's 44pt tap target (finding 4), not
+                    // just its text line — a hardcoded `22` here clipped the
+                    // row from the very first frame, even at rest (`p ==
+                    // 0`). `metaNaturalHeight` (measured above) is used
+                    // instead.
+                    .frame(height: metaNaturalHeight * (1 - p), alignment: .top)
                     .clipped()
             }
         }
