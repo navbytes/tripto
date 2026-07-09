@@ -77,10 +77,11 @@ struct ItineraryTabView: View {
     /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address
     /// (`get_or_create_trip_import_address`), fetched once per trip visit
     /// and cached here rather than re-requested on every render — see
-    /// `fetchImportAddressIfNeeded()`. `nil` until the fetch resolves (or if
-    /// it fails, in which case `importTeaser` just keeps showing its loading
-    /// spinner — a fresh open of the trip tries again).
-    @State private var importAddress: String?
+    /// `fetchImportAddressIfNeeded()`. Reviewer should-fix: a durable RPC
+    /// failure used to leave `.loading`'s spinner up forever (never surfaced
+    /// as `.failed`) — `importTeaser` now renders a tap-to-retry row instead,
+    /// wired to `retryImportAddressFetch()`.
+    @State private var importLoadState: ImportAddressCard.LoadState = .loading
     @State private var hasFetchedImportAddress = false
     /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
     /// as `typeSize`, both so `TimelineLayout.gutterWidth` can step the
@@ -268,19 +269,33 @@ struct ItineraryTabView: View {
     /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): `get_or_create_trip_import_address`
     /// — any trip member may call it, but this is only ever invoked for
     /// editors (`canEdit`), since `importTeaser` (its only reader) is itself
-    /// `canEdit`-gated at the call site in `emptyState`.
+    /// `canEdit`-gated at the call site in `emptyState`. `canEdit` arrives as
+    /// a plain `let` (synchronously known at init, unlike `ShareTripView`'s
+    /// `@Query`-derived `myRole` — see that view's matching doc comment), so
+    /// the one-shot `.task` this backs doesn't need to re-run on a later gate
+    /// flip the way `ShareTripView`'s does.
     private func fetchImportAddressIfNeeded() async {
         guard canEdit, !hasFetchedImportAddress else { return }
         hasFetchedImportAddress = true
+        await fetchImportAddress()
+    }
+
+    /// The actual RPC call, split out from the one-shot guard above so
+    /// `retryImportAddressFetch()` can re-run it without re-triggering
+    /// `hasFetchedImportAddress`'s guard.
+    private func fetchImportAddress() async {
         do {
-            let address: String = try await Supa.rpc(
-                "get_or_create_trip_import_address", params: TripImportAddressParams(pTripId: trip.id)
-            )
-            importAddress = address
+            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: trip.id))
         } catch {
-            // Left `nil` — `importTeaser` shows a loading spinner rather
-            // than an error; a fresh open of the trip tries again.
+            importLoadState = .failed
         }
+    }
+
+    /// Reviewer should-fix: `importTeaser`'s tap-to-retry action on a
+    /// `.failed` state.
+    private func retryImportAddressFetch() {
+        importLoadState = .loading
+        Task { await fetchImportAddress() }
     }
 
     @ViewBuilder
@@ -731,72 +746,11 @@ struct ItineraryTabView: View {
     /// real address or a loading state while it's fetched
     /// (`fetchImportAddressIfNeeded`).
     private var importTeaser: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.md) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.18))
-                    .frame(width: 40, height: 40)
-                    .overlay {
-                        Image(systemName: "envelope.badge")
-                            .foregroundStyle(Palette.amber)
-                    }
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Email import")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text("We\u{2019}ll add it to your itinerary for you to review")
-                        .font(Typo.body(11))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .combine)
-                Spacer(minLength: Spacing.sm)
-            }
-
-            if let importAddress {
-                Button {
-                    toast = ClipboardFeedback.copy(importAddress, label: "Import address")
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        Text("Forward confirmations to")
-                            .font(Typo.body(Typo.Size.caption))
-                            .foregroundStyle(.white.opacity(0.72))
-                        Text(importAddress)
-                            .font(Typo.mono(Typo.Size.caption))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.72))
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .padding(.horizontal, Spacing.md)
-                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Forward confirmations to \(importAddress)")
-                .accessibilityHint("Copies the import address")
-            } else {
-                HStack {
-                    ProgressView().tint(.white)
-                    Text("Loading your import address\u{2026}")
-                        .font(Typo.body(Typo.Size.caption))
-                        .foregroundStyle(.white.opacity(0.72))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        ImportAddressCard(state: importLoadState) { address in
+            toast = ClipboardFeedback.copy(address, label: "Import address")
+        } onRetry: {
+            retryImportAddressFetch()
         }
-        .padding(Spacing.md)
-        .background(Palette.indigo, in: RoundedRectangle(cornerRadius: Radii.card + 2, style: .continuous))
         .padding(.horizontal, Spacing.xl)
     }
-}
-
-/// `get_or_create_trip_import_address(p_trip_id uuid)` — see
-/// `ItineraryTabView.fetchImportAddressIfNeeded()`'s doc comment.
-private struct TripImportAddressParams: Encodable {
-    let pTripId: UUID
 }
