@@ -43,6 +43,12 @@ struct TripView: View {
 
     @Query private var trips: [Trip]
     @Query private var items: [ItineraryItem]
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): `status == 'suggested'` items,
+    /// i.e. unreviewed email-import suggestions — kept out of `items` (which
+    /// now filters to `confirmed` only, see `init` below) so the trusted
+    /// itinerary/bookings views never render one, and surfaced separately
+    /// via `ImportReviewBanner` + `SuggestedItemsSheet` instead.
+    @Query private var suggestedItems: [ItineraryItem]
     @Query private var members: [TripMember]
     @Query private var tripProfiles: [TripProfile]
     @Query private var profiles: [Profile]
@@ -60,10 +66,21 @@ struct TripView: View {
     /// Finding 4: `tabBar()`'s AX-size horizontal-scroll branch, same
     /// `isAccessibilitySize` convention as `TripCard.swift`.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    #if DEBUG
+    /// EI-2 verify-drill only (`-uitestSeedSuggestedItem`,
+    /// `applyUITestAutopilotIfNeeded` below) — every other write in this
+    /// screen is delegated to `AddItemSheet`/`BookingDetailView`, which each
+    /// hold their own `modelContext`; this is the first (DEBUG-only) direct
+    /// write `TripView` itself makes.
+    @Environment(\.modelContext) private var modelContext
+    #endif
 
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
     @State private var isEditingTrip = false
+    /// EI-2: `ImportReviewBanner`'s tap target — opens `SuggestedItemsSheet`
+    /// listing `suggestedItems`.
+    @State private var isPresentingImportReview = false
     @State private var toast: String?
     /// "Just mine" selection (BUILD_PLAN.md §5.4) — `nil` is "Everyone."
     @State private var selectedProfileFilter: UUID?
@@ -93,8 +110,19 @@ struct TripView: View {
         self.tripId = tripId
         self.initialToast = initialToast
         _trips = Query(filter: #Predicate<Trip> { $0.id == tripId })
+        // EI-2: the trusted itinerary/bookings views must never render an
+        // unreviewed suggestion (`docs/EMAIL_IMPORT_PLAN.md` "app-side
+        // changes") — filtered at the query itself, not downstream, so
+        // every consumer of `items` (`ItineraryTabView`, `BookingsTabView`,
+        // `PersonFilter`'s summaries) inherits the exclusion for free.
+        let confirmedRaw = ItemStatus.confirmed.rawValue
         _items = Query(
-            filter: #Predicate<ItineraryItem> { $0.tripId == tripId },
+            filter: #Predicate<ItineraryItem> { $0.tripId == tripId && $0.statusRaw == confirmedRaw },
+            sort: \ItineraryItem.startsAt
+        )
+        let suggestedRaw = ItemStatus.suggested.rawValue
+        _suggestedItems = Query(
+            filter: #Predicate<ItineraryItem> { $0.tripId == tripId && $0.statusRaw == suggestedRaw },
             sort: \ItineraryItem.startsAt
         )
         _members = Query(filter: #Predicate<TripMember> { $0.tripId == tripId })
@@ -205,7 +233,7 @@ struct TripView: View {
             Task { await syncEngine?.stopObservingTrip(id) }
         }
         .task {
-            applyUITestAutopilotIfNeeded()
+            await applyUITestAutopilotIfNeeded()
             if let initialToast {
                 toast = initialToast
             }
@@ -225,9 +253,20 @@ struct TripView: View {
     }
 
     /// M2 verify-drill autopilot — see the state vars' doc comment above.
-    private func applyUITestAutopilotIfNeeded() {
+    private func applyUITestAutopilotIfNeeded() async {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
+        // EI-2: seeds one `status: .suggested` item on this trip so the
+        // review banner/inbox/confirm/dismiss flow is reachable without a
+        // live `ingest-email` pipeline (`docs/EMAIL_IMPORT_PLAN.md` EI-1,
+        // not shipped yet) — see `DemoSeeder.seedSuggestedItem`'s doc
+        // comment.
+        if arguments.contains("-uitestSeedSuggestedItem") {
+            let id = tripId
+            await DemoSeeder.seedSuggestedItem(
+                tripId: id, modelContext: modelContext, syncEngine: syncEngine, authManager: authManager
+            )
+        }
         if arguments.contains("-uitestOpenBookings") {
             selectedTab = .bookings
         }
@@ -280,6 +319,16 @@ struct TripView: View {
             }
 
             tabBar()
+
+            // EI-2: shown on the Itinerary tab only (`docs/EMAIL_IMPORT_PLAN.md`
+            // "a review banner ... on the Itinerary tab") — Bookings/Packing
+            // stay uncluttered since a suggestion isn't a booking until
+            // confirmed.
+            if selectedTab == .itinerary, !suggestedItems.isEmpty {
+                ImportReviewBanner(count: suggestedItems.count) {
+                    isPresentingImportReview = true
+                }
+            }
 
             if selectedTab == .itinerary, !tripProfiles.isEmpty {
                 PersonFilterBar(chips: personFilterChips, selection: $selectedProfileFilter)
@@ -374,6 +423,13 @@ struct TripView: View {
             ) { message in
                 toast = message
             }
+        }
+        .sheet(isPresented: $isPresentingImportReview) {
+            SuggestedItemsSheet(
+                trip: trip, items: suggestedItems,
+                defaultZone: NewItemZoneDefault.zone(forExistingItemTzIdentifiers: items.map(\.tz)),
+                onToast: { message in toast = message }
+            )
         }
         .sheet(isPresented: $isEditingTrip) {
             // UX audit finding 7: the context-menu-triggered edit path

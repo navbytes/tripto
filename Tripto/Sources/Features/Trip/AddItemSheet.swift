@@ -134,6 +134,13 @@ struct AddItemSheet: View {
     }
     @State private var saveError: SaveError?
 
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): the "Dismiss" action's live
+    /// `dismiss_email_import_item` RPC call is in flight — disables both
+    /// CTAs so a second tap can't fire a duplicate request or race the save
+    /// path, and backs the inline error message below on failure.
+    @State private var isDismissingSuggestion = false
+    @State private var dismissError: String?
+
     /// Finding 3: gates the "Discard changes?" confirmation on cancel/swipe-
     /// dismiss, same as `TripFormView`.
     @State private var showDiscardConfirm = false
@@ -359,6 +366,13 @@ struct AddItemSheet: View {
 
     private var isEditing: Bool { editing != nil }
 
+    /// EI-2: true while reviewing an unconfirmed email-import suggestion —
+    /// swaps the primary CTA to "Confirm booking" and reveals the secondary
+    /// "Dismiss" action. Reads `editing.status` live (not a value captured
+    /// at `init`) so the CTA/action correctly disappear the instant `save()`
+    /// flips the status to `.confirmed`, right before this sheet dismisses.
+    private var isReviewingSuggestion: Bool { editing?.status == .suggested }
+
     /// Finding 3: the live counterpart to `initialSnapshot` — diffed against
     /// it (plus the separately-tracked assignee set) by `hasChanges`.
     private var currentSnapshot: EditSnapshot {
@@ -505,6 +519,10 @@ struct AddItemSheet: View {
                 Text(saveError.message)
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.rose)
+            } else if let dismissError {
+                Text(dismissError)
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.rose)
             } else if let hint = missingNameHint {
                 Text(hint)
                     .font(Typo.body(Typo.Size.caption))
@@ -513,7 +531,7 @@ struct AddItemSheet: View {
             Button {
                 save()
             } label: {
-                Text(isEditing ? "Save changes" : "Add \(category.displayName.lowercased()) to itinerary")
+                Text(saveButtonTitle)
                     .font(Typo.body(weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(Palette.onAmber)
@@ -522,9 +540,38 @@ struct AddItemSheet: View {
                     .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)
             }
             .buttonStyle(.plain)
-            .disabled(!isValid)
+            .disabled(!isValid || isDismissingSuggestion)
             .opacity(isValid ? 1 : 0.5)
+
+            // EI-2: a shared triage queue (`docs/EMAIL_IMPORT_PLAN.md`
+            // decisions: "any companion or organizer" can dismiss, not just
+            // whoever forwarded the email) — visible only while reviewing an
+            // unconfirmed suggestion, never for a normal add/edit.
+            if isReviewingSuggestion {
+                Button(role: .destructive) {
+                    Task { await dismissSuggestion() }
+                } label: {
+                    HStack {
+                        if isDismissingSuggestion {
+                            ProgressView().tint(Palette.rose)
+                        }
+                        Text("Dismiss")
+                            .font(Typo.body(weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(Palette.rose)
+                    .padding(.vertical, Spacing.md)
+                    .background(Palette.roseSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isDismissingSuggestion)
+            }
         }
+    }
+
+    private var saveButtonTitle: String {
+        if isReviewingSuggestion { return "Confirm booking" }
+        return isEditing ? "Save changes" : "Add \(category.displayName.lowercased()) to itinerary"
     }
 
     /// Finding 7: names the specific missing field driving a disabled Save,
@@ -583,11 +630,16 @@ struct AddItemSheet: View {
     private func save() {
         guard isValid else { return }
         saveError = nil
+        dismissError = nil
         let now = Date()
         var fields = composedFields()
         fields.details.tags = Array(selectedTags)
 
         if let editing {
+            // EI-2: captured before mutating `editing.status` below, since
+            // `isReviewingSuggestion` reads it live and would otherwise
+            // already read `false` by the time `toastMessage` needs it.
+            let wasReviewingSuggestion = isReviewingSuggestion
             editing.category = category
             editing.title = fields.title
             editing.startsAt = fields.startsAt
@@ -602,6 +654,13 @@ struct AddItemSheet: View {
             // `nil` while signed out — honest: this device's edit hasn't
             // been attributed to a signed-in account yet.
             editing.updatedBy = authManager.userId
+            // EI-2: review-and-confirm flips `suggested` -> `confirmed` as
+            // part of the exact same write — it rides the normal SwiftData
+            // save + `enqueueUpsert` outbox path below, not a separate
+            // request, so it's offline-safe like any other edit.
+            if wasReviewingSuggestion {
+                editing.status = .confirmed
+            }
             do {
                 try modelContext.save()
             } catch {
@@ -615,7 +674,7 @@ struct AddItemSheet: View {
             let rowId = editing.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
             reconcileAssignees(itemId: rowId)
-            onToast(toastMessage("updated"))
+            onToast(toastMessage(wasReviewingSuggestion ? "confirmed" : "updated"))
         } else {
             guard let creatorId = authManager.userId ?? tripCreatedBy else { return }
             let item = ItineraryItem(
@@ -657,6 +716,35 @@ struct AddItemSheet: View {
             return "\(base) \u{2014} you\u{2019}re signed out, so it won\u{2019}t sync until you sign back in."
         }
         return syncStatus.isOffline ? "\(base) \u{2014} will sync when you\u{2019}re back" : base
+    }
+
+    // MARK: - EI-2: dismiss an email-import suggestion
+
+    /// `dismiss_email_import_item` (`docs/EMAIL_IMPORT_PLAN.md`): a live-only
+    /// RPC call, not an outbox op — matching how `claim_invite`/`peek_invite`
+    /// are called directly via `Supa.rpc` (App/AppRouter.swift), since this
+    /// is a one-shot server-side transaction (delete the suggested row +
+    /// mark its `email_imports` row rejected) rather than a field edit that
+    /// makes sense to queue offline. On success, the item is also deleted
+    /// from the local mirror immediately (rather than waiting on the next
+    /// pull/realtime delete) so the inbox updates without a visible delay.
+    private func dismissSuggestion() async {
+        guard let editing else { return }
+        isDismissingSuggestion = true
+        dismissError = nil
+        do {
+            try await Supa.rpcVoid(
+                "dismiss_email_import_item", params: DismissEmailImportItemParams(pItemId: editing.id)
+            )
+            modelContext.delete(editing)
+            try? modelContext.save()
+            isDismissingSuggestion = false
+            onToast("Booking dismissed")
+            dismiss()
+        } catch {
+            isDismissingSuggestion = false
+            dismissError = "Couldn\u{2019}t dismiss this booking. Check your connection and try again."
+        }
     }
 
     // MARK: - Family: assignees + tags (this milestone's brief §3)
@@ -994,4 +1082,10 @@ struct AddItemSheet: View {
     static func timeOfDay(hour: Int, minute: Int) -> Date {
         Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
     }
+}
+
+/// `dismiss_email_import_item(p_item_id uuid)` — see `dismissSuggestion()`'s
+/// doc comment above.
+private struct DismissEmailImportItemParams: Encodable {
+    let pItemId: UUID
 }

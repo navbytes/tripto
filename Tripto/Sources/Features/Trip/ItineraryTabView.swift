@@ -74,7 +74,14 @@ struct ItineraryTabView: View {
     /// app offering a manual refresh). `nil` only in previews/tests.
     var onRefresh: (() async -> Void)? = nil
 
-    @AppStorage("importWaitlistTaps") private var importWaitlistTaps = 0
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address
+    /// (`get_or_create_trip_import_address`), fetched once per trip visit
+    /// and cached here rather than re-requested on every render — see
+    /// `fetchImportAddressIfNeeded()`. `nil` until the fetch resolves (or if
+    /// it fails, in which case `importTeaser` just keeps showing its loading
+    /// spinner — a fresh open of the trip tries again).
+    @State private var importAddress: String?
+    @State private var hasFetchedImportAddress = false
     /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
     /// as `typeSize`, both so `TimelineLayout.gutterWidth` can step the
     /// gutter width with it and so their `.equatable()` short-circuit can't
@@ -85,10 +92,6 @@ struct ItineraryTabView: View {
     /// One-shot: only auto-scroll to "today" the first time this view's
     /// `.task` fires, not on every subsequent data refresh.
     @State private var hasAutoScrolledToToday = false
-
-    /// The existing tap counter already persists across launches, so it
-    /// doubles as the waitlist-membership flag — no new `@AppStorage` key.
-    private var isOnWaitlist: Bool { importWaitlistTaps > 0 }
 
     private var tripStartDay: DayDate { DayDate.from(trip.startDate, calendar: .current) }
     private var tripEndDay: DayDate { DayDate.from(trip.endDate, calendar: .current) }
@@ -255,6 +258,29 @@ struct ItineraryTabView: View {
             }
         }
         .background(Palette.paper)
+        // EI-2: fetched once per trip visit regardless of which branch
+        // above is showing — `importTeaser` only renders in the settled
+        // -empty branch, but caching ahead of that means it's not waiting on
+        // an RPC round trip the moment someone reaches it.
+        .task { await fetchImportAddressIfNeeded() }
+    }
+
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): `get_or_create_trip_import_address`
+    /// — any trip member may call it, but this is only ever invoked for
+    /// editors (`canEdit`), since `importTeaser` (its only reader) is itself
+    /// `canEdit`-gated at the call site in `emptyState`.
+    private func fetchImportAddressIfNeeded() async {
+        guard canEdit, !hasFetchedImportAddress else { return }
+        hasFetchedImportAddress = true
+        do {
+            let address: String = try await Supa.rpc(
+                "get_or_create_trip_import_address", params: TripImportAddressParams(pTripId: trip.id)
+            )
+            importAddress = address
+        } catch {
+            // Left `nil` — `importTeaser` shows a loading spinner rather
+            // than an error; a fresh open of the trip tries again.
+        }
     }
 
     @ViewBuilder
@@ -697,79 +723,80 @@ struct ItineraryTabView: View {
         return TimelineBuilder.dayTitleText(day)
     }
 
-    /// Honest import teaser (this milestone's brief: "never fake parsing").
-    /// Routes to a waitlist counter, never a fabricated parse.
-    ///
-    /// Finding 9: this used to be one giant `Button` — the icon, the
-    /// "coming soon" copy, and the forward-address hint all enrolled in the
-    /// waitlist on tap, which reads as an accidental sign-up trap. Now only
-    /// the explicit CTA is a button; the rest of the card is static
-    /// informational content (`.accessibilityElement(children: .combine)`
-    /// so VoiceOver still reads it as one stop). The old "already on the
-    /// list" re-tap toast goes away with the tap surface — there's nothing
-    /// left to accidentally re-tap.
-    ///
-    /// UX audit finding 3: the copy previously promised a real waitlist
-    /// ("You're on the list — we'll tell you when it's ready"), but the
-    /// mechanism behind it is only a device-local `@AppStorage` tap
-    /// counter — nothing is actually sent anywhere, and no one gets
-    /// notified. The wording below claims only what that counter can
-    /// honestly deliver ("noted interest," not "you'll be notified"); a
-    /// real server-side waitlist capture is deferred to the backend repo.
-    /// The counter, `isOnWaitlist` gate, and persistence semantics are all
-    /// unchanged.
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): replaces the old waitlist-tap
+    /// stub with the trip's real, working import address — forwarding to it
+    /// now actually lands a suggestion in the review inbox (`ImportReviewBanner`
+    /// / `SuggestedItemsSheet`) once EI-1's `ingest-email` function ships. No
+    /// more fake "coming soon"/waitlist-counter copy; this either shows the
+    /// real address or a loading state while it's fetched
+    /// (`fetchImportAddressIfNeeded`).
     private var importTeaser: some View {
-        HStack(spacing: Spacing.md) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.18))
-                .frame(width: 40, height: 40)
-                .overlay {
-                    Image(systemName: "envelope.badge")
-                        .foregroundStyle(Palette.amber)
-                }
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Email import — coming soon")
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(.white)
-                Text("Forward confirmations to tripto@navbytes.io once it\u{2019}s live")
-                    .font(Typo.body(11))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
-            Spacer(minLength: Spacing.sm)
-            if isOnWaitlist {
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "checkmark")
-                    Text("Interest noted \u{2014} thanks!")
-                }
-                .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                .foregroundStyle(.white)
-                .accessibilityElement(children: .combine)
-            } else {
-                Button {
-                    importWaitlistTaps += 1
-                    toast = "Thanks \u{2014} we\u{2019}re building email import."
-                } label: {
-                    Text("I want this")
-                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.md) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: 40, height: 40)
+                    .overlay {
+                        Image(systemName: "envelope.badge")
+                            .foregroundStyle(Palette.amber)
+                    }
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Email import")
+                        .font(Typo.body(weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.xs)
-                        .background(Color.white.opacity(0.18), in: Capsule())
-                        // Same 44pt hit-band pattern as `PersonFilterBar`'s
-                        // chips — a smaller visual capsule centered in a
-                        // 44pt hit area.
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
+                    Text("We\u{2019}ll add it to your itinerary for you to review")
+                        .font(Typo.body(11))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                Spacer(minLength: Spacing.sm)
+            }
+
+            if let importAddress {
+                Button {
+                    toast = ClipboardFeedback.copy(importAddress, label: "Import address")
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Text("Forward confirmations to")
+                            .font(Typo.body(Typo.Size.caption))
+                            .foregroundStyle(.white.opacity(0.72))
+                        Text(importAddress)
+                            .font(Typo.mono(Typo.Size.caption))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Registers your interest in email import")
+                .accessibilityLabel("Forward confirmations to \(importAddress)")
+                .accessibilityHint("Copies the import address")
+            } else {
+                HStack {
+                    ProgressView().tint(.white)
+                    Text("Loading your import address\u{2026}")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(Spacing.md)
         .background(Palette.indigo, in: RoundedRectangle(cornerRadius: Radii.card + 2, style: .continuous))
         .padding(.horizontal, Spacing.xl)
     }
+}
+
+/// `get_or_create_trip_import_address(p_trip_id uuid)` — see
+/// `ItineraryTabView.fetchImportAddressIfNeeded()`'s doc comment.
+private struct TripImportAddressParams: Encodable {
+    let pTripId: UUID
 }
