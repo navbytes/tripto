@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2022"],
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    // *.test.ts run directly under `node --test` (no bundler/no wrangler),
+    // which requires explicit ".ts" specifiers on relative imports -- unlike
+    // src/index.ts and friends, which keep share-worker's extensionless
+    // import style since wrangler's esbuild bundles those. Requires `noEmit`
+    // (set above) per TS's own rule for this flag.
+    "allowImportingTsExtensions": true
+  },
+  // Only the modules tests actually import -- deliberately not index.ts,
+  // which needs the Workers-runtime ForwardableEmailMessage/ExportedHandler
+  // globals from tsconfig.json's "@cloudflare/workers-types", not Node's.
+  "include": ["src/*.test.ts", "src/ingest.ts", "src/token.ts", "src/types.ts"]
+}

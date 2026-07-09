@@ -47,4 +47,11 @@ enum Supa {
     static func rpcVoid(_ function: String) async throws {
         _ = try await client.rpc(function).execute()
     }
+
+    /// Void-returning overload with params — EI-2's `dismiss_email_import_item`
+    /// (`docs/EMAIL_IMPORT_PLAN.md`), same "204 No Content, nothing to
+    /// decode" shape as `delete_account()` above, but taking an argument.
+    static func rpcVoid<Params: Encodable>(_ function: String, params: Params) async throws {
+        _ = try await client.rpc(function, params: params).execute()
+    }
 }

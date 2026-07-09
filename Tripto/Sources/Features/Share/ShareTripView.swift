@@ -47,6 +47,15 @@ struct ShareTripView: View {
     /// (this milestone's brief §2) — both drive `TripProfileFormSheet`.
     @State private var isPresentingAddProfile = false
     @State private var editingProfile: TripProfile?
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address,
+    /// fetched once per screen visit and cached here — see
+    /// `fetchImportAddressIfNeeded()`. Mirrors `ItineraryTabView`'s own
+    /// `importLoadState`/`hasFetchedImportAddress` pair (deliberately not
+    /// shared state — each screen fetches independently), so the
+    /// forwarding-address card stays reachable here even once the itinerary
+    /// has items and its own teaser has stopped rendering.
+    @State private var importLoadState: ImportAddressCard.LoadState = .loading
+    @State private var hasFetchedImportAddress = false
 
     init(tripId: UUID) {
         self.tripId = tripId
@@ -62,6 +71,7 @@ struct ShareTripView: View {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 shareLinkCard
                 inviteSection
+                importCard
                 peopleSection
             }
             .padding(Spacing.xl)
@@ -157,6 +167,20 @@ struct ShareTripView: View {
             await applyUITestAutopilotIfNeeded()
             #endif
         }
+        // Reviewer should-fix: `myRole` (below) is derived from `@Query
+        // members`, which can still be empty on first render (fresh
+        // install, just-joined trip, this screen opened before member sync
+        // completes) — a plain one-shot `.task` here fired once with
+        // `myRole == nil`, the gate inside `fetchImportAddressIfNeeded()`
+        // failed, and `hasFetchedImportAddress` was left `false` forever
+        // (the early return never sets it), so once `members` synced in and
+        // `importCard` started rendering, nothing ever re-fetched — a
+        // permanent loading spinner for the rest of that visit. Re-running
+        // on every `myRole` change fixes that: the guard inside the
+        // function still no-ops once a fetch has actually been attempted,
+        // so this only ever causes a retry in the false/unknown -> true
+        // transition.
+        .task(id: myRole) { await fetchImportAddressIfNeeded() }
     }
 
     // MARK: - Derived
@@ -508,6 +532,68 @@ struct ShareTripView: View {
                 .frame(minWidth: 44, minHeight: 44)
         }
         .padding(.vertical, Spacing.sm)
+    }
+
+    // MARK: - Import card
+
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): a persistent copy of
+    /// `ItineraryTabView`'s import teaser — that one only renders while the
+    /// itinerary has zero items, so once any item exists the forwarding
+    /// address becomes unreachable there. This card lives alongside the
+    /// other copyable tokens on this screen (share link, invite links) so
+    /// it's always reachable. Gated on `ItemPermissions.canAdd` — same
+    /// permission check `addProfileButton` above uses — since only an
+    /// organizer/companion can usefully forward confirmations into the
+    /// itinerary; a viewer sees neither this card nor the teaser's `canEdit`
+    /// equivalent.
+    @ViewBuilder
+    private var importCard: some View {
+        if ItemPermissions.canAdd(role: myRole) {
+            ImportAddressCard(state: importLoadState) { address in
+                toast = ClipboardFeedback.copy(address, label: "Import address")
+            } onRetry: {
+                retryImportAddressFetch()
+            }
+        }
+    }
+
+    /// Same one-shot-per-visit *shape* as `ItineraryTabView`'s function of
+    /// the same name, but gated on `ItemPermissions.canAdd` (not `canEdit`)
+    /// — deliberately different from the teaser's gate: the RPC requires
+    /// trip membership, so fetching for a viewer or signed-out user would
+    /// just fail/spin for someone who can never see `importCard` anyway.
+    ///
+    /// Unlike `ItineraryTabView`'s `canEdit` (a plain `let`, synchronously
+    /// known at init), `myRole` here is derived from `@Query members`,
+    /// which resolves *asynchronously* and can still be empty the first
+    /// time this runs — that's why the `.task(id: myRole)` above re-invokes
+    /// this on every `myRole` change rather than firing once, and why
+    /// `hasFetchedImportAddress` must only ever be set `true` once a fetch
+    /// has actually been attempted (never inside this guard's early
+    /// return), so a gate that starts `false` and later flips `true` still
+    /// gets its one real attempt.
+    private func fetchImportAddressIfNeeded() async {
+        guard ItemPermissions.canAdd(role: myRole), !hasFetchedImportAddress else { return }
+        hasFetchedImportAddress = true
+        await fetchImportAddress()
+    }
+
+    /// The actual RPC call, split out from the one-shot guard above so
+    /// `retryImportAddressFetch()` can re-run it without re-triggering
+    /// `hasFetchedImportAddress`'s guard.
+    private func fetchImportAddress() async {
+        do {
+            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: tripId))
+        } catch {
+            importLoadState = .failed
+        }
+    }
+
+    /// Reviewer should-fix: `importCard`'s tap-to-retry action on a
+    /// `.failed` state.
+    private func retryImportAddressFetch() {
+        importLoadState = .loading
+        Task { await fetchImportAddress() }
     }
 
     // MARK: - People list

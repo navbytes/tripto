@@ -417,6 +417,48 @@ enum DemoSeeder {
         return items
     }
 
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`) verify-drill only: seeds one
+    /// `status: .suggested` item on an *existing* trip so the review
+    /// banner/inbox/confirm/dismiss flow can be exercised end-to-end in the
+    /// simulator — nothing writes `'suggested'` for real until EI-1's
+    /// `ingest-email` edge function ships. Mirrors `seed(...)`'s own
+    /// "same write path as any other mutation" rule (SwiftData insert, then
+    /// `SyncEngine.enqueue`), so this also exercises the confirm flow's real
+    /// outbox push, not just local state. Returns the new item's id, or
+    /// `nil` if there's no signed-in user to attribute it to.
+    @discardableResult
+    @MainActor
+    static func seedSuggestedItem(
+        tripId: UUID, modelContext: ModelContext, syncEngine: SyncEngine?, authManager: AuthManager
+    ) async -> UUID? {
+        guard let userId = authManager.userId else { return nil }
+        let now = Date()
+        var details = ItemDetails.empty
+        details.airline = "Skyline Air"
+        details.flightNo = "SK 204"
+        details.fromIATA = "JFK"
+        details.toIATA = "LIS"
+        let item = ItineraryItem(
+            id: UUID(), tripId: tripId, categoryRaw: ItemCategory.flight.rawValue, title: "Skyline Air SK 204",
+            startsAt: now.addingTimeInterval(3 * 24 * 3600), endsAt: now.addingTimeInterval(3 * 24 * 3600 + 8 * 3600),
+            tz: TimeZone.current.identifier, locationName: "JFK",
+            locationLat: nil, locationLng: nil, confirmation: "SKY204X", notes: nil,
+            detailsJSON: "{}", statusRaw: ItemStatus.suggested.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        item.details = details
+        modelContext.insert(item)
+        do {
+            try modelContext.save()
+        } catch {
+            return nil
+        }
+        let dto = item.toDTO()
+        let rowId = item.id
+        await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto)
+        return rowId
+    }
+
     // MARK: - Helpers
 
     private static func makeItem(
