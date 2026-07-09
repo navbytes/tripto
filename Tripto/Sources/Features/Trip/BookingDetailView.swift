@@ -84,6 +84,8 @@ struct BookingDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 passCard(for: item)
+                tagsBlock(for: item)
+                editedByLabel(for: item)
                 actionRow(for: item)
                 notesBlock(for: item)
 
@@ -152,6 +154,24 @@ struct BookingDetailView: View {
         }
     }
 
+    /// Category gradient plus a topLeading-heavy black scrim (BUILD_PLAN.md
+    /// §7.3 "overlay scrims"). Every header gradient runs topLeading →
+    /// bottomTrailing with the header text living in the upper-left band —
+    /// the scrim is heaviest there and fades toward bottomTrailing so it
+    /// lifts contrast exactly where the text sits without flattening the
+    /// signature look. Shared by all three gradient headers (flight,
+    /// transport, hotel) so the fix — and any future tuning — stays in one
+    /// place; `simpleHeader` (activity/food) uses a light background and
+    /// doesn't need this.
+    private func gradientHeaderFill(_ color: Color) -> some View {
+        LinearGradient(colors: [color, Palette.indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay(
+                LinearGradient(
+                    colors: [.black.opacity(0.45), .black.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+    }
+
     private func headerIconBadge(_ systemImage: String) -> some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
             .fill(.white.opacity(0.18))
@@ -177,7 +197,7 @@ struct BookingDetailView: View {
                 Spacer()
                 Text(flightName.isEmpty ? item.title : flightName)
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white)
             }
             HStack(alignment: .top, spacing: Spacing.sm) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -185,7 +205,6 @@ struct BookingDetailView: View {
                         .font(Typo.display(34))
                     Text("\(depCity) · \(depTime) \(depZone)")
                         .font(Typo.body(Typo.Size.caption))
-                        .opacity(0.85)
                 }
                 Spacer(minLength: Spacing.sm)
                 routeLine
@@ -195,18 +214,13 @@ struct BookingDetailView: View {
                         .font(Typo.display(34))
                     Text("\(arrCity) · \(arrTime) \(arrZone)")
                         .font(Typo.body(Typo.Size.caption))
-                        .opacity(0.85)
                 }
             }
             .foregroundStyle(.white)
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [CategoryColor.flight.fg, Palette.indigo], startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        )
+        .background(gradientHeaderFill(CategoryColor.flight.fg))
     }
 
     private var routeLine: some View {
@@ -245,7 +259,7 @@ struct BookingDetailView: View {
                 Spacer()
                 Text(details.provider ?? item.title)
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 transportEndpoint(label: "Pickup", place: pickup, time: "\(depDate) \u{00B7} \(depTime) \(depZone)")
@@ -255,11 +269,7 @@ struct BookingDetailView: View {
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [CategoryColor.transport.fg, Palette.indigo], startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        )
+        .background(gradientHeaderFill(CategoryColor.transport.fg))
     }
 
     /// Short localized "Mon 14"-style date for a boarding-pass endpoint, in the
@@ -279,8 +289,8 @@ struct BookingDetailView: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .frame(width: 64, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
-                Text(place).font(Typo.display(20)).lineLimit(1)
-                Text(time).font(Typo.body(Typo.Size.caption)).opacity(0.85)
+                Text(place).font(Typo.display(20)).lineLimit(2)
+                Text(time).font(Typo.body(Typo.Size.caption))
             }
         }
     }
@@ -297,16 +307,12 @@ struct BookingDetailView: View {
             if !item.locationName.isEmpty {
                 Text(item.locationName)
                     .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.white)
             }
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [CategoryColor.hotel.fg, Palette.indigo], startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        )
+        .background(gradientHeaderFill(CategoryColor.hotel.fg))
     }
 
     private func simpleHeader(for item: ItineraryItem) -> some View {
@@ -378,9 +384,13 @@ struct BookingDetailView: View {
                 Button {
                     copyToClipboard(value)
                 } label: {
-                    Text(value)
-                        .font(Typo.mono(15.5))
-                        .foregroundStyle(Palette.ink)
+                    HStack(spacing: 4) {
+                        Text(value)
+                            .font(Typo.mono(15.5))
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(Palette.indigo)
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Double tap to copy")
@@ -469,6 +479,51 @@ struct BookingDetailView: View {
         toast = "Copied"
     }
 
+    /// The kid-aware tags dropped when this screen was cut over from the
+    /// timeline (finding 3) — same `WrapLayout`/`TagChip` pair
+    /// `TimelineCardRow` uses (`TimelineRowViews.swift`), so a tag reads
+    /// identically whether you're scanning the timeline or the detail card.
+    @ViewBuilder
+    private func tagsBlock(for item: ItineraryItem) -> some View {
+        if !item.details.tags.isEmpty {
+            WrapLayout(horizontalSpacing: Spacing.xs, verticalSpacing: Spacing.xs) {
+                ForEach(item.details.tags, id: \.self) { tag in
+                    TagChip(tag: tag)
+                }
+            }
+        }
+    }
+
+    /// updated_by → name lookup mirroring `TripView.profileNames` (checks
+    /// account profiles, then trip profiles linked to that account).
+    private var profileNames: [UUID: String] {
+        var names: [UUID: String] = [:]
+        for profile in tripProfiles {
+            if let linked = profile.linkedUserId {
+                names[linked] = profile.displayName
+            }
+        }
+        for profile in profiles {
+            names[profile.id] = profile.displayName
+        }
+        return names
+    }
+
+    /// "edited by {name} · {relative time}" (finding 4) — dropped when this
+    /// screen was cut over from the timeline; reuses the same pure
+    /// `TimelineBuilder.editedByText` the timeline card renders so the two
+    /// surfaces never disagree.
+    @ViewBuilder
+    private func editedByLabel(for item: ItineraryItem) -> some View {
+        if let text = TimelineBuilder.editedByText(
+            for: item, myUserId: authManager.userId, namesById: profileNames, now: .now
+        ) {
+            Text(text)
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+        }
+    }
+
     // MARK: - Action row (BUILD_PLAN.md §4.4: "Add to calendar · Get directions · Share with group")
 
     private func actionRow(for item: ItineraryItem) -> some View {
@@ -522,7 +577,7 @@ struct BookingDetailView: View {
             do {
                 let granted = try await store.requestWriteOnlyAccessToEvents()
                 guard granted else {
-                    toast = "Calendar access denied"
+                    toast = "Calendar access is off. Turn it on in Settings > Tripto to add events."
                     return
                 }
                 let event = EKEvent(eventStore: store)
@@ -536,7 +591,7 @@ struct BookingDetailView: View {
                 try store.save(event, span: .thisEvent)
                 toast = "Added to Calendar"
             } catch {
-                toast = "Couldn\u{2019}t add to Calendar"
+                toast = "Couldn\u{2019}t save to Calendar. Try again in a moment."
             }
         }
     }
@@ -544,22 +599,41 @@ struct BookingDetailView: View {
     /// `MKMapItem` from lat/lng when known, else best-effort `CLGeocoder`
     /// resolution of the free-text `location_name` (this milestone's
     /// brief) — v1 has no obligation to always resolve a location.
+    ///
+    /// Flights are special-cased to the *arrival* airport rather than the
+    /// booking's own `location_name`/lat-lng (which, for a flight, is the
+    /// departure) — directions matter most in the "landed, disoriented"
+    /// moment, not before boarding. Falls back to the departure airport if
+    /// no arrival code is on the booking.
     private func getDirections(_ item: ItineraryItem) {
         Task {
             var coordinate: CLLocationCoordinate2D?
-            if let lat = item.locationLat, let lng = item.locationLng {
+            if item.category == .flight {
+                let details = item.details
+                if let iata = details.toIATA ?? details.fromIATA, !iata.isEmpty {
+                    let geocoder = CLGeocoder()
+                    coordinate = try? await geocoder.geocodeAddressString("\(iata) airport").first?.location?.coordinate
+                }
+            } else if let lat = item.locationLat, let lng = item.locationLng {
                 coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
             } else if !item.locationName.isEmpty {
                 let geocoder = CLGeocoder()
                 coordinate = try? await geocoder.geocodeAddressString(item.locationName).first?.location?.coordinate
             }
             guard let coordinate else {
-                toast = "Couldn\u{2019}t find a location for this item"
+                toast = item.category == .flight
+                    ? "Couldn\u{2019}t find that airport. Check the airport code on this flight."
+                    : "Add an address to this item to get directions."
                 return
             }
             let placemark = MKPlacemark(coordinate: coordinate)
             let mapItem = MKMapItem(placemark: placemark)
-            mapItem.name = item.locationName.isEmpty ? item.title : item.locationName
+            if item.category == .flight {
+                let details = item.details
+                mapItem.name = details.toIATA ?? details.fromIATA ?? item.title
+            } else {
+                mapItem.name = item.locationName.isEmpty ? item.title : item.locationName
+            }
             mapItem.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDefault])
         }
     }
@@ -603,7 +677,10 @@ struct BookingDetailView: View {
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
             } else {
                 let notes = item.notes ?? ""
-                Text(notes.isEmpty ? "No notes yet." : notes)
+                let emptyStateText = canEdit
+                    ? "Add a note for the group \u{2014} a gate change, a packing reminder, anything."
+                    : "No note yet. An organizer can add one."
+                Text(notes.isEmpty ? emptyStateText : notes)
                     .font(Typo.body())
                     .foregroundStyle(notes.isEmpty ? Palette.slate : Palette.ink)
             }
