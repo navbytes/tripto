@@ -35,6 +35,14 @@ struct ShareTripView: View {
     @State private var memberPendingOrganizerConfirm: TripMember?
     @State private var memberPendingRemoval: TripMember?
     @State private var invitePendingRevoke: Invite?
+    /// Guards the deliberate network-bound share-link create/reset (see the
+    /// "Mutations" doc comment below) — without this, a double-tap on
+    /// "Create view link" fires two concurrent inserts. Kept in the Button
+    /// actions themselves, not inside `createShareLink()`, so the DEBUG
+    /// autopilot and `resetShareLink()` aren't blocked by a reentrancy guard.
+    @State private var busyShareLink = false
+    /// Same as `busyShareLink`, per-role, for the two invite buttons.
+    @State private var busyInviteRoles: Set<TripRole> = []
     /// M4: "Add someone without the app" / edit-existing-profile sheets
     /// (this milestone's brief §2) — both drive `TripProfileFormSheet`.
     @State private var isPresentingAddProfile = false
@@ -175,11 +183,22 @@ struct ShareTripView: View {
         }
     }
 
+    /// The trip's actual creator — the earliest-joined `TripMember` (a
+    /// server trigger creates the organizer's `trip_members` row at trip
+    /// creation, before anyone else can join). `memberRow`'s caption used to
+    /// read `role == .organizer` as "created the trip", which goes stale the
+    /// moment a co-organizer is promoted (finding 4) — this instead derives
+    /// the one true creator, using the same `createdAt` field `sortedMembers`
+    /// already relies on.
+    private var tripCreatorId: UUID? {
+        members.min(by: { $0.createdAt < $1.createdAt })?.userId
+    }
+
     /// Trip profiles with no linked account yet — the non-app kids/
     /// grandparents (BUILD_PLAN.md §3.3/§5.3). Empty until M4 ships profile
     /// creation; rendered here so the list is ready the moment it does.
     private var unlinkedProfiles: [TripProfile] {
-        tripProfiles.filter { $0.linkedUserId == nil }
+        tripProfiles.filter { $0.linkedUserId == nil }.sorted { $0.createdAt < $1.createdAt }
     }
 
     private enum PersonRow: Identifiable {
@@ -236,6 +255,37 @@ struct ShareTripView: View {
     /// white pill; caught in the M3 dark-mode screenshot pass).
     private static let onWhitePillInk = Color(hex: "#1A1B2E")
 
+    /// `shareLinkCard`'s text scrim (UX audit finding 1). Unlike `TripCard`'s
+    /// `CoverGradient.textScrim` — a vertical, bottom-heavy ramp built for
+    /// text that sits at the bottom of that card — this card's title/
+    /// description sit at the TOP-LEADING corner, `CoverGradient.dusk`'s
+    /// lightest stop (#E8955A, ~2.4:1 for white per `Palette.onAmber`'s doc).
+    /// A bottom-heavy scrim would darken the wrong corner, so this is a
+    /// diagonal ramp along `.dusk`'s own axis (`.topLeading` ->
+    /// `.bottomTrailing`) instead. Black 0.45 composited over #E8955A yields
+    /// L~0.108 => ~6.6:1 for full white and ~5.3:1 for the description's
+    /// `.white.opacity(0.9)`, clearing WCAG AA (4.5:1); the bottom fine-print
+    /// already sits over dark indigo/plum and is unaffected. Fixed (not
+    /// theme-adaptive), same rationale as `CoverGradient.textScrim`: cover
+    /// gradients don't change between light and dark.
+    ///
+    /// This would normally live as a `CoverGradient` companion next to
+    /// `textScrim` in `Design/PaletteExtras.swift` (same file/rationale —
+    /// `gen_tokens.py` never touches it), but this pass is scoped to the
+    /// Share screen's own files only (concurrent work on other screens is
+    /// touching `Design/` files elsewhere on this branch), so it's kept
+    /// local here. Worth hoisting into `PaletteExtras.swift` in a later,
+    /// non-concurrent pass if `TripCard` or another cover-gradient card ever
+    /// needs the same top-leading treatment.
+    private static let shareLinkCardScrim = LinearGradient(
+        stops: [
+            .init(color: .black.opacity(0.45), location: 0.0),
+            .init(color: .clear, location: 0.6),
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     // MARK: - Share link card (top gradient card)
 
     private var shareLinkCard: some View {
@@ -267,9 +317,24 @@ struct ShareTripView: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .contentShape(Rectangle())
                     .frame(minHeight: 44)
+                    .disabled(busyShareLink)
+            } else if busyShareLink {
+                HStack(spacing: Spacing.sm) {
+                    ProgressView().tint(Self.onWhitePillInk)
+                    Text("Creating link\u{2026}")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Self.onWhitePillInk)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.sm)
+                .background(.white, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
             } else {
                 Button {
-                    Task { _ = await createShareLink() }
+                    Task {
+                        busyShareLink = true
+                        _ = await createShareLink()
+                        busyShareLink = false
+                    }
                 } label: {
                     Text("Create view link")
                         .font(Typo.body(weight: .semibold))
@@ -279,6 +344,7 @@ struct ShareTripView: View {
                         .background(.white, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .disabled(busyShareLink)
             }
 
             Text("Booking codes and notes never appear on this link.")
@@ -286,7 +352,12 @@ struct ShareTripView: View {
                 .foregroundStyle(.white.opacity(0.75))
         }
         .padding(Spacing.lg)
-        .background(CoverGradient.dusk, in: RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous)
+                .fill(CoverGradient.dusk)
+                .overlay { Self.shareLinkCardScrim }
+                .clipShape(RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous))
+        }
     }
 
     private func shareLinkRow(_ link: TripShareLink) -> some View {
@@ -377,23 +448,35 @@ struct ShareTripView: View {
 
     private func inviteButton(role: TripRole, title: String, icon: String, color: Color) -> some View {
         let existing = activeInvite(role: role)
+        let isBusy = busyInviteRoles.contains(role)
         return Button {
             if let existing {
                 let url = DeepLink.inviteURL(token: existing.token)
                 shareSheetItems = ["Join our trip on Tripto: \(url.absoluteString)"]
             } else {
-                Task { _ = await createInvite(role: role) }
+                Task {
+                    busyInviteRoles.insert(role)
+                    _ = await createInvite(role: role)
+                    busyInviteRoles.remove(role)
+                }
             }
         } label: {
             VStack(spacing: 3) {
                 HStack(spacing: Spacing.xs) {
-                    Image(systemName: icon)
+                    Image(systemName: isBusy ? "hourglass" : icon)
                     Text(title).font(Typo.body(weight: .semibold))
                 }
-                Text(existing != nil ? "Share existing link" : role.inviteGrant)
-                    .font(Typo.body(10))
-                    .opacity(0.85)
-                    .multilineTextAlignment(.center)
+                if isBusy {
+                    HStack(spacing: 4) {
+                        ProgressView().tint(color).scaleEffect(0.7)
+                        Text("Creating\u{2026}").font(Typo.body(10)).opacity(0.85)
+                    }
+                } else {
+                    Text(existing != nil ? "Share existing link" : role.inviteGrant)
+                        .font(Typo.body(10))
+                        .opacity(0.85)
+                        .multilineTextAlignment(.center)
+                }
             }
             .foregroundStyle(color)
             .frame(maxWidth: .infinity)
@@ -401,6 +484,7 @@ struct ShareTripView: View {
             .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(isBusy)
     }
 
     private func inviteRow(_ invite: Invite) -> some View {
@@ -543,7 +627,7 @@ struct ShareTripView: View {
                         Text("\u{00B7} you").font(Typo.body(weight: .medium)).foregroundStyle(Palette.slate)
                     }
                 }
-                Text(member.role == .organizer ? "created the trip" : "joined")
+                Text(member.userId == tripCreatorId ? "created the trip" : "joined")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
             }
@@ -696,21 +780,33 @@ struct ShareTripView: View {
             return link
         } catch {
             logDebug("createShareLink failed: \(error)")
-            toast = "Couldn\u{2019}t create a share link \u{2014} check your connection."
+            if let pg = error as? PostgrestError, pg.code == "42501" {
+                toast = "Couldn\u{2019}t create the link yet \u{2014} this trip is still syncing. Try again in a moment."
+            } else {
+                toast = "Couldn\u{2019}t create a share link \u{2014} check your connection."
+            }
             return nil
         }
     }
 
+    /// Creates the replacement link **before** revoking the old one, so
+    /// `activeShareLink` (`shareLinks.first { !revoked }`) never goes empty
+    /// mid-reset — the old create-then-revoke order let `shareLinkCard`
+    /// flash back to its "Create view link" empty state for a frame
+    /// (finding 2/3).
     private func resetShareLink() {
         Task {
-            if let existing = activeShareLink {
-                existing.revoked = true
-                try? modelContext.save()
-                let dto = existing.toDTO()
-                let id = existing.id
-                await syncEngine?.enqueueUpsert(table: .shareLinks, rowId: id, tripId: tripId, payload: dto)
-            }
+            busyShareLink = true
+            defer { busyShareLink = false }
+            let old = activeShareLink
             if await createShareLink() != nil {
+                if let old {
+                    old.revoked = true
+                    try? modelContext.save()
+                    let dto = old.toDTO()
+                    let id = old.id
+                    await syncEngine?.enqueueUpsert(table: .shareLinks, rowId: id, tripId: tripId, payload: dto)
+                }
                 toast = "Link reset"
             }
         }
@@ -747,7 +843,11 @@ struct ShareTripView: View {
             return invite
         } catch {
             logDebug("createInvite failed: \(error)")
-            toast = "Couldn\u{2019}t create an invite link \u{2014} check your connection."
+            if let pg = error as? PostgrestError, pg.code == "42501" {
+                toast = "Couldn\u{2019}t create the link yet \u{2014} this trip is still syncing. Try again in a moment."
+            } else {
+                toast = "Couldn\u{2019}t create an invite link \u{2014} check your connection."
+            }
             return nil
         }
     }

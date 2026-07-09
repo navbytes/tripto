@@ -82,7 +82,7 @@ struct TripProfileFormSheet: View {
                             Text("Color")
                                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                                 .foregroundStyle(Palette.slate)
-                            HStack(spacing: Spacing.md) {
+                            HStack(spacing: Spacing.sm) {
                                 ForEach(Self.swatches, id: \.self) { swatch in
                                     swatchButton(swatch)
                                 }
@@ -149,6 +149,10 @@ struct TripProfileFormSheet: View {
         .padding(.bottom, Spacing.sm)
     }
 
+    /// BUILD_PLAN §6.5's 44pt tap-target floor, matching the sibling
+    /// controls on `ShareTripView` (finding 6) — the swatch stays a 36pt
+    /// circle *visually* (unchanged), but its tappable area grows to 44x44,
+    /// centered on the same circle.
     private func swatchButton(_ swatch: String) -> some View {
         let isOn = avatarColor == swatch
         return Button {
@@ -168,6 +172,8 @@ struct TripProfileFormSheet: View {
                     Circle().stroke(isOn ? Palette.ink.opacity(0.25) : Color.clear, lineWidth: 2)
                         .padding(-3)
                 }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(swatch.capitalized)
