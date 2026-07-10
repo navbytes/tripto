@@ -77,6 +77,14 @@ struct TripView: View {
 
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
+    /// Set by `AddItemSheet`'s dashed "Paste" tile (`onRequestPaste`) right
+    /// before it dismisses itself; `isPresentingAdd`'s `onDismiss` reads and
+    /// clears it to hand off to `isPresentingPasteImport` — sheets can't
+    /// both be `true` at once, so the handoff has to happen after the first
+    /// one actually finishes dismissing, same pattern as any other
+    /// sheet-presents-a-sheet flow.
+    @State private var pasteRequestedFromAdd = false
+    @State private var isPresentingPasteImport = false
     @State private var isEditingTrip = false
     /// EI-2: `ImportReviewBanner`'s tap target — opens `SuggestedItemsSheet`
     /// listing `suggestedItems`.
@@ -415,14 +423,28 @@ struct TripView: View {
                 }
             }
         }
-        .sheet(isPresented: $isPresentingAdd) {
+        .sheet(isPresented: $isPresentingAdd, onDismiss: {
+            if pasteRequestedFromAdd {
+                pasteRequestedFromAdd = false
+                isPresentingPasteImport = true
+            }
+        }) {
             AddItemSheet(
                 tripId: trip.id, tripTitle: trip.title, editing: nil,
                 defaultZone: NewItemZoneDefault.zone(forExistingItemTzIdentifiers: items.map(\.tz)),
-                tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy
+                tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy,
+                onRequestPaste: { pasteRequestedFromAdd = true }
             ) { message in
                 toast = message
             }
+        }
+        .sheet(isPresented: $isPresentingPasteImport) {
+            PasteImportSheet(
+                kind: .booking, tripId: trip.id,
+                onBookingImported: { created in
+                    toast = "\(created) booking\(created == 1 ? "" : "s") added to review"
+                }
+            )
         }
         .sheet(isPresented: $isPresentingImportReview) {
             SuggestedItemsSheet(

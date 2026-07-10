@@ -155,19 +155,26 @@ struct PasteImportSheet: View {
             } label: {
                 HStack(spacing: Spacing.sm) {
                     if isSubmitting {
-                        ProgressView().tint(Palette.onAmber)
+                        ProgressView().tint(canSubmit ? Palette.onAmber : Palette.slate)
                     }
                     Text(isSubmitting ? "Importing\u{2026}" : "Import")
                         .font(Typo.body(weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
-                .foregroundStyle(Palette.onAmber)
+                // Bug fix: `onAmber` is a fixed near-black, deliberately
+                // non-adaptive to stay readable against `amber` (also
+                // fixed) — see its doc comment. Blanket `.opacity(0.5)` on
+                // the whole button used to fade this near-black text toward
+                // the dark-mode page background instead of toward anything
+                // legible, making disabled CTAs unreadable in dark mode.
+                .foregroundStyle(canSubmit ? Palette.onAmber : Palette.slate)
                 .padding(.vertical, Spacing.md)
-                .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                .background(
+                    canSubmit ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                )
             }
             .buttonStyle(.plain)
             .disabled(!canSubmit)
-            .opacity(canSubmit ? 1 : 0.5)
         }
     }
 
@@ -205,13 +212,15 @@ struct PasteImportSheet: View {
                 Text("Add \(toAddCandidates.count) item\(toAddCandidates.count == 1 ? "" : "s")")
                     .font(Typo.body(weight: .semibold))
                     .frame(maxWidth: .infinity)
-                    .foregroundStyle(Palette.onAmber)
+                    .foregroundStyle(toAddCandidates.isEmpty ? Palette.slate : Palette.onAmber)
                     .padding(.vertical, Spacing.md)
-                    .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                    .background(
+                        toAddCandidates.isEmpty ? Palette.mist : Palette.amber,
+                        in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                    )
             }
             .buttonStyle(.plain)
             .disabled(toAddCandidates.isEmpty)
-            .opacity(toAddCandidates.isEmpty ? 0.5 : 1)
         }
     }
 

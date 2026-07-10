@@ -17,6 +17,13 @@ struct AddItemSheet: View {
     let tripTitle: String
     let editing: ItineraryItem?
     let onToast: (String) -> Void
+    /// Add-mode only (`nil` when editing): tapping the category row's
+    /// dashed "Paste" tile calls this instead of switching `category`, then
+    /// dismisses — the caller owns presenting `PasteImportSheet` itself
+    /// (same "sheet hands off to sheet via `onDismiss`" pattern
+    /// `TripView` already uses elsewhere), so this sheet never has to know
+    /// about paste-extraction state.
+    var onRequestPaste: (() -> Void)? = nil
     /// The zone a *new* item's pickers should default to — the trip's dominant
     /// existing-item zone (see `NewItemZoneDefault`), so a Lisbon trip doesn't
     /// offer the traveler's home clock. `.current` when adding to an empty trip
@@ -215,11 +222,13 @@ struct AddItemSheet: View {
 
     init(
         tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current,
-        tripStartDate: Date = .now, tripCreatedBy: UUID? = nil, onToast: @escaping (String) -> Void
+        tripStartDate: Date = .now, tripCreatedBy: UUID? = nil, onRequestPaste: (() -> Void)? = nil,
+        onToast: @escaping (String) -> Void
     ) {
         self.tripId = tripId
         self.tripTitle = tripTitle
         self.editing = editing
+        self.onRequestPaste = onRequestPaste
         self.onToast = onToast
         self.defaultZone = defaultZone
         self.tripCreatedBy = tripCreatedBy
@@ -482,7 +491,40 @@ struct AddItemSheet: View {
             ForEach(ItemCategory.allCases, id: \.self) { cat in
                 categoryTile(cat)
             }
+            if let onRequestPaste {
+                pasteTile(onRequestPaste)
+            }
         }
+    }
+
+    /// Dashed border + no category color, deliberately unlike `categoryTile`
+    /// — this switches the whole sheet to a different mode (paste-and-
+    /// extract, `PasteImportSheet`), not one more category to fill in a form
+    /// for, and the mockup this shipped from called out that distinction as
+    /// the whole point.
+    private func pasteTile(_ onRequestPaste: @escaping () -> Void) -> some View {
+        Button {
+            onRequestPaste()
+            dismiss()
+        } label: {
+            VStack(spacing: Spacing.xs) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 18, weight: .medium))
+                Text("Paste")
+                    .font(Typo.body(11.5, weight: .semibold))
+            }
+            .foregroundStyle(Palette.ink)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.sm + 2)
+            .background(Palette.paper, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Palette.ink, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            }
+        }
+        .buttonStyle(.plain)
+        // XCUITest hook, same reasoning as `categoryTile`'s identifier below.
+        .accessibilityIdentifier("addItemCategoryTile-paste")
     }
 
     private func categoryTile(_ cat: ItemCategory) -> some View {
@@ -507,6 +549,10 @@ struct AddItemSheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
+        // ponytail: XCUITest hook — the icon+text pairing can concatenate SF
+        // Symbol accessibility text into the default label, so a plain
+        // identifier is more reliable than matching on visible text here.
+        .accessibilityIdentifier("addItemCategoryTile-\(cat.rawValue)")
     }
 
     /// Findings 2 & 7: the CTA-adjacent guidance line, mirroring
@@ -534,14 +580,15 @@ struct AddItemSheet: View {
                 Text(saveButtonTitle)
                     .font(Typo.body(weight: .semibold))
                     .frame(maxWidth: .infinity)
-                    .foregroundStyle(Palette.onAmber)
+                    .foregroundStyle(isValid ? Palette.onAmber : Palette.slate)
                     .padding(.vertical, Spacing.md)
-                    .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-                    .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)
+                    .background(
+                        isValid ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                    )
+                    .shadow(color: isValid ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
             .disabled(!isValid || isDismissingSuggestion)
-            .opacity(isValid ? 1 : 0.5)
 
             // EI-2: a shared triage queue (`docs/EMAIL_IMPORT_PLAN.md`
             // decisions: "any companion or organizer" can dismiss, not just

@@ -31,6 +31,11 @@ struct ShareTripView: View {
     @State private var toast: String?
     @State private var shareSheetItems: [Any]?
     @State private var isPresentingResetConfirm = false
+    /// Bug fix: the card used to only offer "Reset link" (revoke +
+    /// immediately create a replacement) — no way to just turn the link
+    /// off. Mirrors `invitePendingRevoke`'s "revoke, no replacement"
+    /// pattern below.
+    @State private var linkPendingRemoval: TripShareLink?
     @State private var memberPendingRoleChange: TripMember?
     @State private var memberPendingOrganizerConfirm: TripMember?
     @State private var memberPendingRemoval: TripMember?
@@ -158,6 +163,22 @@ struct ShareTripView: View {
                 memberPendingRemoval = nil
             }
             Button("Cancel", role: .cancel) { memberPendingRemoval = nil }
+        }
+        .confirmationDialog(
+            "Remove the share link?",
+            isPresented: Binding(
+                get: { linkPendingRemoval != nil },
+                set: { isPresented in if !isPresented { linkPendingRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove link", role: .destructive) {
+                if let link = linkPendingRemoval { removeShareLink(link) }
+                linkPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { linkPendingRemoval = nil }
+        } message: {
+            Text("Anyone with this link loses access. You can create a new one anytime.")
         }
         .confirmationDialog(
             "Revoke this invite link?",
@@ -349,12 +370,18 @@ struct ShareTripView: View {
                     .foregroundStyle(.white.opacity(0.85))
             } else if let link = activeShareLink {
                 shareLinkRow(link)
-                Button("Reset link") { isPresentingResetConfirm = true }
-                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .contentShape(Rectangle())
-                    .frame(minHeight: 44)
-                    .disabled(busyShareLink)
+                HStack(spacing: Spacing.lg) {
+                    Button("Reset link") { isPresentingResetConfirm = true }
+                        .foregroundStyle(.white.opacity(0.85))
+                        .contentShape(Rectangle())
+                        .frame(minHeight: 44)
+                    Button("Remove link") { linkPendingRemoval = link }
+                        .foregroundStyle(.white)
+                        .contentShape(Rectangle())
+                        .frame(minHeight: 44)
+                }
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .disabled(busyShareLink)
             } else if busyShareLink {
                 HStack(spacing: Spacing.sm) {
                     ProgressView().tint(Self.onWhitePillInk)
@@ -928,6 +955,19 @@ struct ShareTripView: View {
                 toast = "Link reset"
             }
         }
+    }
+
+    /// "Remove link" — revoke with no replacement, unlike `resetShareLink`.
+    /// Same local-write-then-enqueue shape as `revokeInvite`; no
+    /// `busyShareLink` guard needed since (unlike reset/create) this never
+    /// makes a network round trip itself before the local write.
+    private func removeShareLink(_ link: TripShareLink) {
+        link.revoked = true
+        try? modelContext.save()
+        let dto = link.toDTO()
+        let id = link.id
+        Task { await syncEngine?.enqueueUpsert(table: .shareLinks, rowId: id, tripId: tripId, payload: dto) }
+        toast = "Link removed"
     }
 
     // UX audit finding 6: routes through the same `ClipboardFeedback` helper
