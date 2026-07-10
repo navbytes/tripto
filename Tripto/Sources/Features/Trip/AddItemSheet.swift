@@ -215,7 +215,8 @@ struct AddItemSheet: View {
 
     init(
         tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current,
-        tripStartDate: Date = .now, tripCreatedBy: UUID? = nil, onToast: @escaping (String) -> Void
+        tripStartDate: Date = .now, tripCreatedBy: UUID? = nil,
+        onToast: @escaping (String) -> Void
     ) {
         self.tripId = tripId
         self.tripTitle = tripTitle
@@ -507,6 +508,10 @@ struct AddItemSheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected] : [])
+        // ponytail: XCUITest hook — the icon+text pairing can concatenate SF
+        // Symbol accessibility text into the default label, so a plain
+        // identifier is more reliable than matching on visible text here.
+        .accessibilityIdentifier("addItemCategoryTile-\(cat.rawValue)")
     }
 
     /// Findings 2 & 7: the CTA-adjacent guidance line, mirroring
@@ -534,14 +539,15 @@ struct AddItemSheet: View {
                 Text(saveButtonTitle)
                     .font(Typo.body(weight: .semibold))
                     .frame(maxWidth: .infinity)
-                    .foregroundStyle(Palette.onAmber)
+                    .foregroundStyle(isValid ? Palette.onAmber : Palette.slate)
                     .padding(.vertical, Spacing.md)
-                    .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-                    .shadow(color: Palette.amber.opacity(0.45), radius: 10, y: 5)
+                    .background(
+                        isValid ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                    )
+                    .shadow(color: isValid ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
             .disabled(!isValid || isDismissingSuggestion)
-            .opacity(isValid ? 1 : 0.5)
 
             // EI-2: a shared triage queue (`docs/EMAIL_IMPORT_PLAN.md`
             // decisions: "any companion or organizer" can dismiss, not just

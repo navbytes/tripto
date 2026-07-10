@@ -57,13 +57,13 @@ struct PackingListView: View {
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
 
+    /// TI-3: paste-import moved off this tab's FAB entirely — it's now
+    /// `TripView.pasteImportPill`, the one consistent entry point shared by
+    /// all three tabs (a UX audit found the FAB's old two-item
+    /// confirmationDialog was itself one of several inconsistent paste
+    /// doors; see that view's doc comment). The FAB goes back to a single
+    /// action, so it opens the add-item form directly again, no menu.
     @State private var isPresentingAdd = false
-    /// TI-2: the FAB now offers a choice — "Add item" (unchanged, drives
-    /// `isPresentingAdd` below) or "Paste a list" (drives
-    /// `isPresentingPasteImport`) — gated the same way the FAB itself
-    /// already is (`canManage`).
-    @State private var isPresentingFabChoice = false
-    @State private var isPresentingPasteImport = false
     @State private var toast: String?
     @State private var reassigningItem: PackingItem?
     /// Finding 3: drives `PackingItemFormSheet` in edit mode — set from the
@@ -152,55 +152,15 @@ struct PackingListView: View {
         // in-content FAB matching the itinerary tab, not a nav-bar button.
         .overlay(alignment: .bottomTrailing) {
             if canManage && !packingItems.isEmpty {
-                // Nit: the label used to describe the FAB's old single-action
-                // behavior; it now opens a confirmationDialog with two
-                // options, so the label/hint pair needs to say that — mirrors
-                // `HeroCollapse`'s traveler-count button (label = what it is,
-                // hint = what tapping it does).
-                Fab(action: { isPresentingFabChoice = true }, accessibilityLabel: "Add packing items")
-                    .accessibilityHint("Choose to add one item or paste a list")
+                Fab(action: { isPresentingAdd = true }, accessibilityLabel: "Add a packing item")
                     .padding(.trailing, Spacing.xl)
                     .padding(.bottom, Spacing.xxl)
             }
-        }
-        // TI-2: the FAB's own choice dialog — "Add item" is the unchanged
-        // single-item flow below; "Paste a list" is the new paste-to-import
-        // entry point.
-        .confirmationDialog("Add to packing list", isPresented: $isPresentingFabChoice, titleVisibility: .visible) {
-            Button("Add item") { isPresentingAdd = true }
-            Button("Paste a list") { isPresentingPasteImport = true }
-            Button("Cancel", role: .cancel) {}
         }
         .sheet(isPresented: $isPresentingAdd) {
             PackingItemFormSheet(tripProfiles: tripProfiles) { label, groupKey, assigneeProfileId in
                 addItem(label: label, groupKey: groupKey, assigneeProfileId: assigneeProfileId)
             }
-        }
-        // TI-2: the packing-vetting checklist hands back only the
-        // still-checked rows — each inserted through this view's own
-        // `addItem`, same offline-first write path a manual add uses.
-        // `assigneeProfileId: nil` since a paste-imported item has no
-        // assignee to infer.
-        .sheet(isPresented: $isPresentingPasteImport) {
-            PasteImportSheet(
-                kind: .packing, tripId: tripId,
-                onPackingConfirmed: { confirmed in
-                    // Nit: `addItem` sets its own toast on every call, so
-                    // without `announceIndividually: false` a bulk "Add 5
-                    // items" left whichever single-item toast happened to
-                    // run last on screen — this replaces it with one counted
-                    // message, matching the booking side's
-                    // "N bookings added to review" toast.
-                    for candidate in confirmed {
-                        addItem(
-                            label: candidate.label, groupKey: candidate.groupKey, assigneeProfileId: nil,
-                            announceIndividually: false
-                        )
-                    }
-                    let count = confirmed.count
-                    toast = "\(count) item\(count == 1 ? "" : "s") added to packing list"
-                }
-            )
         }
         // Finding 3: same form, driven by the item being edited — the sheet
         // decides add-vs-edit copy internally (see its `editing` init), and
@@ -449,22 +409,12 @@ struct PackingListView: View {
                             .background(Palette.amber, in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    // Should-fix: the FAB (this tab's only other route to
-                    // `PasteImportSheet`) only renders once the list is
-                    // non-empty, so a brand-new trip — the single highest-value
-                    // case for bulk paste-import — had no way to reach it.
-                    // Mirrors `ItineraryTabView.pasteImportSecondaryAction`'s
-                    // "Or paste text instead" beside its primary CTA.
-                    Button {
-                        isPresentingPasteImport = true
-                    } label: {
-                        Text("Or paste a list instead")
-                            .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                            .foregroundStyle(Palette.slate)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    // TI-3: no separate "Or paste a list instead" fallback
+                    // needed here anymore — `TripView.pasteImportPill` is
+                    // always visible above the tab content regardless of
+                    // item count, which is what this fallback used to exist
+                    // to work around (the FAB itself only rendered once the
+                    // list was non-empty).
                 }
             }
             Spacer()
@@ -574,16 +524,11 @@ struct PackingListView: View {
         label: String, groupKey: PackingGroupKey, assigneeProfileId: UUID?, announceIndividually: Bool = true
     ) {
         guard canManage, !label.isEmpty else { return }
-        let now = Date()
-        let creatorId = authManager.userId ?? tripCreatedBy
-        let item = PackingItem(
-            id: UUID(), tripId: tripId, label: label, groupKeyRaw: groupKey.rawValue,
-            assigneeProfileId: assigneeProfileId, isDone: false, createdBy: creatorId,
-            createdAt: now, updatedAt: now, updatedBy: nil
+        PackingItem.insert(
+            label: label, groupKey: groupKey, assigneeProfileId: assigneeProfileId,
+            tripId: tripId, createdBy: authManager.userId ?? tripCreatedBy,
+            modelContext: modelContext, syncEngine: syncEngine
         )
-        modelContext.insert(item)
-        try? modelContext.save()
-        enqueue(item)
         guard announceIndividually else { return }
         toast = authManager.userId == nil
             ? "Added to packing list \u{2014} you\u{2019}re signed out, so it won\u{2019}t sync until you sign back in."
@@ -883,13 +828,14 @@ private struct PackingItemFormSheet: View {
                             Text(editing == nil ? "Add to packing list" : "Save changes")
                                 .font(Typo.body(weight: .semibold))
                                 .frame(maxWidth: .infinity)
-                                .foregroundStyle(Palette.onAmber)
+                                .foregroundStyle(isValid ? Palette.onAmber : Palette.slate)
                                 .padding(.vertical, Spacing.md)
-                                .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                                .background(
+                                    isValid ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                                )
                         }
                         .buttonStyle(.plain)
                         .disabled(!isValid)
-                        .opacity(isValid ? 1 : 0.5)
                         .padding(.top, Spacing.xs)
                     }
                     .padding(Spacing.xl)

@@ -101,4 +101,37 @@ extension PackingItem {
             updatedBy: updatedBy
         )
     }
+
+    /// TI-3: the local-insert-then-enqueue write shared by
+    /// `PackingListView.addItem` and the new paste-import confirm flow
+    /// (`PasteImportSheet`, reachable from any tab now, not just Packing —
+    /// see that sheet's doc comment). Pulled out of `PackingListView` since
+    /// packing items are trip-scoped data, not Packing-tab-scoped code; both
+    /// call sites need the identical offline-first write (insert locally,
+    /// save, enqueue for sync) with no duplicated logic to drift.
+    @discardableResult
+    static func insert(
+        label: String,
+        groupKey: PackingGroupKey,
+        assigneeProfileId: UUID?,
+        tripId: UUID,
+        createdBy: UUID,
+        modelContext: ModelContext,
+        syncEngine: SyncEngine?
+    ) -> PackingItem? {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let now = Date()
+        let item = PackingItem(
+            id: UUID(), tripId: tripId, label: trimmed, groupKeyRaw: groupKey.rawValue,
+            assigneeProfileId: assigneeProfileId, isDone: false, createdBy: createdBy,
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        modelContext.insert(item)
+        try? modelContext.save()
+        let dto = item.toDTO()
+        let rowId = item.id
+        Task { await syncEngine?.enqueueUpsert(table: .packingItems, rowId: rowId, tripId: tripId, payload: dto) }
+        return item
+    }
 }

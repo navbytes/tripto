@@ -184,12 +184,20 @@ struct BookingDetailView: View {
         let flightName = [details.airline, details.flightNo].compactMap { $0 }.joined(separator: " ")
         let depTime = ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz)
         let depZone = ItineraryTimeZone.zoneLabel(for: item.primaryTz, at: item.startsAt)
-        let depCity = ItineraryTimeZone.citySegment(of: item.primaryTz.identifier)
+        // Bug fix: was `citySegment(of: item.primaryTz.identifier)` — the
+        // timezone's canonical city, not the actual airport's city (EWR's
+        // zone is "America/New_York", so this showed "New York" for a
+        // Newark departure). Falls back to the old timezone-derived city
+        // for an airport `AirportTimeZones` doesn't know, same graceful
+        // degradation `tzIdentifier` already uses elsewhere in this file.
+        let depCity = details.fromIATA.flatMap(AirportTimeZones.cityName(for:))
+            ?? ItineraryTimeZone.citySegment(of: item.primaryTz.identifier)
         let arrivalTz = item.effectiveTz
         let endsAt = item.endsAt ?? item.startsAt
         let arrTime = ItineraryTimeZone.timeString(endsAt, in: arrivalTz)
         let arrZone = ItineraryTimeZone.zoneLabel(for: arrivalTz, at: endsAt)
-        let arrCity = ItineraryTimeZone.citySegment(of: arrivalTz.identifier)
+        let arrCity = details.toIATA.flatMap(AirportTimeZones.cityName(for:))
+            ?? ItineraryTimeZone.citySegment(of: arrivalTz.identifier)
 
         return VStack(alignment: .leading, spacing: Spacing.xl) {
             HStack {

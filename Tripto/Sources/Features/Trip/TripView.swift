@@ -66,17 +66,22 @@ struct TripView: View {
     /// Finding 4: `tabBar()`'s AX-size horizontal-scroll branch, same
     /// `isAccessibilitySize` convention as `TripCard.swift`.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    #if DEBUG
-    /// EI-2 verify-drill only (`-uitestSeedSuggestedItem`,
-    /// `applyUITestAutopilotIfNeeded` below) — every other write in this
-    /// screen is delegated to `AddItemSheet`/`BookingDetailView`, which each
-    /// hold their own `modelContext`; this is the first (DEBUG-only) direct
-    /// write `TripView` itself makes.
+    /// TI-3: the paste-import pill (shown across all three tabs, owned
+    /// here rather than by any one tab view) needs this for
+    /// `PackingItem.insert` when a paste's packing checklist is confirmed —
+    /// no longer DEBUG-only (`AddItemSheet`/`BookingDetailView` already
+    /// hold their own `modelContext` for their own writes; this was
+    /// previously only used by the EI-2 verify-drill autopilot below).
     @Environment(\.modelContext) private var modelContext
-    #endif
 
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
+    /// TI-3: the ONE "Paste to import" entry point, same trigger/label/
+    /// placement regardless of which tab is showing — replaces three
+    /// previously-inconsistent doors (a disguised tile in `AddItemSheet`'s
+    /// category row, an empty-state-only link on Itinerary, a
+    /// confirmation-dialog item on Packing's FAB). See `pasteImportPill`.
+    @State private var isPresentingPasteImport = false
     @State private var isEditingTrip = false
     /// EI-2: `ImportReviewBanner`'s tap target — opens `SuggestedItemsSheet`
     /// listing `suggestedItems`.
@@ -320,6 +325,17 @@ struct TripView: View {
 
             tabBar()
 
+            // TI-3: same trigger, same spot, on every tab — see
+            // `pasteImportPill`'s doc comment for what this replaced.
+            if canAddItems {
+                HStack {
+                    Spacer()
+                    pasteImportPill
+                }
+                .padding(.horizontal, Spacing.xl)
+                .padding(.top, Spacing.xs)
+            }
+
             // EI-2: shown on the Itinerary tab only (`docs/EMAIL_IMPORT_PLAN.md`
             // "a review banner ... on the Itinerary tab") — Bookings/Packing
             // stay uncluttered since a suggestion isn't a booking until
@@ -424,6 +440,25 @@ struct TripView: View {
                 toast = message
             }
         }
+        .sheet(isPresented: $isPresentingPasteImport) {
+            PasteImportSheet(
+                tripId: trip.id,
+                onItineraryItemsImported: { created in
+                    toast = "\(created) item\(created == 1 ? "" : "s") added to review"
+                },
+                onPackingConfirmed: { candidates in
+                    let creatorId = authManager.userId ?? trip.createdBy
+                    for candidate in candidates {
+                        PackingItem.insert(
+                            label: candidate.label, groupKey: candidate.groupKey, assigneeProfileId: nil,
+                            tripId: trip.id, createdBy: creatorId,
+                            modelContext: modelContext, syncEngine: syncEngine
+                        )
+                    }
+                    toast = "\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list"
+                }
+            )
+        }
         .sheet(isPresented: $isPresentingImportReview) {
             SuggestedItemsSheet(
                 trip: trip, items: suggestedItems,
@@ -486,6 +521,42 @@ struct TripView: View {
     }
 
     // MARK: - Sub-tabs (Itinerary · Bookings · Packing — Map/$ Split hidden, §9.4)
+
+    /// TI-3: the one door into `PasteImportSheet`, rendered once in this
+    /// screen's shared chrome (not per-tab) so it's pixel-identical
+    /// regardless of which of the three tabs is selected — a UX audit
+    /// found *four* different doors into paste-import before this (a
+    /// dashed tile buried in `AddItemSheet`'s category row, an
+    /// empty-state-only link on Itinerary, a confirmation-dialog item on
+    /// Packing's FAB, plus a fourth on the Share screen), each a different
+    /// shape, each visible under different conditions, none discoverable
+    /// mid-trip on the tab whose whole purpose is confirmation codes
+    /// (Bookings had none at all). One pill, always visible (not
+    /// empty-state-gated — that was itself part of the inconsistency),
+    /// same place on every tab.
+    private var pasteImportPill: some View {
+        Button { isPresentingPasteImport = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Paste to import")
+                    .font(Typo.body(11, weight: .semibold))
+            }
+            .foregroundStyle(Palette.ink)
+            .padding(.horizontal, Spacing.sm + 1)
+            .padding(.vertical, 5)
+            .frame(minHeight: 32)
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Palette.mist, lineWidth: 1)
+            }
+        }
+        // XCUITest hook — icon+text can concatenate into an unreliable
+        // default accessibility label, same reasoning as `AddItemSheet`'s
+        // category tile identifiers.
+        .accessibilityIdentifier("pasteImportPill")
+        .buttonStyle(.plain)
+    }
 
     /// The three content tabs — Itinerary · Bookings · Packing — each swapping
     /// `selectedTab` in place. Packing was originally a separate pushed screen

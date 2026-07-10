@@ -88,12 +88,15 @@ targets:
       properties:
         # Sign in with Apple — the production auth path (BUILD_PLAN §3.5), the
         # app-side half of the capability enabled on the App ID.
-        # NOTE: Associated Domains (universal links) is deliberately NOT here —
-        # it first needs that capability enabled on the App ID, or archiving
-        # fails. Add `com.apple.developer.associated-domains: [applinks:tripto.navbytes.io]`
-        # once that's done; the AASA is already served (web/share-worker).
         com.apple.developer.applesignin:
           - Default
+        # Universal links (`https://tripto.navbytes.io/join/<token>` opening
+        # the app directly, no scheme) — Associated Domains capability
+        # enabled on the App ID 2026-07-11 (Apple Developer console), AASA
+        # already served correctly (web/share-worker). This is the app-side
+        # half.
+        com.apple.developer.associated-domains:
+          - applinks:tripto.navbytes.io
     settings:
       base:
         PRODUCT_NAME: Tripto
@@ -121,18 +124,39 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
 
+  # Added for the QA smoke pass (see docs/HANDOVER_2026-07-10.md) — the repo
+  # had zero XCUITest coverage before this. Drives the app via the existing
+  # `-uitestXxx` launch-argument hooks (App/*View.swift), not raw taps
+  # through Sign in with Apple.
+  TriptoUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: TriptoUITests
+    dependencies:
+      - target: Tripto
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.navbytes.tripto.uitests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "59J9RQXYYP"
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   Tripto:
     build:
       targets:
         Tripto: all
         TriptoTests: [test]
+        TriptoUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - TriptoTests
+        - TriptoUITests
     profile:
       config: Release
     analyze:

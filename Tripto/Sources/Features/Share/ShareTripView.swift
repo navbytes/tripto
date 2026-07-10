@@ -31,6 +31,11 @@ struct ShareTripView: View {
     @State private var toast: String?
     @State private var shareSheetItems: [Any]?
     @State private var isPresentingResetConfirm = false
+    /// Bug fix: the card used to only offer "Reset link" (revoke +
+    /// immediately create a replacement) — no way to just turn the link
+    /// off. Mirrors `invitePendingRevoke`'s "revoke, no replacement"
+    /// pattern below.
+    @State private var linkPendingRemoval: TripShareLink?
     @State private var memberPendingRoleChange: TripMember?
     @State private var memberPendingOrganizerConfirm: TripMember?
     @State private var memberPendingRemoval: TripMember?
@@ -85,12 +90,33 @@ struct ShareTripView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toastOverlay($toast)
         .activityShareSheet(items: $shareSheetItems)
-        // TI-2: the fallback path beside `importCard`'s email-address card.
+        // TI-2/TI-3: the fallback path beside `importCard`'s email-address
+        // card — not one of the three tabs the paste-import consistency
+        // pass (TripView.pasteImportPill) targeted, left as its own entry
+        // point here, just updated to the unified sheet's new signature.
         .sheet(isPresented: $isPresentingPasteImport) {
             PasteImportSheet(
-                kind: .booking, tripId: tripId,
-                onBookingImported: { created in
-                    toast = "\(created) booking\(created == 1 ? "" : "s") added to review"
+                tripId: tripId,
+                onItineraryItemsImported: { created in
+                    toast = "\(created) item\(created == 1 ? "" : "s") added to review"
+                },
+                onPackingConfirmed: { candidates in
+                    // Bug fix (review): a bare `guard let userId =
+                    // authManager.userId else { return }` silently dropped
+                    // every confirmed item with no toast when signed out —
+                    // `?? trips.first?.createdBy` matches the fallback
+                    // `TripView`/`PackingListView.addItem` already use for
+                    // exactly this signed-out-local-creator case.
+                    let creatorId = authManager.userId ?? trips.first?.createdBy
+                    guard let creatorId else { return }
+                    for candidate in candidates {
+                        PackingItem.insert(
+                            label: candidate.label, groupKey: candidate.groupKey, assigneeProfileId: nil,
+                            tripId: tripId, createdBy: creatorId,
+                            modelContext: modelContext, syncEngine: syncEngine
+                        )
+                    }
+                    toast = "\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list"
                 }
             )
         }
@@ -158,6 +184,22 @@ struct ShareTripView: View {
                 memberPendingRemoval = nil
             }
             Button("Cancel", role: .cancel) { memberPendingRemoval = nil }
+        }
+        .confirmationDialog(
+            "Remove the share link?",
+            isPresented: Binding(
+                get: { linkPendingRemoval != nil },
+                set: { isPresented in if !isPresented { linkPendingRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove link", role: .destructive) {
+                if let link = linkPendingRemoval { removeShareLink(link) }
+                linkPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { linkPendingRemoval = nil }
+        } message: {
+            Text("Anyone with this link loses access. You can create a new one anytime.")
         }
         .confirmationDialog(
             "Revoke this invite link?",
@@ -349,12 +391,18 @@ struct ShareTripView: View {
                     .foregroundStyle(.white.opacity(0.85))
             } else if let link = activeShareLink {
                 shareLinkRow(link)
-                Button("Reset link") { isPresentingResetConfirm = true }
-                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .contentShape(Rectangle())
-                    .frame(minHeight: 44)
-                    .disabled(busyShareLink)
+                HStack(spacing: Spacing.lg) {
+                    Button("Reset link") { isPresentingResetConfirm = true }
+                        .foregroundStyle(.white.opacity(0.85))
+                        .contentShape(Rectangle())
+                        .frame(minHeight: 44)
+                    Button("Remove link") { linkPendingRemoval = link }
+                        .foregroundStyle(.white)
+                        .contentShape(Rectangle())
+                        .frame(minHeight: 44)
+                }
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .disabled(busyShareLink)
             } else if busyShareLink {
                 HStack(spacing: Spacing.sm) {
                     ProgressView().tint(Self.onWhitePillInk)
@@ -928,6 +976,19 @@ struct ShareTripView: View {
                 toast = "Link reset"
             }
         }
+    }
+
+    /// "Remove link" — revoke with no replacement, unlike `resetShareLink`.
+    /// Same local-write-then-enqueue shape as `revokeInvite`; no
+    /// `busyShareLink` guard needed since (unlike reset/create) this never
+    /// makes a network round trip itself before the local write.
+    private func removeShareLink(_ link: TripShareLink) {
+        link.revoked = true
+        try? modelContext.save()
+        let dto = link.toDTO()
+        let id = link.id
+        Task { await syncEngine?.enqueueUpsert(table: .shareLinks, rowId: id, tripId: tripId, payload: dto) }
+        toast = "Link removed"
     }
 
     // UX audit finding 6: routes through the same `ClipboardFeedback` helper

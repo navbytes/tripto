@@ -199,12 +199,13 @@ struct TripProfileFormSheet: View {
             Text(isEditing ? "Save changes" : "Add to trip")
                 .font(Typo.body(weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .foregroundStyle(Palette.onAmber)
+                .foregroundStyle(isValid ? Palette.onAmber : Palette.slate)
                 .padding(.vertical, Spacing.md)
-                .background(Palette.amber, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                .background(
+                    isValid ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                )
         }
         .buttonStyle(.plain)
         .disabled(!isValid)
-        .opacity(isValid ? 1 : 0.5)
     }
 }

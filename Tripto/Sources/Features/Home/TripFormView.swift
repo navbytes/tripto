@@ -467,7 +467,14 @@ struct TripFormView: View {
                 Text(isEditing ? "Save changes" : "Create trip")
                     .font(Typo.body(weight: .semibold))
                     .frame(maxWidth: .infinity)
-                    .foregroundStyle(Palette.onAmber)
+                    // Bug fix: `onAmber` is a fixed near-black (`#241505`,
+                    // deliberately non-adaptive so it stays readable against
+                    // `amber`, which is likewise fixed — see its doc
+                    // comment). Left hardcoded here while the background
+                    // below swaps to `mist` (which IS dynamic) for the
+                    // disabled state, near-black-on-dark-navy in dark mode
+                    // made this button's disabled label unreadable.
+                    .foregroundStyle(canSubmit ? Palette.onAmber : Palette.slate)
                     .padding(.vertical, Spacing.md)
                     .background(
                         canSubmit ? Palette.amber : Palette.mist,
@@ -481,7 +488,6 @@ struct TripFormView: View {
             }
             .buttonStyle(.plain)
             .disabled(!canSubmit)
-            .opacity(canSubmit ? 1 : 0.5)
         }
     }
 
