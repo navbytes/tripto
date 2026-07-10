@@ -12,6 +12,12 @@ struct GlassCircleGlyph: View {
 
     var body: some View {
         Image(systemName: systemImage)
+            // Deliberately fixed, not @ScaledMetric: this glyph sits inside
+            // `TripHeroView`'s top button row (HeroCollapse.swift), whose
+            // scroll-collapse math measures fixed row heights — growing
+            // this circle with Dynamic Type risks fighting that measurement
+            // in a file outside this pass's scope. The 44pt tap target
+            // below already clears the a11y floor at every text size.
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 38, height: 38)

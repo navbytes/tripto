@@ -41,7 +41,22 @@ extension ItemCategory {
 /// The 38pt icon tile on timeline cards and booking rows.
 struct CategoryIconTile: View {
     let category: ItemCategory
-    var side: CGFloat = 38
+    /// UX-audit residue (T1 report): `side` used to be a plain stored
+    /// `CGFloat`, so every Features/Trip call site's tile — and its
+    /// `side * 0.47` glyph — stayed pinned at its base point size while the
+    /// row's own adjacent text scaled around it with Dynamic Type.
+    /// `@ScaledMetric` grows the whole tile (container + glyph together,
+    /// same recipe as `PackingListView`'s checkbox) on the shared `.body`
+    /// curve; at the default content size category it returns exactly the
+    /// base value passed in, so default-size rendering everywhere this is
+    /// used (Home's `TripCard` doesn't use this component; only
+    /// Features/Trip does) is unchanged.
+    @ScaledMetric private var side: CGFloat
+
+    init(category: ItemCategory, side: CGFloat = 38) {
+        self.category = category
+        self._side = ScaledMetric(wrappedValue: side, relativeTo: .body)
+    }
 
     var body: some View {
         RoundedRectangle(cornerRadius: side * 0.29, style: .continuous)

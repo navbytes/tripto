@@ -66,6 +66,15 @@ struct ShareTripView: View {
     /// in `.booking` mode.
     @State private var isPresentingPasteImport = false
 
+    /// `shareLinkRow`'s `ShareLink` icon — glyph+container scaled together
+    /// (this view owns the whole row, no external layout contract on its
+    /// 30pt circle, unlike `Fab`/`GlassCircleButton`).
+    @ScaledMetric(relativeTo: .caption) private var shareIconFontSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .caption) private var shareIconDiameter: CGFloat = 30
+    /// Small caption-adjacent glyphs: `roleBadgeLabel`'s icon and
+    /// `unlinkedProfileRow`'s disclosure chevron, both originally 11pt.
+    @ScaledMetric(relativeTo: .caption) private var captionIconSize: CGFloat = 11
+
     init(tripId: UUID) {
         self.tripId = tripId
         _trips = Query(filter: #Predicate<Trip> { $0.id == tripId })
@@ -371,6 +380,7 @@ struct ShareTripView: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "link")
+                    .accessibilityHidden(true)
                 Text("Anyone-can-view link").font(Typo.body(weight: .bold))
             }
             .foregroundStyle(.white)
@@ -464,12 +474,16 @@ struct ShareTripView: View {
                 .background(.white, in: Capsule())
                 .contentShape(Rectangle())
                 .frame(minWidth: 44, minHeight: 44)
+                // States the action rather than the bare "Copy" (finding:
+                // out of context — e.g. right after a page's Edit/Copy —
+                // the label alone doesn't say what's being copied).
+                .accessibilityLabel("Copy link")
 
             ShareLink(item: url) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: shareIconFontSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
+                    .frame(width: shareIconDiameter, height: shareIconDiameter)
                     .background(.white.opacity(0.22), in: Circle())
             }
             .accessibilityLabel("Share link")
@@ -549,6 +563,7 @@ struct ShareTripView: View {
             VStack(spacing: 3) {
                 HStack(spacing: Spacing.xs) {
                     Image(systemName: isBusy ? "hourglass" : icon)
+                        .accessibilityHidden(true)
                     Text(title).font(Typo.body(weight: .semibold))
                 }
                 if isBusy {
@@ -578,6 +593,7 @@ struct ShareTripView: View {
             Image(systemName: info.icon)
                 .foregroundStyle(info.color)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(info.label) link")
                     .font(Typo.body(weight: .semibold))
@@ -687,6 +703,7 @@ struct ShareTripView: View {
             let badge = roleBadge(for: myRole)
             HStack(spacing: Spacing.sm) {
                 Image(systemName: badge.icon).foregroundStyle(badge.color).frame(width: 22)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Your role: \(badge.label)")
                         .font(Typo.body(weight: .semibold))
@@ -699,6 +716,9 @@ struct ShareTripView: View {
             }
             .padding(Spacing.md)
             .background(badge.color.opacity(0.08), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+            // Non-interactive info card — one VoiceOver stop instead of icon
+            // + two texts.
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -759,7 +779,9 @@ struct ShareTripView: View {
     /// so a non-organizer's pill read as tappable when it never was.
     private func roleBadgeLabel(_ info: (icon: String, color: Color, label: String)) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: info.icon).font(.system(size: 11, weight: .semibold))
+            Image(systemName: info.icon)
+                .font(.system(size: captionIconSize, weight: .semibold))
+                .accessibilityHidden(true)
             Text(info.label).font(Typo.body(Typo.Size.caption, weight: .bold))
         }
         .foregroundStyle(info.color)
@@ -785,6 +807,9 @@ struct ShareTripView: View {
                 .overlay {
                     Text(initials(from: name)).font(Typo.body(15, weight: .bold)).foregroundStyle(.white)
                 }
+                // Decorative — the name `Text` right after already carries
+                // this identity.
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
@@ -809,6 +834,10 @@ struct ShareTripView: View {
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
+                // Role picker row: states the current value and what
+                // tapping does, rather than the badge's icon/text alone.
+                .accessibilityLabel("Role: \(info.label)")
+                .accessibilityHint("Opens the role picker for \(name)")
             } else {
                 roleBadgeLabel(info)
             }
@@ -830,6 +859,9 @@ struct ShareTripView: View {
                 .overlay {
                     Text(initials(from: profile.displayName)).font(Typo.body(15, weight: .bold)).foregroundStyle(.white)
                 }
+                // Decorative — the name `Text` right after already carries
+                // this identity.
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.displayName).font(Typo.body(weight: .semibold)).foregroundStyle(Palette.ink)
                 Text("No account yet").font(Typo.body(Typo.Size.caption)).foregroundStyle(Palette.slate)
@@ -838,8 +870,11 @@ struct ShareTripView: View {
             PillLabel(text: "Can be assigned plans \u{00B7} no app needed", tint: .neutral)
             if isOrganizer {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: captionIconSize, weight: .semibold))
                     .foregroundStyle(Palette.slate.opacity(0.5))
+                    // Decorative disclosure indicator — the wrapping
+                    // Button's own trait already conveys "tappable".
+                    .accessibilityHidden(true)
             }
         }
         .padding(.vertical, Spacing.sm)
@@ -849,6 +884,7 @@ struct ShareTripView: View {
             if isOrganizer {
                 Button { editingProfile = profile } label: { content }
                     .buttonStyle(.plain)
+                    .accessibilityHint("Opens their profile to edit")
             } else {
                 content
             }
@@ -1169,6 +1205,7 @@ private struct RolePickerSheet: View {
                                 .fill(option.color.opacity(0.15))
                                 .frame(width: 34, height: 34)
                                 .overlay { Image(systemName: option.icon).foregroundStyle(option.color) }
+                                .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(option.role.rawValue.capitalized)
                                     .font(Typo.body(weight: .semibold))
@@ -1180,10 +1217,19 @@ private struct RolePickerSheet: View {
                             Spacer(minLength: 0)
                             if option.role == currentRole {
                                 Image(systemName: "checkmark").foregroundStyle(Palette.amber)
+                                    .accessibilityHidden(true)
                             }
                         }
                     }
                     .buttonStyle(.plain)
+                    // Role picker row: value states whether it's the
+                    // current role, hint carries the capability description
+                    // (visible on screen either way) rather than folding it
+                    // into the label.
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(option.role.rawValue.capitalized)
+                    .accessibilityValue(option.role == currentRole ? "Selected" : "")
+                    .accessibilityHint(option.description)
                 }
 
                 if let onRemove {

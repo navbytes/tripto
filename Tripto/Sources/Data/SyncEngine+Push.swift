@@ -256,9 +256,10 @@ extension SyncEngine {
         await refreshStatusCounts()
     }
 
-    /// Exponential backoff with jitter, capped at 60s, so a transient
-    /// failure retries on its own rather than waiting for the next
-    /// unrelated mutation to happen to trigger a push.
+    /// Exponential backoff with jitter, capped at 60s (`SyncBackoff`, also
+    /// reused by `SyncEngine+Realtime.swift`'s subscribe retry), so a
+    /// transient failure retries on its own rather than waiting for the
+    /// next unrelated mutation to happen to trigger a push.
     ///
     /// Deliberately an independent, untracked `Task` rather than reusing
     /// `pushDebounceTask` — this runs from inside `flushPush()`'s own loop
@@ -266,8 +267,7 @@ extension SyncEngine {
     /// task*; cancelling it here would mark the still-executing flush
     /// cancelled and could abort its remaining ops' network calls.
     private func scheduleRetry(afterAttempts attempts: Int) {
-        let exponent = min(attempts, 6)
-        let delay = min(pow(2.0, Double(exponent)) + Double.random(in: 0...1), 60)
+        let delay = SyncBackoff.delay(attemptsSoFar: attempts)
         Task {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             self.schedulePush()

@@ -46,6 +46,9 @@ struct AddItemSheet: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.dismiss) private var dismiss
+    /// Finding 2: `categorySelector`'s AX-size horizontal-scroll branch,
+    /// same `isAccessibilitySize` convention as `TripView.tabBar()`.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State var category: ItemCategory
 
@@ -144,6 +147,18 @@ struct AddItemSheet: View {
     /// Finding 3: gates the "Discard changes?" confirmation on cancel/swipe-
     /// dismiss, same as `TripFormView`.
     @State private var showDiscardConfirm = false
+    /// Haptics (award-polish pass): flipped once `save()` actually lands
+    /// (add or edit), read only by the `.sensoryFeedback` in `body` — fires
+    /// on the save landing, not on the Save button tap itself.
+    @State private var didSave = false
+
+    /// `categoryTile`'s icon, stacked above its own label — see the shared
+    /// `@ScaledMetric` recipe used throughout Features/Trip.
+    @ScaledMetric(relativeTo: .body) private var categoryIconSize: CGFloat = 18
+    /// `tagToggle`'s icon (`AddItemFormSections.swift`) — not `private` so
+    /// that file's `extension AddItemSheet` can read it; Swift extensions
+    /// can't declare their own stored properties.
+    @ScaledMetric(relativeTo: .body) var tagIconSize: CGFloat = 10
 
     private static let lastDepartureTZKey = "lastDepartureTZ"
     private static func lastArrivalTZKey(_ tripId: UUID) -> String { "lastArrivalTZ.\(tripId.uuidString)" }
@@ -476,12 +491,30 @@ struct AddItemSheet: View {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
+        // Haptics (award-polish pass): success on a landed save — see `didSave`.
+        .sensoryFeedback(.success, trigger: didSave)
     }
 
+    /// Finding 2: 5 equal-width tiles truncate their labels at accessibility
+    /// sizes — same `isAccessibilitySize` horizontal-scroll branch as
+    /// `TripView.tabBar()`/`PersonFilterBar`, so each tile keeps its full
+    /// label instead of clipping. Non-AX rendering below is untouched.
     private var categorySelector: some View {
-        HStack(spacing: Spacing.sm) {
-            ForEach(ItemCategory.allCases, id: \.self) { cat in
-                categoryTile(cat)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Spacing.sm) {
+                        ForEach(ItemCategory.allCases, id: \.self) { cat in
+                            categoryTile(cat)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: Spacing.sm) {
+                    ForEach(ItemCategory.allCases, id: \.self) { cat in
+                        categoryTile(cat)
+                    }
+                }
             }
         }
     }
@@ -493,12 +526,20 @@ struct AddItemSheet: View {
         } label: {
             VStack(spacing: Spacing.xs) {
                 Image(systemName: cat.symbolName)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: categoryIconSize, weight: .medium))
+                    // Decorative — the label right below already names the category.
+                    .accessibilityHidden(true)
                 Text(cat.displayName)
                     .font(Typo.body(11.5, weight: .semibold))
             }
             .foregroundStyle(isOn ? cat.colorPair.fg : Palette.slate)
-            .frame(maxWidth: .infinity)
+            // Finding 2: at accessibility sizes the row scrolls
+            // horizontally instead of forcing 5 equal-width columns (see
+            // `categorySelector`), so each tile sizes to its own label
+            // (plus a little breathing room) instead of fighting for a
+            // fifth of the sheet's width. Default rendering unchanged.
+            .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? nil : .infinity)
+            .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? Spacing.lg : 0)
             .padding(.vertical, Spacing.sm + 2)
             .background(isOn ? cat.colorPair.soft : Palette.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
@@ -706,6 +747,11 @@ struct AddItemSheet: View {
             onToast(toastMessage("added"))
         }
 
+        // Haptics: both the add and edit branches above only reach this
+        // point once their own `modelContext.save()` actually succeeded —
+        // a failed save returns early (`saveError = .writeFailed`) without
+        // ever reaching here, so this can't fire on a save that didn't land.
+        didSave.toggle()
         persistZoneDefaults()
         dismiss()
     }

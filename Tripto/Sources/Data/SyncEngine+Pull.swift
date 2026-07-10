@@ -29,22 +29,25 @@ extension SyncEngine {
         defer { isPullingHome = false }
 
         do {
-            async let profiles: [ProfileDTO] = Supa.client.from(SyncTable.profiles.rawValue)
+            // Decoded via `LossyCodableList` (not `[T]` directly), so one
+            // malformed row on any of the four tables is skipped rather
+            // than failing this entire pull — see that type's doc comment.
+            async let profiles: LossyCodableList<ProfileDTO> = Supa.client.from(SyncTable.profiles.rawValue)
                 .select().execute().value
-            async let trips: [TripDTO] = Supa.client.from(SyncTable.trips.rawValue)
+            async let trips: LossyCodableList<TripDTO> = Supa.client.from(SyncTable.trips.rawValue)
                 .select().execute().value
-            async let members: [TripMemberDTO] = Supa.client.from(SyncTable.tripMembers.rawValue)
+            async let members: LossyCodableList<TripMemberDTO> = Supa.client.from(SyncTable.tripMembers.rawValue)
                 .select().execute().value
-            async let tripProfiles: [TripProfileDTO] = Supa.client.from(SyncTable.tripProfiles.rawValue)
+            async let tripProfiles: LossyCodableList<TripProfileDTO> = Supa.client.from(SyncTable.tripProfiles.rawValue)
                 .select().execute().value
 
             let (profilesResult, tripsResult, membersResult, tripProfilesResult) =
                 try await (profiles, trips, members, tripProfiles)
 
-            try await store.applyProfiles(profilesResult)
-            try await store.applyTrips(tripsResult)
-            try await store.applyTripMembers(membersResult)
-            try await store.applyTripProfiles(tripProfilesResult)
+            try await store.applyProfiles(profilesResult.elements, skippedCount: profilesResult.skippedCount)
+            try await store.applyTrips(tripsResult.elements, skippedCount: tripsResult.skippedCount)
+            try await store.applyTripMembers(membersResult.elements, skippedCount: membersResult.skippedCount)
+            try await store.applyTripProfiles(tripProfilesResult.elements, skippedCount: tripProfilesResult.skippedCount)
             // Cascade-clean trip-scoped tables for any trip that just
             // disappeared (deleted, or membership revoked) — see its doc
             // comment; pullHome never refetches those tables directly.
@@ -91,22 +94,25 @@ extension SyncEngine {
         defer { pullingTrips.remove(tripId) }
 
         do {
-            async let items: [ItineraryItemDTO] = Supa.client.from(SyncTable.itineraryItems.rawValue)
+            // Decoded via `LossyCodableList` (not `[T]` directly), so one
+            // malformed row on any of this trip's tables is skipped rather
+            // than failing this entire pull — see that type's doc comment.
+            async let items: LossyCodableList<ItineraryItemDTO> = Supa.client.from(SyncTable.itineraryItems.rawValue)
                 .select().eq("trip_id", value: tripId).execute().value
-            async let packing: [PackingItemDTO] = Supa.client.from(SyncTable.packingItems.rawValue)
+            async let packing: LossyCodableList<PackingItemDTO> = Supa.client.from(SyncTable.packingItems.rawValue)
                 .select().eq("trip_id", value: tripId).execute().value
-            async let shareLinks: [ShareLinkDTO] = Supa.client.from(SyncTable.shareLinks.rawValue)
+            async let shareLinks: LossyCodableList<ShareLinkDTO> = Supa.client.from(SyncTable.shareLinks.rawValue)
                 .select().eq("trip_id", value: tripId).execute().value
-            async let invites: [InviteDTO] = Supa.client.from(SyncTable.invites.rawValue)
+            async let invites: LossyCodableList<InviteDTO> = Supa.client.from(SyncTable.invites.rawValue)
                 .select().eq("trip_id", value: tripId).execute().value
 
             let (itemsResult, packingResult, shareLinksResult, invitesResult) =
                 try await (items, packing, shareLinks, invites)
 
-            try await store.applyItineraryItems(itemsResult, tripId: tripId)
-            try await store.applyPackingItems(packingResult, tripId: tripId)
-            try await store.applyShareLinks(shareLinksResult, tripId: tripId)
-            try await store.applyInvites(invitesResult, tripId: tripId)
+            try await store.applyItineraryItems(itemsResult.elements, tripId: tripId, skippedCount: itemsResult.skippedCount)
+            try await store.applyPackingItems(packingResult.elements, tripId: tripId, skippedCount: packingResult.skippedCount)
+            try await store.applyShareLinks(shareLinksResult.elements, tripId: tripId, skippedCount: shareLinksResult.skippedCount)
+            try await store.applyInvites(invitesResult.elements, tripId: tripId, skippedCount: invitesResult.skippedCount)
 
             // `item_assignees` has no `trip_id` column (composite PK
             // item_id+profile_id — `ItemAssignee`'s doc comment), so it
@@ -115,11 +121,20 @@ extension SyncEngine {
             // instead, so it runs after they resolve. Skipping the network
             // round trip entirely for a (rare) itemless trip, rather than
             // sending `.in("item_id", values: [])`.
-            let itemIds = itemsResult.map(\.id)
-            let assigneesResult: [ItemAssigneeDTO] = itemIds.isEmpty ? [] : try await Supa.client
-                .from(SyncTable.itemAssignees.rawValue)
-                .select().in("item_id", values: itemIds).execute().value
-            try await store.applyItemAssignees(assigneesResult, tripId: tripId)
+            let itemIds = itemsResult.elements.map(\.id)
+            let assigneesResult: LossyCodableList<ItemAssigneeDTO> = itemIds.isEmpty
+                ? LossyCodableList(elements: [])
+                : try await Supa.client
+                    .from(SyncTable.itemAssignees.rawValue)
+                    .select().in("item_id", values: itemIds).execute().value
+            // The assignee query above is shaped from the DECODED item ids, so
+            // whenever item rows were skipped the assignee pulled-set is also
+            // incomplete — protect its delete pass with the items' skip count
+            // too, or a malformed item's assignees get reconciled away as
+            // "genuinely absent" (D1 residual, handoffs/D1.md).
+            try await store.applyItemAssignees(
+                assigneesResult.elements, tripId: tripId,
+                skippedCount: assigneesResult.skippedCount + itemsResult.skippedCount)
 
             await status.markSynced()
             await status.setTripPullFailed(tripId, false)

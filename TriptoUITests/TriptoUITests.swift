@@ -140,6 +140,26 @@ final class TriptoUITests: XCTestCase {
         app.buttons["Add to packing list"].tap()
 
         let row = app.buttons[label]
+        // D2 defect 6 root cause (verified via the failing run's captured
+        // accessibility-hierarchy attachment, not assumed): the row *was*
+        // being added every time — the header right above it read "5 of
+        // 13 packed" (was 12) — so this was never an accessibility
+        // regression in `PackingRow` (still a real `Button`, still
+        // `.accessibilityLabel(item.label)` / `.accessibilityValue(
+        // "Packed"/"Not packed")`, exactly what this test already
+        // expects). The new item lands in the "Shared" group
+        // (`PackingItemFormSheet`'s default `groupKey`), which
+        // `PackingProgress.order` sorts *after* the seeded Documents/Kids
+        // groups — a couple of screens' worth of rows down. SwiftUI's
+        // `LazyVStack` (`PackingListView.list`) never instantiates a row
+        // that far outside the rendered range, let alone renders it, so a
+        // bare `waitForExistence` here could never see it — no amount of
+        // waiting scrolls the list. Scrolling first (bounded, so a
+        // genuine regression still fails fast rather than hanging) fixes
+        // the test without touching the row's (correct) semantics.
+        for _ in 0..<15 where !row.exists {
+            app.swipeUp()
+        }
         XCTAssertTrue(row.waitForExistence(timeout: 10), "new packing item row didn't appear in the list")
         XCTAssertEqual(row.value as? String, "Not packed", "new item should start unpacked")
         row.tap()

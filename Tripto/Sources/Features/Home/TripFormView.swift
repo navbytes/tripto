@@ -90,6 +90,11 @@ struct TripFormView: View {
     }
 
     @State private var saveError: SaveError?
+    /// Toggled right before a successful `save()` dismisses — the trigger
+    /// for the `.sensoryFeedback(.success, trigger:)` below. Only reached on
+    /// the success path (both failure branches `return` early), so it never
+    /// fires alongside `saveError`.
+    @State private var didSaveSuccessfully = false
     /// F4: gates the "Discard changes?" confirmation on cancel/swipe-dismiss.
     @State private var showDiscardConfirm = false
     /// UX audit finding 8: gates the "Delete trip" confirmation — same
@@ -279,6 +284,9 @@ struct TripFormView: View {
             SheetDismissAttemptObserver { showDiscardConfirm = true }
         )
         .interactiveDismissDisabled(hasChanges)
+        // Trip created/saved — success haptic on the one common path both
+        // `.create` and `.edit` reach at the end of `save()`.
+        .sensoryFeedback(.success, trigger: didSaveSuccessfully)
         .confirmationDialog("Discard changes?", isPresented: $showDiscardConfirm, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
@@ -691,6 +699,7 @@ struct TripFormView: View {
             onSaved?(trip, outcome)
         }
 
+        didSaveSuccessfully.toggle()
         dismiss()
     }
 

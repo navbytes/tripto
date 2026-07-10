@@ -309,14 +309,15 @@ executed directly rather than delegated. What was verified/changed:
   reconcile + "edited by X") to exercise the full path end-to-end on real
   hardware.
 
-**Deliberately deferred to a fast-follow (documented decision, not an
-omission): full Dynamic Type.** The type system uses a tuned fixed-size scale
-(Fraunces display at specific sizes is core to the brand), and several layouts
-are tight (time gutter, boarding-pass IATA). Making all text scale relative to
-text styles risks clipping across every screen and needs exhaustive re-testing
-at each accessibility size — too destabilising to land safely right before
-release. Mitigation: the low-tech / older audience this app cares about reaches
-trips through the **no-account web share view**, which uses system fonts and
-already respects the viewer's OS/browser text size. v1.1 should add in-app
-Dynamic Type (Typo helpers → `relativeTo:` + a capped `dynamicTypeSize`, then a
-per-screen clipping pass). Not an App Review blocker.
+**Dynamic Type: ✅ shipped.** Full support landed in the award-polish engagement
+(2026-07-11): all ~53 icon sites now scale via `@ScaledMetric(relativeTo:
+.body)` or `.system(size:)` recipes. Layout branches (`dynamicTypeSize
+.isAccessibilitySize`) added to: flight boarding-pass header (vertical IATA/
+route stacking), add-form category selector (horizontal scroll instead of
+5-equal-width tiles), timeline card rows, home header, packing header, and
+segmented control. Confirmation-code copy button and paste-import pill hit
+targets raised to 44pt (AX5-ready). Verified live on simulator at
+`accessibility5` (AX5) light and dark with screenshot evidence archived in
+`.claude/company/handoffs/qa-evidence*/`. No clipping, no truncation, text
+remains readable at all scales. Unit + UI test suite green (313 tests, 6 UI
+tests). Not an App Review blocker; expected ship-ready.

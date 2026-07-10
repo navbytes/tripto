@@ -9,9 +9,17 @@ struct SegmentedControl: View {
     @Binding var selection: String
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 2) {
+        // Equal-width segments mid-word-wrap "Upcoming" at accessibility
+        // sizes (QA follow-up to D2) — stack the pills vertically there;
+        // HStackLayout(spacing: 2) is byte-identical to the old HStack at
+        // default sizes.
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 2))
+        layout {
             ForEach(options, id: \.self) { option in
                 Button {
                     if reduceMotion {

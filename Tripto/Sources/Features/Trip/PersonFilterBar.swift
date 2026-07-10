@@ -22,6 +22,10 @@ struct PersonFilterBar: View {
     /// decoration on a bar that already fits everything.
     @State private var contentWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
+    /// See the shared `@ScaledMetric` recipe used throughout Features/Trip
+    /// — both icons below sit next to this bar's own scaling label text.
+    @ScaledMetric(relativeTo: .body) private var filterIconSize: CGFloat = 10
+    @ScaledMetric(relativeTo: .body) private var everyoneIconSize: CGFloat = 12
 
     private var hasOverflow: Bool {
         contentWidth > containerWidth - 2 * Spacing.xl + 1
@@ -31,7 +35,7 @@ struct PersonFilterBar: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.xs) {
                 Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: filterIconSize, weight: .bold))
                     // Finding F3: decorative — the "Showing plans for" text
                     // right next to it already says the same thing, same
                     // pattern as this bar's `person.2.fill` chip icon and
@@ -96,7 +100,7 @@ struct PersonFilterBar: View {
             select(nil)
         } label: {
             HStack(spacing: Spacing.xs) {
-                Image(systemName: "person.2.fill").font(.system(size: 12))
+                Image(systemName: "person.2.fill").font(.system(size: everyoneIconSize))
                     .accessibilityHidden(true)
                 Text("Everyone").font(Typo.body(13, weight: .bold))
             }

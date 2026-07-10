@@ -90,6 +90,9 @@ struct TripView: View {
     /// "Just mine" selection (BUILD_PLAN.md §5.4) — `nil` is "Everyone."
     @State private var selectedProfileFilter: UUID?
     @Namespace private var tabUnderline
+    /// `pasteImportPill`'s icon, next to its own label — see the shared
+    /// `@ScaledMetric` recipe used throughout Features/Trip.
+    @ScaledMetric(relativeTo: .body) private var pasteImportIconSize: CGFloat = 12
 
     /// Backs the hero's scroll-driven collapse — see `HeroScrollModel`'s doc
     /// comment (HeroCollapse.swift) for why this lives in a reference-type
@@ -538,7 +541,9 @@ struct TripView: View {
         Button { isPresentingPasteImport = true } label: {
             HStack(spacing: 4) {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: pasteImportIconSize, weight: .medium))
+                    // Decorative — the label right next to it says the same thing.
+                    .accessibilityHidden(true)
                 Text("Paste to import")
                     .font(Typo.body(11, weight: .semibold))
             }
@@ -550,6 +555,12 @@ struct TripView: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(Palette.mist, lineWidth: 1)
             }
+            // Finding 5 (§6.5 44pt floor): applied after the pill's own
+            // 32pt frame so the compact visual stays exactly as-is — this
+            // only grows the invisible tappable band around it, same
+            // recipe as `AddItemFormSections.nextDayChip`.
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
         }
         // XCUITest hook — icon+text can concatenate into an unreliable
         // default accessibility label, same reasoning as `AddItemSheet`'s

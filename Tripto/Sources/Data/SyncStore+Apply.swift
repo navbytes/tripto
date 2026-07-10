@@ -5,7 +5,10 @@ import SwiftData
 /// (SYNC_DESIGN.md): upsert-by-id, skipping rows with a pending outbox op
 /// entirely (neither their fields nor their existence are touched — see
 /// `SyncReconcile`'s doc comment), then delete local rows absent from the
-/// pull that aren't protected by a pending op.
+/// pull that aren't protected by a pending op — unless `skippedCount` (the
+/// matching `LossyCodableList.skippedCount` for this table's pull) is
+/// nonzero, in which case the whole delete phase is skipped for this pull
+/// (D1: a malformed row must never look like a server-side delete).
 ///
 /// Deliberately concrete per table rather than generic: SwiftData's
 /// `#Predicate` macro needs a concrete model type at each call site, and at
@@ -17,7 +20,7 @@ extension SyncStore {
     // "my trips" server-side, so there's no client-side trip_id filter to
     // apply on top of it).
 
-    func applyProfiles(_ dtos: [ProfileDTO]) throws {
+    func applyProfiles(_ dtos: [ProfileDTO], skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(FetchDescriptor<Profile>())
         let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
@@ -31,8 +34,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyProfiles: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -40,7 +46,7 @@ extension SyncStore {
         try modelContext.save()
     }
 
-    func applyTrips(_ dtos: [TripDTO]) throws {
+    func applyTrips(_ dtos: [TripDTO], skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(FetchDescriptor<Trip>())
         let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
@@ -54,8 +60,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyTrips: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -63,7 +72,7 @@ extension SyncStore {
         try modelContext.save()
     }
 
-    func applyTripMembers(_ dtos: [TripMemberDTO]) throws {
+    func applyTripMembers(_ dtos: [TripMemberDTO], skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(FetchDescriptor<TripMember>())
         let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
@@ -77,8 +86,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyTripMembers: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -86,7 +98,7 @@ extension SyncStore {
         try modelContext.save()
     }
 
-    func applyTripProfiles(_ dtos: [TripProfileDTO]) throws {
+    func applyTripProfiles(_ dtos: [TripProfileDTO], skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(FetchDescriptor<TripProfile>())
         let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
@@ -100,8 +112,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyTripProfiles: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -163,7 +178,7 @@ extension SyncStore {
     // unlike the home tables, an unfiltered select here would return every
     // trip's rows the caller can see, not just the one being pulled).
 
-    func applyItineraryItems(_ dtos: [ItineraryItemDTO], tripId: UUID) throws {
+    func applyItineraryItems(_ dtos: [ItineraryItemDTO], tripId: UUID, skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(
             FetchDescriptor<ItineraryItem>(predicate: #Predicate { $0.tripId == tripId })
@@ -179,8 +194,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyItineraryItems: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -188,7 +206,7 @@ extension SyncStore {
         try modelContext.save()
     }
 
-    func applyPackingItems(_ dtos: [PackingItemDTO], tripId: UUID) throws {
+    func applyPackingItems(_ dtos: [PackingItemDTO], tripId: UUID, skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(
             FetchDescriptor<PackingItem>(predicate: #Predicate { $0.tripId == tripId })
@@ -204,8 +222,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyPackingItems: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -223,7 +244,7 @@ extension SyncStore {
     /// `item_assignees` with `.in("item_id", values:)` against the same
     /// pull's own `itineraryItems` result) — this method doesn't re-filter
     /// `dtos` itself, only the *local* existing/delete-candidate set.
-    func applyItemAssignees(_ dtos: [ItemAssigneeDTO], tripId: UUID) throws {
+    func applyItemAssignees(_ dtos: [ItemAssigneeDTO], tripId: UUID, skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let localItemIds = Set(
             try modelContext.fetch(FetchDescriptor<ItineraryItem>(predicate: #Predicate { $0.tripId == tripId }))
@@ -245,8 +266,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyItemAssignees: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -257,7 +281,7 @@ extension SyncStore {
     /// RLS returns `[]` here for non-organizers — handled the same as any
     /// other empty pull (nothing to upsert; anything local gets reconciled
     /// away below unless pending), no special-casing needed.
-    func applyShareLinks(_ dtos: [ShareLinkDTO], tripId: UUID) throws {
+    func applyShareLinks(_ dtos: [ShareLinkDTO], tripId: UUID, skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(
             FetchDescriptor<TripShareLink>(predicate: #Predicate { $0.tripId == tripId })
@@ -273,8 +297,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyShareLinks: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }
@@ -283,7 +310,7 @@ extension SyncStore {
     }
 
     /// Same RLS shape as `applyShareLinks` — see its doc comment.
-    func applyInvites(_ dtos: [InviteDTO], tripId: UUID) throws {
+    func applyInvites(_ dtos: [InviteDTO], tripId: UUID, skippedCount: Int = 0) throws {
         let pending = try allPendingRowIds()
         let existing = try modelContext.fetch(
             FetchDescriptor<Invite>(predicate: #Predicate { $0.tripId == tripId })
@@ -299,8 +326,11 @@ extension SyncStore {
             }
         }
 
+        if skippedCount > 0 {
+            logDebug("applyInvites: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
         let toDelete = SyncReconcile.idsToDelete(
-            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
         )
         for id in toDelete {
             if let model = existingById[id] { modelContext.delete(model) }

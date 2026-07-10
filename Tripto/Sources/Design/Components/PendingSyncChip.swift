@@ -4,10 +4,12 @@ import SwiftUI
 /// ACCEPTANCE.md "(e)" — "a small clock glyph"). Shown on a trip card when
 /// its id is in `SyncStatus.pendingRowIds`.
 struct PendingSyncChip: View {
+    @ScaledMetric(relativeTo: .caption) private var clockSize: CGFloat = 10
+
     var body: some View {
         HStack(spacing: Spacing.xxs) {
             Image(systemName: "clock")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: clockSize, weight: .semibold))
             Text("Waiting to sync")
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
         }

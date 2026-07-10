@@ -16,6 +16,9 @@ struct HomeView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(AppRouter.self) private var appRouter
+    /// D2 defect 1: `header`'s AX-size restack, same `isAccessibilitySize`
+    /// convention as `TripCard.swift`/`TripView.tabBar()`.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var selectedTab = "Upcoming"
     /// Guards `chooseInitialTabIfNeeded()` to a one-time redirect (finding
@@ -57,6 +60,8 @@ struct HomeView: View {
     /// chevron from appearing: `List` only draws that accessory for a
     /// `NavigationLink`-shaped row, never for a plain `Button`.
     @State private var path = NavigationPath()
+
+    @ScaledMetric(relativeTo: .caption) private var valueRowIconSize: CGFloat = 13
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -339,55 +344,86 @@ struct HomeView: View {
 
     // MARK: - Header
 
+    /// D2 defect 1: at accessibility Dynamic Type sizes the fixed-width
+    /// settings avatar (44pt) starved `greetingBlock` of width inside the
+    /// default `HStack` below, and "Your trips" (`Typo.display()`, this
+    /// screen's biggest font) mid-word-truncated to "Your tri…" instead of
+    /// wrapping — essential heading text must never do that. Same
+    /// `isAccessibilitySize` restructure as `TripCard`/`TripView.tabBar()`/
+    /// `PersonFilterBar`: the avatar moves to its own trailing-aligned row
+    /// above the greeting/title block instead of squeezing it horizontally,
+    /// so the heading always gets the sheet's full width to wrap into (at
+    /// word boundaries, per `Text`'s own default — no `.lineLimit` added).
+    /// Default rendering (the `else` branch) is untouched.
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 2) {
-                if myDisplayName == nil {
-                    // Finding 4: no profile has hydrated yet — a redacted
-                    // placeholder keeps the layout height stable without
-                    // asserting a fake "Traveler" identity that reads as
-                    // wrong once the real name lands.
-                    Text("Good morning, Traveler")
-                        .font(Typo.body(weight: .medium))
-                        .foregroundStyle(Palette.slate)
-                        .redacted(reason: .placeholder)
-                } else {
-                    Text(greeting)
-                        .font(Typo.body(weight: .medium))
-                        .foregroundStyle(Palette.slate)
-                }
-                Text("Your trips")
-                    .font(Typo.display())
-                    .foregroundStyle(Palette.ink)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            Spacer()
-            // NavigationLink(value:), same reasoning as TripView's share
-            // button: pushes SettingsRoute onto this stack (M3 brief:
-            // "Reachable from HomeView (avatar tap → Settings)").
-            NavigationLink(value: SettingsRoute()) {
-                Circle()
-                    .fill(Palette.indigo)
-                    .frame(width: 42, height: 42)
-                    .overlay {
-                        if let myDisplayName {
-                            Text(initials(from: myDisplayName))
-                                .font(Typo.display(16))
-                                .foregroundStyle(.white)
-                        } else {
-                            // Finding 4: no bogus "T" initial before the
-                            // profile hydrates.
-                            Image(systemName: "person.fill")
-                                .foregroundStyle(.white)
-                        }
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack {
+                        Spacer()
+                        settingsAvatar
                     }
-                    // 44pt hit target (§6.5) around the 42pt visual circle —
-                    // finding 8.
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    greetingBlock
+                }
+            } else {
+                HStack(alignment: .top) {
+                    greetingBlock
+                    Spacer()
+                    settingsAvatar
+                }
             }
-            .accessibilityLabel("Settings")
         }
+    }
+
+    private var greetingBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if myDisplayName == nil {
+                // Finding 4: no profile has hydrated yet — a redacted
+                // placeholder keeps the layout height stable without
+                // asserting a fake "Traveler" identity that reads as
+                // wrong once the real name lands.
+                Text("Good morning, Traveler")
+                    .font(Typo.body(weight: .medium))
+                    .foregroundStyle(Palette.slate)
+                    .redacted(reason: .placeholder)
+            } else {
+                Text(greeting)
+                    .font(Typo.body(weight: .medium))
+                    .foregroundStyle(Palette.slate)
+            }
+            Text("Your trips")
+                .font(Typo.display())
+                .foregroundStyle(Palette.ink)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    // NavigationLink(value:), same reasoning as TripView's share button:
+    // pushes SettingsRoute onto this stack (M3 brief: "Reachable from
+    // HomeView (avatar tap → Settings)").
+    private var settingsAvatar: some View {
+        NavigationLink(value: SettingsRoute()) {
+            Circle()
+                .fill(Palette.indigo)
+                .frame(width: 42, height: 42)
+                .overlay {
+                    if let myDisplayName {
+                        Text(initials(from: myDisplayName))
+                            .font(Typo.display(16))
+                            .foregroundStyle(.white)
+                    } else {
+                        // Finding 4: no bogus "T" initial before the
+                        // profile hydrates.
+                        Image(systemName: "person.fill")
+                            .foregroundStyle(.white)
+                    }
+                }
+                // 44pt hit target (§6.5) around the 42pt visual circle —
+                // finding 8.
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Settings")
     }
 
     private var greeting: String {
@@ -487,8 +523,13 @@ struct HomeView: View {
             VStack(spacing: Spacing.lg) {
                 Spacer()
                 Image(systemName: "airplane.departure")
+                    // Decorative empty-state glyph — capped rather than
+                    // scaled: a big illustrative icon above a headline, not
+                    // text-adjacent, and growing it ~3x at AX5 would
+                    // dominate the screen more than help comprehension.
                     .font(.system(size: 40))
                     .foregroundStyle(Palette.amber)
+                    .accessibilityHidden(true)
                 VStack(spacing: Spacing.xs) {
                     Text("Plan your first trip")
                         .font(Typo.display(Typo.Size.title))
@@ -520,13 +561,16 @@ struct HomeView: View {
     private func valueRow(_ icon: String, _ text: String) -> some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: valueRowIconSize, weight: .semibold))
                 .foregroundStyle(Palette.amber)
                 .frame(width: 20)
+                .accessibilityHidden(true)
             Text(text)
                 .font(Typo.body(Typo.Size.caption))
                 .foregroundStyle(Palette.slate)
         }
+        // One VoiceOver stop per bullet (icon + text), not two.
+        .accessibilityElement(children: .combine)
     }
 
     /// Shown when the *selected tab* is empty but the other tab has trips —
@@ -600,8 +644,11 @@ struct HomeView: View {
             VStack(spacing: Spacing.lg) {
                 Spacer()
                 Image(systemName: "wifi.slash")
+                    // Decorative empty-state glyph — same deliberate cap as
+                    // `emptyState`'s icon above.
                     .font(.system(size: 40))
                     .foregroundStyle(Palette.slate)
+                    .accessibilityHidden(true)
                 VStack(spacing: Spacing.xs) {
                     Text("Can\u{2019}t check for trips yet")
                         .font(Typo.display(Typo.Size.title))
@@ -633,8 +680,11 @@ struct HomeView: View {
             VStack(spacing: Spacing.lg) {
                 Spacer()
                 Image(systemName: "exclamationmark.arrow.circlepath")
+                    // Decorative empty-state glyph — same deliberate cap as
+                    // `emptyState`'s icon above.
                     .font(.system(size: 40))
                     .foregroundStyle(Palette.slate)
+                    .accessibilityHidden(true)
                 VStack(spacing: Spacing.xs) {
                     Text("Couldn\u{2019}t check for trips")
                         .font(Typo.display(Typo.Size.title))

@@ -27,12 +27,29 @@ struct BookingDetailView: View {
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
     @Environment(\.dismiss) private var dismiss
+    /// Findings 1/2/6: the `isAccessibilitySize` AX-branch convention used
+    /// throughout Features/Trip (`TripCard.swift`, `TripView.tabBar()`).
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var toast: String?
     @State private var isPresentingEdit = false
     @State private var isPresentingDeleteConfirm = false
     @State private var isEditingNotes = false
     @State private var notesDraft = ""
+    /// Haptics (award-polish pass): flipped once `deleteItem` actually runs
+    /// (i.e. the confirmation dialog's destructive button was tapped, not
+    /// just opened), read only by the `.sensoryFeedback` in `body`.
+    @State private var didDeleteItem = false
+
+    /// Icon sizes next to this screen's own Sofia Sans caption/mono text —
+    /// see the shared `@ScaledMetric` recipe used throughout Features/Trip.
+    /// Not used inside `flightHeader`/`transportHeader`/etc. — those sit in
+    /// the boarding-pass hero art with their own fixed decorative glyphs
+    /// (route-line airplane, header badge icon), not an icon-beside-caption
+    /// pairing this recipe is for.
+    @ScaledMetric(relativeTo: .body) private var lockIconSize: CGFloat = 11
+    @ScaledMetric(relativeTo: .body) private var copyIconSize: CGFloat = 11
+    @ScaledMetric(relativeTo: .body) private var actionIconSize: CGFloat = 18
 
     init(itemId: UUID) {
         self.itemId = itemId
@@ -67,6 +84,9 @@ struct BookingDetailView: View {
         .navigationTitle("Booking details")
         .navigationBarTitleDisplayMode(.inline)
         .toastOverlay($toast)
+        // Haptics (award-polish pass): warning on a confirmed delete — see
+        // `didDeleteItem`.
+        .sensoryFeedback(.warning, trigger: didDeleteItem)
         .task {
             #if DEBUG
             // M2 verify-drill autopilot only (see `WelcomeView`/`HomeView`/
@@ -91,7 +111,11 @@ struct BookingDetailView: View {
 
                 if !canEdit {
                     HStack(spacing: Spacing.xs) {
-                        Image(systemName: "lock.fill").font(.system(size: 11))
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: lockIconSize))
+                            // Decorative — the adjacent sentence already
+                            // says this item is read-only.
+                            .accessibilityHidden(true)
                         Text("Only the person who added this, or an organizer, can change it.")
                     }
                     .font(Typo.body(Typo.Size.caption))
@@ -136,6 +160,15 @@ struct BookingDetailView: View {
 
     private func passCard(for item: ItineraryItem) -> some View {
         VStack(spacing: 0) {
+            // Finding 1: this used to cap the whole boarding-pass hero art
+            // at `.accessibility2` as an interim guard against the flight
+            // header's fixed-width route-line/IATA-pair layout, which had
+            // nowhere to reflow. `flightHeader` now branches to its own
+            // vertical layout at accessibility sizes instead (see its doc
+            // comment) — the other three header variants (hotel/simple/
+            // transport) were never the problem (no fixed side-by-side
+            // pairing), so no cap is needed here anymore and every variant
+            // scales all the way to accessibility5, matching the grid below.
             passHeader(for: item)
             perforatedGrid(for: item)
         }
@@ -207,24 +240,63 @@ struct BookingDetailView: View {
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(.white)
             }
-            HStack(alignment: .top, spacing: Spacing.sm) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(details.fromIATA ?? "—")
-                        .font(Typo.display(34))
-                    Text("\(depCity) · \(depTime) \(depZone)")
-                        .font(Typo.body(Typo.Size.caption))
+            // Finding 1: the side-by-side IATA/route-line layout below has
+            // two fixed-width columns either side of a fixed-width
+            // `routeLine` with no room to reflow — at accessibility sizes
+            // this switches to a single leading-aligned column instead
+            // (departure, then arrival), the same "give up on side-by-side,
+            // go vertical" shape `transportHeader` already uses for its
+            // pickup/drop-off pair below. `.lineLimit(2)` relief on the
+            // city/time captions now that each has a full-width line to
+            // wrap into, instead of the cramped column it had before.
+            // Default rendering in the `else` branch is untouched.
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Spacing.lg) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(details.fromIATA ?? "—")
+                            .font(Typo.display(34))
+                        Text("\(depCity) · \(depTime) \(depZone)")
+                            .font(Typo.body(Typo.Size.caption))
+                            .lineLimit(2)
+                    }
+                    Image(systemName: "airplane")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .rotationEffect(.degrees(135))
+                        // Decorative connector between the two endpoint
+                        // blocks — the from/to codes and cities either side
+                        // already say "flight," same reasoning as
+                        // `routeLine` below.
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(details.toIATA ?? "—")
+                            .font(Typo.display(34))
+                        Text("\(arrCity) · \(arrTime) \(arrZone)")
+                            .font(Typo.body(Typo.Size.caption))
+                            .lineLimit(2)
+                    }
                 }
-                Spacer(minLength: Spacing.sm)
-                routeLine
-                Spacer(minLength: Spacing.sm)
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(details.toIATA ?? "—")
-                        .font(Typo.display(34))
-                    Text("\(arrCity) · \(arrTime) \(arrZone)")
-                        .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(.white)
+            } else {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(details.fromIATA ?? "—")
+                            .font(Typo.display(34))
+                        Text("\(depCity) · \(depTime) \(depZone)")
+                            .font(Typo.body(Typo.Size.caption))
+                    }
+                    Spacer(minLength: Spacing.sm)
+                    routeLine
+                    Spacer(minLength: Spacing.sm)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(details.toIATA ?? "—")
+                            .font(Typo.display(34))
+                        Text("\(arrCity) · \(arrTime) \(arrZone)")
+                            .font(Typo.body(Typo.Size.caption))
+                    }
                 }
+                .foregroundStyle(.white)
             }
-            .foregroundStyle(.white)
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,6 +304,14 @@ struct BookingDetailView: View {
     }
 
     private var routeLine: some View {
+        // Boarding-pass hero art, not a labeled glyph next to text — this
+        // connecting rule between the two IATA codes stays a fixed size.
+        // Only rendered at non-accessibility sizes now: finding 1's
+        // vertical branch replaces the whole side-by-side layout —
+        // `routeLine` included — once `dynamicTypeSize.isAccessibilitySize`
+        // is true (see `flightHeader`), so it never needs to grow.
+        // Decorative: the from/to codes and cities either side already say
+        // "flight."
         ZStack {
             Rectangle().fill(.white.opacity(0.4)).frame(height: 1)
             Image(systemName: "airplane")
@@ -243,6 +323,7 @@ struct BookingDetailView: View {
         }
         .frame(width: 46)
         .padding(.top, 10)
+        .accessibilityHidden(true)
     }
 
     /// Transport uses a *vertical* pickup → drop-off layout (not the flight's
@@ -295,7 +376,14 @@ struct BookingDetailView: View {
             Text(label.uppercased())
                 .font(Typo.body(9, weight: .bold))
                 .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 64, alignment: .leading)
+                // `minWidth` (not a fixed `width`) — "PICKUP"/"DROP-OFF"
+                // keeps its column alignment at default size but can still
+                // grow to fit instead of clipping as Dynamic Type scales up
+                // (finding 1 removed the header's old `.accessibility2`
+                // cap; this row already reflows fine uncapped since neither
+                // this label nor `place`'s own 2-line cap forces a fixed
+                // width).
+                .frame(minWidth: 64, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(place).font(Typo.display(20)).lineLimit(2)
                 Text(time).font(Typo.body(Typo.Size.caption))
@@ -383,12 +471,13 @@ struct BookingDetailView: View {
     }
 
     private func gridCell(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        let isCopyable = (label == "Confirmation" || label == "Ticket") && value != "—"
+        return VStack(alignment: .leading, spacing: 3) {
             Text(label.uppercased())
                 .font(Typo.body(11, weight: .bold))
                 .foregroundStyle(Palette.slate)
                 .tracking(0.4)
-            if label == "Confirmation" || label == "Ticket", value != "—" {
+            if isCopyable {
                 Button {
                     // UX audit finding 6: object-specific toast ("Code
                     // copied"/"Ticket copied"), not a bare "Copied" — matches
@@ -400,9 +489,26 @@ struct BookingDetailView: View {
                         Text(value)
                             .font(Typo.mono(15.5))
                         Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11))
+                            .font(.system(size: copyIconSize))
+                            // Decorative — the mono value text next to it
+                            // and the hint below already say what this does.
+                            .accessibilityHidden(true)
                     }
-                    .foregroundStyle(Palette.indigo)
+                    // D2 defect 7: `Palette.indigo` is a fixed fill color
+                    // (same hex both themes, Tokens.swift) — fine for the
+                    // assignee-tile fill it's designed for, but low-contrast
+                    // as dark-on-dark-elevated text in dark mode. `.ink`
+                    // matches the mono-code treatment `BookingsTabView`'s
+                    // `BookingRow`/`axCard` already use for confirmation
+                    // codes and adapts light/dark like the rest of this
+                    // card's text.
+                    .foregroundStyle(Palette.ink)
+                    // Finding 7 (§6.5 44pt floor): grows only the invisible
+                    // tappable band around the ~20pt-tall label — same
+                    // recipe as `AddItemFormSections.nextDayChip`/
+                    // `TripView.pasteImportPill`, visuals unchanged.
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Double tap to copy")
@@ -412,6 +518,12 @@ struct BookingDetailView: View {
                     .foregroundStyle(Palette.ink)
             }
         }
+        // Groups the label + value into one VoiceOver stop ("Passenger,
+        // Naveen Kumar") instead of two unrelated swipes. Skipped for the
+        // copy-button branch (`.contain`, the default) — folding an
+        // interactive Button into a `.combine`d element would cost it its
+        // own tap target and hint.
+        .accessibilityElement(children: isCopyable ? .contain : .combine)
     }
 
     /// One 4-cell grid per category (this milestone's brief: flight =
@@ -532,24 +644,40 @@ struct BookingDetailView: View {
 
     // MARK: - Action row (BUILD_PLAN.md §4.4: "Add to calendar · Get directions · Share with group")
 
+    /// Finding 6: 3-tile row at default size; stacks vertically at
+    /// accessibility sizes so each label gets the sheet's full width to
+    /// wrap into instead of a cramped 1/3 column — same `AnyLayout` swap
+    /// pattern as `TripCard`'s `topLayout`/`metaLayout`.
+    private var actionRowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: Spacing.sm))
+            : AnyLayout(HStackLayout(spacing: Spacing.md))
+    }
+
     private func actionRow(for item: ItineraryItem) -> some View {
-        HStack(spacing: Spacing.md) {
+        actionRowLayout {
             Button {
                 addToCalendar(item)
             } label: {
-                actionLabel(icon: "calendar.badge.plus", text: "Add to\ncalendar")
+                // Finding 6: a literal "\n" mid-label forced an exact
+                // 2-line break that couldn't reflow once Dynamic Type grew
+                // past what the old fixed `lineLimit(2)` column could show.
+                // A plain sentence lets `Text` wrap on its own based on the
+                // space it actually has (~1/3 of the row by default, the
+                // full row at accessibility sizes via `actionRowLayout`).
+                actionLabel(icon: "calendar.badge.plus", text: "Add to calendar")
             }
             .buttonStyle(.plain)
 
             Button {
                 getDirections(item)
             } label: {
-                actionLabel(icon: "location.fill", text: "Get\ndirections")
+                actionLabel(icon: "location.fill", text: "Get directions")
             }
             .buttonStyle(.plain)
 
             ShareLink(item: ShareSummary.text(for: item)) {
-                actionLabel(icon: "square.and.arrow.up", text: "Share\nwith group")
+                actionLabel(icon: "square.and.arrow.up", text: "Share with group")
             }
         }
     }
@@ -557,13 +685,21 @@ struct BookingDetailView: View {
     private func actionLabel(icon: String, text: String) -> some View {
         VStack(spacing: Spacing.xs) {
             Image(systemName: icon)
-                .font(.system(size: 18))
+                .font(.system(size: actionIconSize))
                 .foregroundStyle(Palette.indigo)
+                // Decorative — the label below already names the action;
+                // each of these three is a Button/ShareLink whose label
+                // already reads as one VoiceOver stop.
+                .accessibilityHidden(true)
             Text(text)
                 .font(Typo.body(11, weight: .semibold))
                 .foregroundStyle(Palette.slate)
                 .multilineTextAlignment(.center)
-                .lineLimit(2)
+                // Finding 6: was a hard `2` matching the old literal "\n"
+                // break — relaxed at accessibility sizes so a label that
+                // needs a 3rd line isn't truncated instead of just
+                // wrapping; default stays capped at 2 as before.
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.md)
@@ -660,7 +796,11 @@ struct BookingDetailView: View {
                         isEditingNotes = true
                     }
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                    .foregroundStyle(Palette.amber)
+                    // Finding 3: raw `Palette.amber` as foreground text
+                    // measures ~2.3:1 on `Palette.elevated` (fails AA) —
+                    // `amberInk` is the same darkened, AA-compliant amber
+                    // the codebase already uses for inline text actions.
+                    .foregroundStyle(Palette.amberInk)
                 }
             }
 
@@ -678,7 +818,8 @@ struct BookingDetailView: View {
                     Button("Cancel") { isEditingNotes = false }
                         .foregroundStyle(Palette.slate)
                     Button("Save") { saveNotes(item) }
-                        .foregroundStyle(Palette.amber)
+                        // Finding 3: same `amberInk` swap as "Edit" above.
+                        .foregroundStyle(Palette.amberInk)
                 }
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
             } else {
@@ -719,17 +860,40 @@ struct BookingDetailView: View {
         modelContext.delete(item)
         try? modelContext.save()
         Task { await syncEngine?.enqueueDelete(table: .itineraryItems, rowId: rowId, tripId: tripId) }
+        didDeleteItem.toggle()
         dismiss()
     }
 
+    /// Finding 4: parity with `TripView.missingTripState` — explains the
+    /// likely cause instead of a bare headline, marks the headline
+    /// `.isHeader`, and swaps the bare-amber-text "Back" for the same
+    /// filled `Palette.amber`/`Palette.onAmber` capsule CTA (finding 3's
+    /// established pattern, `TripView.swift`'s own `missingTripState`).
     private var missingItemState: some View {
         VStack(spacing: Spacing.md) {
             Text("This item is no longer available")
                 .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.slate)
-            Button("Back") { dismiss() }
-                .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.amber)
+                .foregroundStyle(Palette.ink)
+                .accessibilityAddTraits(.isHeader)
+            Text(
+                "It may have been removed by an organizer or companion, or your access " +
+                    "to this trip may have ended."
+            )
+            .font(Typo.body())
+            .foregroundStyle(Palette.slate)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, Spacing.xxl)
+            Button(action: { dismiss() }) {
+                Text("Back")
+                    .font(Typo.body(weight: .semibold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.md)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                    .contentShape(Capsule())
+                    .background(Palette.amber, in: Capsule())
+            }
+            .padding(.top, Spacing.xs)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

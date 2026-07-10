@@ -52,6 +52,11 @@ actor SyncEngine {
     var tripChannelTasks: [UUID: [Task<Void, Never>]] = [:]
 
     static let maxPushAttempts = 8
+    /// Bounded retry budget for a failed realtime subscribe
+    /// (`SyncEngine+Realtime.swift`) — smaller than `maxPushAttempts`
+    /// since a dead channel degrades to pull-on-foreground rather than
+    /// losing user data, so there's less to gain from a long tail of retries.
+    static let maxRealtimeSubscribeAttempts = 5
     static let pushDebounceMilliseconds: UInt64 = 300
     static let pullDebounceMilliseconds: UInt64 = 500
 

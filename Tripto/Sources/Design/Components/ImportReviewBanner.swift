@@ -9,6 +9,7 @@ struct ImportReviewBanner: View {
     let count: Int
     let onTap: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .caption) private var chevronSize: CGFloat = 11
 
     var body: some View {
         Button(action: onTap) {
@@ -18,7 +19,7 @@ struct ImportReviewBanner: View {
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: chevronSize, weight: .semibold))
                     .opacity(0.7)
             }
             .foregroundStyle(Palette.amberInk)

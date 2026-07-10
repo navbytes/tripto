@@ -37,6 +37,12 @@ struct AvatarColorPicker: View {
                 .overlay {
                     if isOn {
                         Image(systemName: "checkmark")
+                            // Deliberately fixed: `swatchSize` (default 36,
+                            // caller-set) isn't itself Dynamic-Type-aware, so
+                            // scaling this checkmark without also growing
+                            // the swatch would overflow the circle.
+                            // VoiceOver already conveys selection via
+                            // `.isSelected` below, independent of this glyph.
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
                     }

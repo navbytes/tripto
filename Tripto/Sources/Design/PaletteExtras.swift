@@ -35,6 +35,19 @@ public extension Palette {
     /// light variant is ~5.3:1 on `#FFFFFF`; dark mode keeps the existing
     /// amber look (~7:1 on `Palette.elevated`'s dark hex), so only light
     /// mode actually changes.
+    ///
+    /// UX-audit finding 3 reuses this rather than adding a same-purpose
+    /// `amberText` duplicate (read this file first, per the brief's own
+    /// "must not collide with existing names"): light-mode `#A25A24` is
+    /// ~5.0:1 on `Palette.paper` (`#FBFAF7`), and dark-mode `#E8955A` is
+    /// ~7.7:1 on `Palette.paper`'s dark hex (`#141522`) — both clear the
+    /// finding's ≥4.5:1 bar on paper as well as elevated. Backs
+    /// `BookingDetailView`'s note Edit/Save, `AddItemFormSections`' "Same
+    /// as pickup", and `PackingListView`'s "Show/Hide packed" + percent
+    /// label — every inline (non-capsule) amber text action found in the
+    /// audit's Features/Trip/** sweep. CTA-weight actions instead become
+    /// filled `Palette.amber`/`Palette.onAmber` capsules (see
+    /// `TripView.missingTripState`).
     static let amberInk = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(hex: "#E8955A")

@@ -23,6 +23,16 @@ struct Fab: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
+                // Deliberately fixed, not @ScaledMetric: `diameter` below is
+                // a `static let` other screens key scroll-inset math off
+                // (`Fab.scrollClearance` — ItineraryTabView/BookingsTabView/
+                // PackingListView/TripView), so it can't become an
+                // environment-dependent scaled value without breaking that
+                // contract, and scaling just the glyph (up to ~3x at AX5)
+                // would badly outgrow this fixed circle. The 58pt circle
+                // already clears the 44pt tap-target floor at every text
+                // size, and `accessibilityLabel` below carries the action
+                // for VoiceOver regardless of glyph size.
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(Palette.onAmber)
                 .frame(width: Self.diameter, height: Self.diameter)

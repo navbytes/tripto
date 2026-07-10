@@ -68,6 +68,10 @@ struct SettingsView: View {
                                 .font(Typo.display(18))
                                 .foregroundStyle(.white)
                         }
+                        // Decorative live preview — the name field and the
+                        // color picker's own selection state below already
+                        // convey this.
+                        .accessibilityHidden(true)
                     TextField("Display name", text: $displayName)
                         .font(Typo.body(weight: .semibold))
                         .disabled(isDeletingAccount)
@@ -96,6 +100,7 @@ struct SettingsView: View {
                     Text(nameSaveError)
                         .font(Typo.body(Typo.Size.caption))
                         .foregroundStyle(Palette.rose)
+                        .accessibilityAddTraits(.updatesFrequently)
                 }
             }
 
@@ -159,6 +164,7 @@ struct SettingsView: View {
                 Button(action: backTapped) {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.backward")
+                            .accessibilityHidden(true)
                         Text("Back")
                     }
                 }
@@ -201,6 +207,13 @@ struct SettingsView: View {
         .onChange(of: avatarColor) { _, _ in
             if nameSaveError != nil {
                 nameSaveError = nil
+            }
+        }
+        // Same VoiceOver gap `TripFormView`'s `saveError` announcement
+        // closes — a write failure otherwise has no spoken feedback.
+        .onChange(of: nameSaveError) { _, newValue in
+            if let newValue {
+                AccessibilityNotification.Announcement(newValue).post()
             }
         }
         .confirmationDialog(
