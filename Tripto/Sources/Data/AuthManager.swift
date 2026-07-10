@@ -38,7 +38,13 @@ final class AuthManager {
         switch event {
         case .initialSession:
             isRestoring = false
-            if session != nil {
+            // `emitLocalSessionAsInitialSession: true` (SupabaseClient.swift)
+            // means `session` here may be expired — the SDK refreshes it in
+            // the background and a later `.tokenRefreshed`/`.signedOut` event
+            // updates `self.session` above, but starting the sync engine
+            // against a known-expired session would just spend its first
+            // requests on 401s.
+            if let session, !session.isExpired {
                 await syncEngine.start()
             }
         case .signedIn:
