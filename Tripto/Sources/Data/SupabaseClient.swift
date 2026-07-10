@@ -17,7 +17,15 @@ enum Supa {
             // Every request/response body goes through the same snake_case +
             // ISO8601 mechanism as the rest of the app (Models/JSONCoding.swift)
             // — DTOs are plain camelCase structs with no per-field CodingKeys.
-            db: .init(encoder: JSONCoding.encoder, decoder: JSONCoding.decoder)
+            db: .init(encoder: JSONCoding.encoder, decoder: JSONCoding.decoder),
+            // Opting into supabase-swift's post-2.50 default early (currently
+            // opt-in, becomes the only behavior next major version — see
+            // https://github.com/supabase/supabase-swift/pull/822): emit the
+            // locally stored session immediately as `.initialSession`, even if
+            // expired, instead of trying to refresh it first. AuthManager's
+            // `.initialSession` handler checks `session.isExpired` per the
+            // SDK's own guidance for this flag.
+            auth: .init(emitLocalSessionAsInitialSession: true)
         )
     )
 
