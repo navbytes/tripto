@@ -23,3 +23,6 @@ Tripto/Generated/
 # Python (scripts/gen_tokens.py)
 __pycache__/
 *.pyc
+
+# Claude Code agent worktrees — internal scratch, not project content.
+.claude/worktrees/
