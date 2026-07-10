@@ -12,6 +12,7 @@ struct SyncIssueBanner: View {
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isPresentingDetails = false
+    @ScaledMetric(relativeTo: .caption) private var chevronSize: CGFloat = 11
 
     var body: some View {
         Button {
@@ -23,7 +24,7 @@ struct SyncIssueBanner: View {
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: chevronSize, weight: .semibold))
                     .opacity(0.7)
             }
             .foregroundStyle(Palette.rose)
@@ -90,6 +91,10 @@ struct SyncIssuesSheet: View {
     private var emptyState: some View {
         VStack(spacing: Spacing.sm) {
             Image(systemName: "checkmark.circle")
+                // Decorative empty-state glyph — capped rather than scaled
+                // (same rationale as HomeView's empty-state icons): a
+                // reassurance glyph above a two-word headline in an
+                // otherwise-blank sheet, not text-adjacent.
                 .font(.system(size: 32))
                 .foregroundStyle(Palette.slate)
             Text("Nothing outstanding")
@@ -101,17 +106,23 @@ struct SyncIssuesSheet: View {
 
     private func issueRow(_ issue: SyncIssueSnapshot) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
-            HStack {
-                Text(SyncIssuePresentation.title(forTable: SyncTable(rawValue: issue.tableRaw)).capitalized)
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                Spacer()
-                Text(issue.at, style: .relative)
-                    .helperTextStyle()
+            // Combine only the informational subtree; the action buttons below
+            // must stay individually reachable to VoiceOver (same pattern as
+            // ImportAddressCard).
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                HStack {
+                    Text(SyncIssuePresentation.title(forTable: SyncTable(rawValue: issue.tableRaw)).capitalized)
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Spacer()
+                    Text(issue.at, style: .relative)
+                        .helperTextStyle()
+                }
+                Text(SyncIssuePresentation.message(retriable: issue.retriable))
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
             }
-            Text(SyncIssuePresentation.message(retriable: issue.retriable))
-                .font(Typo.body(Typo.Size.caption))
-                .foregroundStyle(Palette.slate)
+            .accessibilityElement(children: .combine)
             HStack(spacing: Spacing.lg) {
                 if issue.retriable {
                     Button("Try again") {
@@ -119,7 +130,7 @@ struct SyncIssuesSheet: View {
                             await syncEngine?.retryIssue(id: issue.id, rowId: issue.rowId, tableRaw: issue.tableRaw)
                         }
                     }
-                    .foregroundStyle(Palette.amber)
+                    .foregroundStyle(Palette.amberInk)
                 }
                 Button("Dismiss") {
                     Task { await syncEngine?.dismissIssue(id: issue.id) }
@@ -131,7 +142,6 @@ struct SyncIssuesSheet: View {
             .padding(.top, Spacing.xxs)
         }
         .padding(.vertical, Spacing.xs)
-        .accessibilityElement(children: .combine)
     }
 }
 

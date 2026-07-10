@@ -17,6 +17,7 @@ struct ZonePicker: View {
     var hint: String?
 
     @State private var isPresented = false
+    @ScaledMetric(relativeTo: .caption) private var chevronSize: CGFloat = 11
 
     var body: some View {
         Button {
@@ -37,7 +38,7 @@ struct ZonePicker: View {
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: chevronSize, weight: .semibold))
                     .foregroundStyle(Palette.slate)
             }
             .contentShape(Rectangle())

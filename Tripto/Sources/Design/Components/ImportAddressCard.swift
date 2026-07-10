@@ -26,6 +26,9 @@ struct ImportAddressCard: View {
     let onCopy: (String) -> Void
     let onRetry: () -> Void
 
+    @ScaledMetric(relativeTo: .caption) private var copyIconSize: CGFloat = 11
+    @ScaledMetric(relativeTo: .caption) private var retryIconSize: CGFloat = 12
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.md) {
@@ -65,7 +68,7 @@ struct ImportAddressCard: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: copyIconSize, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.72))
                     }
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -88,7 +91,7 @@ struct ImportAddressCard: View {
                 Button(action: onRetry) {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "exclamationmark.circle")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: retryIconSize, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.85))
                         Text("Couldn\u{2019}t load \u{2014} tap to retry")
                             .font(Typo.body(Typo.Size.caption))

@@ -59,16 +59,45 @@ struct TimelineCardRow: View, Equatable {
     /// `lineLimit(isAXSize ? 2 : 1)` call sites are untouched.
     var typeSize: DynamicTypeSize = .large
 
+    /// Ticket-glyph size, next to the card's Sofia Sans title/subtitle
+    /// (`Typo.body`, which always scales on the `.body` curve regardless of
+    /// its own point size — see `Typo.body`'s doc comment) — a bare
+    /// `.font(.system(size:))` here wouldn't grow with them.
+    @ScaledMetric(relativeTo: .body) private var ticketIconSize: CGFloat = 14
+
     private var isAXSize: Bool { typeSize.isAccessibilitySize }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: model.id)) {
-            HStack(alignment: .top, spacing: 0) {
-                timeGutter
-                railColumn
-                card
+            Group {
+                // D2 defect 2: the fixed 76pt AX gutter (`TimelineLayout
+                // .gutterWidth`) plus the 14pt rail still only left `card`
+                // a sliver of the row's width — squeezed further by its
+                // own `CategoryIconTile`/ticket glyph (both growing with
+                // the same Dynamic Type), title/subtitle collapsed to
+                // single-character-per-line fragments ("T"/"…"/"JF")
+                // instead of wrapping. Same "give up on side-by-side, go
+                // vertical" relief `BookingDetailView.flightHeader`/
+                // `transportHeader` already use for an analogous fixed-
+                // column squeeze: the time/rail marker moves to its own
+                // compact leading row above the card, which then gets the
+                // row's full width to wrap title/subtitle into (already
+                // `lineLimit(isAXSize ? 2 : 1)` below — untouched). Default
+                // rendering (the `else` branch) is pixel-identical to before.
+                if isAXSize {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        axTimeRow
+                        card
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 0) {
+                        timeGutter
+                        railColumn
+                        card
+                    }
+                }
             }
             // One spoken element per row: names the category (conveyed only
             // by node color + icon tile visually — never color alone, §7.3),
@@ -79,6 +108,29 @@ struct TimelineCardRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .padding(.vertical, Spacing.xs)
+    }
+
+    /// D2 defect 2: the AX-branch stand-in for `timeGutter` + `railColumn`
+    /// — a single compact leading row (rail node + time + zone) instead of
+    /// two fixed-width columns, since it no longer needs to reserve a
+    /// column `card` sits beside.
+    private var axTimeRow: some View {
+        HStack(spacing: Spacing.xs) {
+            RailNode(category: model.category)
+            Text(model.timeText)
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+            if let zoneLabel = model.zoneLabel {
+                // UX audit finding 3 (see `timeGutter`'s matching comment):
+                // safety-critical, so it wraps rather than shrinks — a full
+                // row is available here, unlike the old fixed gutter.
+                Text(zoneLabel)
+                    .font(Typo.body(9.5, weight: .medium))
+                    .foregroundStyle(Palette.slate)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.leading, Spacing.sm)
     }
 
     private var categoryWord: String { model.category.displayName }
@@ -170,6 +222,17 @@ struct TimelineCardRow: View, Equatable {
     private var card: some View {
         HStack(spacing: Spacing.md) {
             CategoryIconTile(category: model.category)
+                // D2 defect 2: capped, not left to keep growing — shared
+                // conventions' sanctioned recipe for a glyph in a
+                // fixed-role container ("cap with .dynamicTypeSize(...
+                // accessibility2)"). `axTimeRow`'s restack above already
+                // gives `card` back its own row's full width; this keeps
+                // that width going to the title/subtitle instead of an
+                // icon tile ballooning past accessibility2 (~2x its base
+                // 38pt) for no added legibility. Only touches this
+                // instance's own environment — unrelated to `railColumn`'s
+                // `RailNode`, which was never `@ScaledMetric` to begin with.
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.title)
                     .font(Typo.body(Typo.Size.body, weight: .semibold))
@@ -209,7 +272,7 @@ struct TimelineCardRow: View, Equatable {
             Spacer(minLength: Spacing.xs)
             if model.hasTicket {
                 Image(systemName: "ticket.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: ticketIconSize))
                     .foregroundStyle(Palette.slate)
             }
         }
@@ -241,13 +304,16 @@ struct StayingStripRow: View, Equatable {
     /// stays aligned with the card/check-out columns at every type size.
     var typeSize: DynamicTypeSize = .large
 
+    /// See `TimelineCardRow.ticketIconSize`'s doc comment.
+    @ScaledMetric(relativeTo: .body) private var bedIconSize: CGFloat = 12
+
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: model.itemId)) {
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "bed.double.fill")
-                    .font(.system(size: 12))
+                    .font(.system(size: bedIconSize))
                     .foregroundStyle(CategoryColor.hotel.fg)
                 Text(model.text)
                     .font(Typo.body(Typo.Size.caption, weight: .medium))
@@ -286,6 +352,9 @@ struct CheckOutRow: View, Equatable {
     /// See `TimelineCardRow.typeSize`'s doc comment.
     var typeSize: DynamicTypeSize = .large
 
+    /// See `TimelineCardRow.ticketIconSize`'s doc comment.
+    @ScaledMetric(relativeTo: .body) private var arrowIconSize: CGFloat = 12
+
     private var isAXSize: Bool { typeSize.isAccessibilitySize }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
@@ -295,7 +364,7 @@ struct CheckOutRow: View, Equatable {
             HStack(spacing: Spacing.sm) {
                 timeGutter
                 Image(systemName: "arrow.up.forward.square")
-                    .font(.system(size: 12))
+                    .font(.system(size: arrowIconSize))
                     .foregroundStyle(CategoryColor.hotel.fg)
                 Text(model.title)
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
@@ -370,13 +439,15 @@ struct TagChip: View {
     /// — its parent (`TimelineCardRow`) already carries `typeSize` in its
     /// own `==`, so a live type-size change still re-triggers this body.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// See `TimelineCardRow.ticketIconSize`'s doc comment.
+    @ScaledMetric(relativeTo: .body) private var tagIconSize: CGFloat = 9
 
     private var itemTag: ItemTag? { ItemTag(rawValue: tag) }
 
     var body: some View {
         HStack(spacing: 3) {
             if let symbolName = itemTag?.symbolName {
-                Image(systemName: symbolName).font(.system(size: 9, weight: .semibold))
+                Image(systemName: symbolName).font(.system(size: tagIconSize, weight: .semibold))
             }
             Text(itemTag?.label ?? tag)
         }
@@ -401,12 +472,15 @@ struct TZShiftChipRow: View, Equatable {
     /// See `TimelineCardRow.typeSize`'s doc comment.
     var typeSize: DynamicTypeSize = .large
 
+    /// See `TimelineCardRow.ticketIconSize`'s doc comment.
+    @ScaledMetric(relativeTo: .body) private var shiftIconSize: CGFloat = 10
+
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: "arrow.left.arrow.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: shiftIconSize, weight: .semibold))
             Text(model.text)
                 .font(Typo.body(11, weight: .semibold))
         }

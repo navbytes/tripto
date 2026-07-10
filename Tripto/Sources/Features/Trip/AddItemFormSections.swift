@@ -181,7 +181,11 @@ extension AddItemSheet {
             LocationField(label: "Drop-off location", text: $dropoffText) { _, _ in }
             Button("Same as pickup") { dropoffText = locationText }
                 .font(Typo.body(11, weight: .semibold))
-                .foregroundStyle(Palette.amber)
+                // Finding 3: raw `Palette.amber` as foreground text
+                // measures ~2.3:1 on `Palette.paper` (fails AA) —
+                // `amberInk` is the same darkened, AA-compliant amber the
+                // codebase already uses for inline text actions.
+                .foregroundStyle(Palette.amberInk)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             HStack(spacing: Spacing.md) {
                 LabeledDatePicker(label: "Drop-off date", date: $dropoffDate, displayedComponents: .date)
@@ -287,7 +291,10 @@ extension AddItemSheet {
         } label: {
             HStack(spacing: 4) {
                 if let symbolName = tag.symbolName {
-                    Image(systemName: symbolName).font(.system(size: 10, weight: .semibold))
+                    Image(systemName: symbolName)
+                        .font(.system(size: tagIconSize, weight: .semibold))
+                        // Decorative — the label right next to it names the tag.
+                        .accessibilityHidden(true)
                 }
                 Text(tag.label).font(Typo.body(11.5, weight: .semibold))
             }
@@ -339,7 +346,12 @@ extension AddItemSheet {
         } label: {
             Text("+1 day")
                 .font(Typo.body(11, weight: .semibold))
-                .foregroundStyle(effectiveNextDay ? .white : Palette.slate)
+                // Finding 3 (sweep, same defect class): raw `.white` on
+                // `Palette.amber` measures ~2.3:1 (fails AA) — the same
+                // white-on-amber bug `Palette.onAmber` exists to fix,
+                // already used by every other filled-amber CTA in this
+                // codebase (e.g. `TripView.missingTripState`).
+                .foregroundStyle(effectiveNextDay ? Palette.onAmber : Palette.slate)
                 .padding(.horizontal, Spacing.sm)
                 .padding(.vertical, Spacing.xs)
                 .background(effectiveNextDay ? Palette.amber : Palette.mist, in: Capsule())
@@ -421,9 +433,18 @@ struct FormTextField<FocusValue: Hashable>: View {
         if let focusBinding, let focusValue {
             TextField(placeholder, text: $text)
                 .focused(focusBinding, equals: focusValue)
+                // T2 residue: `TextField(_:text:)` defaults its VoiceOver
+                // label to the placeholder (an example value like "Meera,
+                // Grandma…"), not the visible `label` caption above it
+                // ("Name") — applied to this leaf `TextField`, not the
+                // wrapping `VStack`, so it doesn't collapse the caption+
+                // field into one element and break the field's own
+                // text-editing gestures.
+                .accessibilityLabel(label)
         } else {
             TextField(placeholder, text: $text)
                 .focused($fallbackFocus)
+                .accessibilityLabel(label)
         }
     }
 }
@@ -457,8 +478,17 @@ struct LabeledDatePicker: View {
     /// dragged before its start date. `nil` keeps the picker unbounded.
     var minDate: Date? = nil
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     var body: some View {
-        HStack {
+        // At accessibility sizes the native picker's intrinsic width squeezes
+        // the label into mid-word wraps ("Da/te" — QA follow-up to D2), so
+        // the label moves above the picker there; HStackLayout at default
+        // sizes is identical to the old HStack.
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xs))
+            : AnyLayout(HStackLayout())
+        layout {
             Text(label)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.slate)
@@ -467,7 +497,9 @@ struct LabeledDatePicker: View {
                 // calls) — hiding this static duplicate keeps it from being
                 // announced a second time as its own element.
                 .accessibilityHidden(true)
-            Spacer(minLength: Spacing.sm)
+            if !typeSize.isAccessibilitySize {
+                Spacer(minLength: Spacing.sm)
+            }
             Group {
                 if let minDate {
                     DatePicker(label, selection: $date, in: minDate..., displayedComponents: displayedComponents)

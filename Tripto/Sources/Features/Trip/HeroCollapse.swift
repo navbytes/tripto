@@ -149,6 +149,13 @@ struct TripHeroView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// `metaRow`'s traveler-count icon, next to its own count text — see the
+    /// shared `@ScaledMetric` recipe used throughout Features/Trip. The
+    /// chevron beside it is already hidden from VoiceOver (decorative) but
+    /// still visually scales for sighted low-vision users.
+    @ScaledMetric(relativeTo: .body) private var travelerIconSize: CGFloat = 10
+    @ScaledMetric(relativeTo: .body) private var travelerChevronSize: CGFloat = 9
+
     /// The meta row's true, fully-expanded natural height — measured (see
     /// `metaRow`'s `.background`/`.onPreferenceChange` below) rather than
     /// assumed, since the traveler-count pill's 44pt tap target (finding 4)
@@ -278,7 +285,36 @@ struct TripHeroView: View {
         // term is the scroll-collapse range added on top of that: fully
         // expanded at `p == 0`, compact (96pt floor — clears the notch +
         // 44pt button row) at `p == 1`.
-        .frame(minHeight: 150 - 54 * p, alignment: .bottom)
+        //
+        // D2 defect 3: `alignment: .bottom` here (kept for the default/
+        // non-AX case — unaffected, verified pixel-identical) is what let
+        // the button row render on top of the status bar at accessibility
+        // sizes, on whichever tab is `TripView`'s *initial* `selectedTab`
+        // (Itinerary) specifically — live-instrumented via three nested
+        // `GeometryReader`s reading `.global` frames: this frame's own box
+        // consistently settles at the correct safe-area-respecting origin
+        // (confirmed identical on Itinerary vs Packing), but the button
+        // row's *measured* position landed ~48pt above that box's own top
+        // — almost exactly the gap between this view's first and second
+        // layout pass's differing ideal heights (`.fixedSize` re-resolving
+        // the AX-branch `metaRow`'s wrapped height once real width
+        // settles). `alignment: .bottom` computes a child's position from
+        // `frameHeight - contentHeight`, i.e. from *two* independently-
+        // resolving measurements; when they disagree across passes (as
+        // observed only on the tab mounted on the very first render, never
+        // on a tab reached by a later state change), the button row is
+        // placed as if inside a taller phantom box. `alignment: .top`
+        // places content directly from the box's own top edge — one
+        // measurement, not a difference of two — sidestepping the mismatch
+        // regardless of its deeper cause. Safe to scope to `isAccessibilitySize`
+        // only: `metaRow` never height-collapses there anyway (this file's
+        // "Finding 2" above), so content already meets or exceeds
+        // `minHeight` at every `p`, meaning there's rarely real slack for
+        // `.bottom` vs `.top` to visibly disagree over even when the bug
+        // isn't triggered — confirmed via the same instrumentation
+        // (screenshot + logged global frames) before/after on both the
+        // Itinerary and Packing tabs at AX5.
+        .frame(minHeight: 150 - 54 * p, alignment: dynamicTypeSize.isAccessibilitySize ? .top : .bottom)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             CoverGradient.from(key: trip.coverGradient)
@@ -318,14 +354,14 @@ struct TripHeroView: View {
 
             NavigationLink(value: ShareRoute(tripId: trip.id)) {
                 HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "person.2.fill").font(.system(size: 10))
+                    Image(systemName: "person.2.fill").font(.system(size: travelerIconSize))
                     Text("\(max(tripProfileCount, 1))")
                     // Finding 5: a small tappability cue for sighted users —
                     // VoiceOver already gets the same signal from the
                     // `.accessibilityHint` below, so this glyph adds nothing
                     // there and is hidden from it.
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9))
+                        .font(.system(size: travelerChevronSize))
                         .accessibilityHidden(true)
                 }
                 .padding(.horizontal, Spacing.sm)

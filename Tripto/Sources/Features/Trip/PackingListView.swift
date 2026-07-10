@@ -56,6 +56,18 @@ struct PackingListView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// D2 defect 4: `progressHeader`'s AX-size restack, same
+    /// `isAccessibilitySize` convention as `TripCard.swift`/
+    /// `TripView.tabBar()`.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Lock-glyph size next to the read-only notice's caption text — a bare
+    /// `.font(.system(size:))` wouldn't scale with it (see the shared
+    /// `@ScaledMetric` recipe used throughout Features/Trip).
+    @ScaledMetric(relativeTo: .body) private var lockIconSize: CGFloat = 11
+    /// Group-header glyph size, next to that header's own label.
+    @ScaledMetric(relativeTo: .body) private var groupIconSize: CGFloat = 11
 
     /// TI-3: paste-import moved off this tab's FAB entirely — it's now
     /// `TripView.pasteImportPill`, the one consistent entry point shared by
@@ -81,6 +93,13 @@ struct PackingListView: View {
     /// affordance in the app (Home's trip swipe, Booking detail's trash,
     /// `TripProfileFormSheet`'s remove).
     @State private var itemPendingDeletion: PackingItem?
+    /// Haptics (award-polish pass): flipped on a successful add/update save
+    /// and read only by the `.sensoryFeedback` below — fires on the save
+    /// actually landing, not on the Save button tap itself.
+    @State private var didSaveItem = false
+    /// Flipped once a delete is confirmed (not on the swipe/dialog opening)
+    /// — see `didSaveItem`'s doc comment for the same trigger-not-tap shape.
+    @State private var didDeleteItem = false
 
     init(
         tripId: UUID, tripCreatedBy: UUID, heroScrollModel: HeroScrollModel, isAwaitingFirstSync: Bool = false,
@@ -224,6 +243,10 @@ struct PackingListView: View {
         // finding-8 fix — this tab renders its own FAB in the same band, so
         // its toast needs the same constant FAB-clearance inset.
         .toastOverlay($toast, bottomInset: Fab.scrollClearance)
+        // Haptics (award-polish pass): success on a landed add/update save,
+        // warning on a confirmed delete — see `didSaveItem`/`didDeleteItem`.
+        .sensoryFeedback(.success, trigger: didSaveItem)
+        .sensoryFeedback(.warning, trigger: didDeleteItem)
         .task {
             #if DEBUG
             await applyUITestAutopilotIfNeeded()
@@ -234,30 +257,56 @@ struct PackingListView: View {
     // MARK: - Progress header (this milestone's brief: "'{done} of {total}
     // packed', %, gradient bar")
 
+    /// D2 defect 4: at accessibility Dynamic Type sizes the fixed `HStack`
+    /// below squeezed "{done} of {total} packed" (this row's biggest font,
+    /// `Typo.display(20)`) between the Hide/Show-packed toggle and the
+    /// percent label, truncating it to "5 of…". Same `isAccessibilitySize`
+    /// `AnyLayout` swap `TripCard`/`BookingDetailView.actionRowLayout` use —
+    /// stacks the three pieces instead of squeezing them side by side, so
+    /// the count always gets the row's full width. Default rendering (the
+    /// `HStackLayout` branch) is untouched.
+    private var progressHeaderRowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xs))
+            : AnyLayout(HStackLayout(alignment: .lastTextBaseline))
+    }
+
     private var progressHeader: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(alignment: .lastTextBaseline) {
+            progressHeaderRowLayout {
                 Text("\(summary.done) of \(summary.total) packed")
                     .font(Typo.display(20))
                     .foregroundStyle(Palette.ink)
-                Spacer(minLength: Spacing.sm)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer(minLength: Spacing.sm)
+                }
                 // Finding 2: opt-in complement to the always-on
                 // packed-to-bottom sort — only worth surfacing once there's
                 // at least one packed item to hide.
                 if summary.done > 0 {
                     Button {
-                        withAnimation { hidePacked.toggle() }
+                        if reduceMotion {
+                            hidePacked.toggle()
+                        } else {
+                            withAnimation { hidePacked.toggle() }
+                        }
                     } label: {
                         Text(hidePacked ? "Show packed" : "Hide packed")
                             .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                            .foregroundStyle(hidePacked ? Palette.amber : Palette.slate)
+                            // Finding 3 (sweep, same defect class):
+                            // `amberInk` — see its doc comment in
+                            // `PaletteExtras.swift`.
+                            .foregroundStyle(hidePacked ? Palette.amberInk : Palette.slate)
                     }
                     .buttonStyle(.plain)
-                    .padding(.trailing, Spacing.sm)
+                    .padding(.trailing, dynamicTypeSize.isAccessibilitySize ? 0 : Spacing.sm)
                 }
                 Text("\(summary.percent)%")
                     .font(Typo.body(Typo.Size.caption, weight: .bold))
-                    .foregroundStyle(Palette.amber)
+                    // Finding 3 (sweep, same defect class): raw
+                    // `Palette.amber` as foreground text measures ~2.3:1 on
+                    // `Palette.paper` (fails AA).
+                    .foregroundStyle(Palette.amberInk)
             }
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -274,7 +323,11 @@ struct PackingListView: View {
             // that this list can't be changed from this account/role.
             if !canManage && !packingItems.isEmpty {
                 HStack(spacing: Spacing.xs) {
-                    Image(systemName: "lock.fill").font(.system(size: 11))
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: lockIconSize))
+                        // Decorative — the adjacent sentence already says
+                        // this list is read-only.
+                        .accessibilityHidden(true)
                     Text("Only an organizer or companion can change the packing list.")
                 }
                 .font(Typo.body(Typo.Size.caption))
@@ -295,12 +348,20 @@ struct PackingListView: View {
                     VStack(alignment: .leading, spacing: Spacing.sm) {
                         HStack(spacing: Spacing.xs) {
                             Image(systemName: group.key.symbolName)
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: groupIconSize, weight: .bold))
+                                // Decorative — redundant with the label text
+                                // right next to it.
+                                .accessibilityHidden(true)
                             Text(group.key.displayName.uppercased())
                                 .font(Typo.body(12, weight: .bold))
                                 .tracking(0.5)
                         }
                         .foregroundStyle(Palette.slate)
+                        // Matches the `.isHeader` trait `BookingsTabView`'s
+                        // category headers and `ItineraryTabView`'s day
+                        // headers already carry, so the headings rotor can
+                        // jump group-to-group here too.
+                        .accessibilityAddTraits(.isHeader)
 
                         VStack(spacing: Spacing.sm) {
                             ForEach(group.items) { item in
@@ -373,9 +434,13 @@ struct PackingListView: View {
                 // correct either way).
                 unavailableState
             } else {
+                // Decorative empty-state art, deliberately fixed size (no
+                // adjacent inline text to track, nothing clips) — the
+                // headline right below already carries the message.
                 Image(systemName: "bag.badge.plus")
                     .font(.system(size: 36))
                     .foregroundStyle(Palette.slate)
+                    .accessibilityHidden(true)
                 VStack(spacing: Spacing.xs) {
                     Text("Start the family packing list")
                         .font(Typo.display(Typo.Size.title))
@@ -428,9 +493,11 @@ struct PackingListView: View {
     /// sized to this tab's simpler empty-state shell.
     private var unavailableState: some View {
         VStack(spacing: Spacing.md) {
+            // Decorative — see the matching icon in `emptyState` above.
             Image(systemName: "bag.badge.plus")
                 .font(.system(size: 36))
                 .foregroundStyle(Palette.slate)
+                .accessibilityHidden(true)
             Text(isOffline ? "Packing list hasn\u{2019}t loaded yet" : "Couldn\u{2019}t load the packing list")
                 .font(Typo.body())
                 .foregroundStyle(Palette.slate)
@@ -470,8 +537,12 @@ struct PackingListView: View {
         // Finding 2: so a checked item visibly sinks to the bottom of its
         // group (`PackingGrouping.groups(for:)`'s new packed-to-bottom
         // sort) instead of just snapping there.
-        withAnimation {
+        if reduceMotion {
             item.isDone.toggle()
+        } else {
+            withAnimation {
+                item.isDone.toggle()
+            }
         }
         item.updatedAt = .now
         item.updatedBy = authManager.userId
@@ -508,6 +579,7 @@ struct PackingListView: View {
         item.updatedBy = authManager.userId
         try? modelContext.save()
         enqueue(item)
+        didSaveItem.toggle()
     }
 
     /// Finding 1: dropped the `authManager.userId` hard guard — it made
@@ -529,7 +601,11 @@ struct PackingListView: View {
             tripId: tripId, createdBy: authManager.userId ?? tripCreatedBy,
             modelContext: modelContext, syncEngine: syncEngine
         )
+        // Haptics: gated the same as the toast below — a bulk paste-import
+        // add loop stays quiet per item (one buzz per pasted row would be
+        // noise), same reasoning as its suppressed per-item toast.
         guard announceIndividually else { return }
+        didSaveItem.toggle()
         toast = authManager.userId == nil
             ? "Added to packing list \u{2014} you\u{2019}re signed out, so it won\u{2019}t sync until you sign back in."
             : "Added to packing list"
@@ -544,6 +620,7 @@ struct PackingListView: View {
         // deleting previously gave no feedback at all.
         toast = "Removed from packing list"
         UISelectionFeedbackGenerator().selectionChanged()
+        didDeleteItem.toggle()
     }
 
     private func enqueue(_ item: PackingItem) {
@@ -597,8 +674,32 @@ private struct PackingRow: View {
     let onEdit: () -> Void
     let onDelete: () -> Void
 
+    /// The checkbox is a fixed-size container around its own checkmark
+    /// glyph, not just a bare icon — both need to grow together (per the
+    /// shared `@ScaledMetric` recipe) or the box reads as shrinking next to
+    /// the label as Dynamic Type scales up.
+    @ScaledMetric(relativeTo: .body) private var checkboxSide: CGFloat = 24
+    @ScaledMetric(relativeTo: .body) private var checkmarkSize: CGFloat = 12
+    /// D2 defect 4: `rowLayout`'s AX-size restack, same `isAccessibilitySize`
+    /// convention as `TripCard.swift`/`TripView.tabBar()`.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// At accessibility Dynamic Type sizes the fixed `HStack` below squeezed
+    /// `item.label` between the (also-scaling) checkbox and the assignee
+    /// chip until even 2 lines couldn't hold it, truncating mid-word
+    /// ("Boar"/"din…"). Same `isAccessibilitySize` `AnyLayout` swap
+    /// `TripCard`/`BookingDetailView.actionRowLayout` use: the reassign
+    /// button drops to its own row below instead of sharing this one, so
+    /// the toggle button's checkbox+label pairing gets the row's full width.
+    /// Default rendering (the `HStackLayout` branch) is untouched.
+    private var rowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.sm))
+            : AnyLayout(HStackLayout(spacing: Spacing.md))
+    }
+
     var body: some View {
-        HStack(spacing: Spacing.md) {
+        rowLayout {
             Button(action: onToggle) {
                 HStack(spacing: Spacing.md) {
                     checkbox
@@ -607,7 +708,11 @@ private struct PackingRow: View {
                             .font(Typo.body(Typo.Size.body, weight: .semibold))
                             .foregroundStyle(item.isDone ? Palette.slate : Palette.ink)
                             .strikethrough(item.isDone)
-                            .lineLimit(2)
+                            // Finding (D2 defect 4): unlimited at AX sizes —
+                            // `rowLayout` above already gives this row's
+                            // label the full row width there, same relief
+                            // `BookingDetailView.actionLabel` uses.
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                         if isPending { PendingSyncChip() }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -664,14 +769,16 @@ private struct PackingRow: View {
     private var checkbox: some View {
         RoundedRectangle(cornerRadius: 7, style: .continuous)
             .fill(item.isDone ? CategoryColor.activity.fg : Color.clear)
-            .frame(width: 24, height: 24)
+            .frame(width: checkboxSide, height: checkboxSide)
             .overlay {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .stroke(item.isDone ? Color.clear : Palette.mist, lineWidth: 2)
             }
             .overlay {
                 if item.isDone {
-                    Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: checkmarkSize, weight: .bold))
+                        .foregroundStyle(.white)
                 }
             }
     }
@@ -689,6 +796,10 @@ private struct PackingRow: View {
     private var assigneeChip: some View {
         let profile = item.assigneeProfileId.flatMap { id in tripProfiles.first { $0.id == id } }
         return HStack(spacing: 6) {
+            // Avatar bubble — deliberately fixed size (matches every other
+            // avatar circle in the app, e.g. `PersonFilterBar`'s chips,
+            // none of which scale with Dynamic Type either); the name text
+            // beside it carries the scaling information.
             Circle()
                 .fill(profile.map { AvatarColor.color(named: $0.avatarColor) } ?? Palette.mist)
                 .frame(width: 22, height: 22)
@@ -701,6 +812,7 @@ private struct PackingRow: View {
                         Image(systemName: "person.fill.questionmark")
                             .font(.system(size: 10))
                             .foregroundStyle(Palette.slate)
+                            .accessibilityHidden(true)
                     }
                 }
             Text(profile.map { firstName(from: $0.displayName) } ?? "Unassigned")
@@ -741,6 +853,9 @@ private struct PackingItemFormSheet: View {
     @State private var label: String
     @State private var groupKey: PackingGroupKey
     @State private var assigneeProfileId: UUID?
+    /// `groupTile`'s icon, stacked above its own label — see the shared
+    /// `@ScaledMetric` recipe used throughout Features/Trip.
+    @ScaledMetric(relativeTo: .body) private var groupTileIconSize: CGFloat = 15
     /// UX audit finding 4: gates the "Discard changes?" confirmation on
     /// Cancel/swipe-dismiss — the same guard `TripFormView`/`AddItemSheet`
     /// already apply, extended to this sheet and `TripProfileFormSheet`,
@@ -892,7 +1007,10 @@ private struct PackingItemFormSheet: View {
             groupKey = key
         } label: {
             VStack(spacing: 4) {
-                Image(systemName: key.symbolName).font(.system(size: 15, weight: .medium))
+                Image(systemName: key.symbolName)
+                    .font(.system(size: groupTileIconSize, weight: .medium))
+                    // Decorative — the label right below already names the group.
+                    .accessibilityHidden(true)
                 Text(key.displayName).font(Typo.body(10.5, weight: .semibold))
             }
             .foregroundStyle(isOn ? CategoryColor.activity.fg : Palette.slate)

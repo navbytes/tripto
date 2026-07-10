@@ -150,9 +150,12 @@ struct BookingsTabView: View {
             } else if onAdd == nil && (isOffline || didLoadFail) {
                 unavailableState
             } else {
+                // Decorative empty-state art, deliberately fixed size — the
+                // sentence right below already carries the message.
                 Image(systemName: "ticket")
                     .font(.system(size: 34))
                     .foregroundStyle(Palette.slate)
+                    .accessibilityHidden(true)
                 Text(
                     onAdd != nil
                         ? "Add a flight or stay with its confirmation code \u{2014} bookings collect here automatically."
@@ -192,9 +195,11 @@ struct BookingsTabView: View {
     /// simpler empty-state shell.
     private var unavailableState: some View {
         VStack(spacing: Spacing.md) {
+            // Decorative — see the matching icon in `emptyState` above.
             Image(systemName: "ticket")
                 .font(.system(size: 34))
                 .foregroundStyle(Palette.slate)
+                .accessibilityHidden(true)
             Text(isOffline ? "Bookings haven\u{2019}t loaded yet" : "Couldn\u{2019}t load this trip\u{2019}s bookings")
                 .font(Typo.body())
                 .foregroundStyle(Palette.slate)
@@ -243,6 +248,9 @@ private struct BookingRow: View {
     /// `CheckOutRow`/`StayingStripRow`).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var isAXSize: Bool { dynamicTypeSize.isAccessibilitySize }
+    /// Trailing chevron, next to this row's Sofia Sans title/code — see the
+    /// shared `@ScaledMetric` recipe used throughout Features/Trip.
+    @ScaledMetric(relativeTo: .body) private var chevronSize: CGFloat = 11
 
     var body: some View {
         NavigationLink(value: ItemRoute(id: item.id)) {
@@ -313,7 +321,7 @@ private struct BookingRow: View {
                 .truncationMode(.middle)
                 .layoutPriority(1)
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: chevronSize, weight: .semibold))
                 .foregroundStyle(Palette.slate.opacity(0.6))
         }
     }
@@ -334,7 +342,7 @@ private struct BookingRow: View {
             }
             Spacer(minLength: Spacing.sm)
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: chevronSize, weight: .semibold))
                 .foregroundStyle(Palette.slate.opacity(0.6))
         }
     }

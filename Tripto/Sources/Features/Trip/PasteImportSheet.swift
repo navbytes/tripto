@@ -70,6 +70,12 @@ struct PasteImportSheet: View {
     /// here means "we couldn't check for X, not that there wasn't any."
     @State private var partialFailureNote: String?
 
+    /// Checkbox container + its checkmark glyph, and the group-tag icon —
+    /// see the shared `@ScaledMetric` recipe used throughout Features/Trip.
+    @ScaledMetric(relativeTo: .body) private var checkboxSide: CGFloat = 24
+    @ScaledMetric(relativeTo: .body) private var checkmarkSize: CGFloat = 12
+    @ScaledMetric(relativeTo: .body) private var groupIconSize: CGFloat = 10
+
     private struct PackingCandidate: Identifiable {
         let id = UUID()
         var label: String
@@ -139,6 +145,10 @@ struct PasteImportSheet: View {
                         .stroke(Palette.mist, lineWidth: 1)
                 }
                 .disabled(isSubmitting)
+                // A bare `TextEditor` otherwise reads as an unlabeled text
+                // field — the instruction sentence above it explains what
+                // to paste, but isn't itself attached to this control.
+                .accessibilityLabel("Text to import")
 
             if let noResultsMessage {
                 Text(noResultsMessage)
@@ -230,7 +240,7 @@ struct PasteImportSheet: View {
             } label: {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(candidate.wrappedValue.isChecked ? CategoryColor.activity.fg : Color.clear)
-                    .frame(width: 24, height: 24)
+                    .frame(width: checkboxSide, height: checkboxSide)
                     .overlay {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .stroke(candidate.wrappedValue.isChecked ? Color.clear : Palette.mist, lineWidth: 2)
@@ -238,12 +248,20 @@ struct PasteImportSheet: View {
                     .overlay {
                         if candidate.wrappedValue.isChecked {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: checkmarkSize, weight: .bold))
                                 .foregroundStyle(.white)
                         }
                     }
             }
             .buttonStyle(.plain)
+            // This checkbox had no accessible label at all — VoiceOver read
+            // either nothing or the checkmark glyph's own SF Symbol name,
+            // depending on state. Mirrors `PackingListView`'s
+            // reference-standard checkbox: label + checked state as a
+            // value, not baked into the label.
+            .accessibilityLabel(candidate.wrappedValue.label.isEmpty ? "Packing item" : candidate.wrappedValue.label)
+            .accessibilityValue(candidate.wrappedValue.isChecked ? "Included" : "Excluded")
+            .accessibilityAddTraits(candidate.wrappedValue.isChecked ? [.isSelected] : [])
 
             VStack(alignment: .leading, spacing: 2) {
                 TextField("Item", text: candidate.label)
@@ -251,7 +269,10 @@ struct PasteImportSheet: View {
                     .foregroundStyle(Palette.ink)
                 HStack(spacing: 4) {
                     Image(systemName: candidate.wrappedValue.groupKey.symbolName)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: groupIconSize, weight: .bold))
+                        // Decorative — the group name right next to it says
+                        // the same thing.
+                        .accessibilityHidden(true)
                     Text(candidate.wrappedValue.groupKey.displayName)
                         .font(Typo.body(11, weight: .semibold))
                 }

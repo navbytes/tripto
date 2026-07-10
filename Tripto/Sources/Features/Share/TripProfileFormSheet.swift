@@ -102,6 +102,11 @@ struct TripProfileFormSheet: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.top, Spacing.sm)
+                        // Decorative live preview — the Name field and the
+                        // Color picker's own selection state below already
+                        // convey this; nothing here is information VoiceOver
+                        // needs on its own.
+                        .accessibilityHidden(true)
 
                         FormTextField(label: "Name", text: $displayName, placeholder: "Meera, Grandma\u{2026}")
 
@@ -184,7 +189,11 @@ struct TripProfileFormSheet: View {
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1)
             Spacer()
-            Text("Cancel").font(Typo.body(weight: .semibold)).opacity(0) // balances the leading button
+            // Balances the leading button. `.opacity(0)` only hides it
+            // visually — `.accessibilityHidden` keeps VoiceOver from
+            // landing on a phantom "Cancel" (same fix as `SheetHeader`).
+            Text("Cancel").font(Typo.body(weight: .semibold)).opacity(0)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.top, Spacing.md)

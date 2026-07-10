@@ -17,6 +17,7 @@ struct CountryPickerField: View {
     @Binding var code: String
 
     @State private var isPresented = false
+    @ScaledMetric(relativeTo: .body) private var chevronSize: CGFloat = 11
 
     /// The selected country's resolved display, when the code is a real,
     /// assigned ISO region.
@@ -36,7 +37,7 @@ struct CountryPickerField: View {
                     fieldContent
                     Spacer(minLength: Spacing.sm)
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: chevronSize, weight: .semibold))
                         .foregroundStyle(Palette.slate)
                 }
                 .font(Typo.body())

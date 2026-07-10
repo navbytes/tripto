@@ -19,6 +19,9 @@ struct SuggestedItemsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var reviewingItem: ItineraryItem?
+    /// Trailing chevron, next to this row's Sofia Sans title/date — see the
+    /// shared `@ScaledMetric` recipe used throughout Features/Trip.
+    @ScaledMetric(relativeTo: .body) private var chevronSize: CGFloat = 11
 
     var body: some View {
         NavigationStack {
@@ -55,9 +58,12 @@ struct SuggestedItemsSheet: View {
 
     private var emptyState: some View {
         VStack(spacing: Spacing.sm) {
+            // Decorative empty-state art, deliberately fixed size — the
+            // label right below already carries the message.
             Image(systemName: "checkmark.circle")
                 .font(.system(size: 32))
                 .foregroundStyle(Palette.slate)
+                .accessibilityHidden(true)
             Text("Nothing left to review")
                 .font(Typo.body(weight: .semibold))
                 .foregroundStyle(Palette.slate)
@@ -83,7 +89,7 @@ struct SuggestedItemsSheet: View {
             }
             Spacer(minLength: Spacing.sm)
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: chevronSize, weight: .semibold))
                 .foregroundStyle(Palette.slate.opacity(0.6))
         }
         .padding(.vertical, Spacing.xxs)

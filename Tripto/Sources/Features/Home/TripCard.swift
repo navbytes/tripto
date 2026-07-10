@@ -11,6 +11,7 @@ struct TripCard: View {
     var today: Date = .now
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var smallGlyphSize: CGFloat = 10
 
     private var bucket: TripBucket { trip.bucket(asOf: today) }
 
@@ -131,7 +132,7 @@ struct TripCard: View {
     private func glassPill(text: String, icon: String?) -> some View {
         HStack(spacing: Spacing.xxs) {
             if let icon {
-                Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+                Image(systemName: icon).font(.system(size: smallGlyphSize, weight: .semibold))
             }
             Text(text)
         }
@@ -144,7 +145,7 @@ struct TripCard: View {
 
     private func metaItem(icon: String, text: String) -> some View {
         HStack(spacing: Spacing.xxs) {
-            Image(systemName: icon).font(.system(size: 10))
+            Image(systemName: icon).font(.system(size: smallGlyphSize))
             Text(text)
         }
     }

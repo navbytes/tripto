@@ -167,7 +167,7 @@ struct WelcomeView: View {
                     .font(Typo.body(weight: .semibold))
                     .foregroundStyle(Palette.ink)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .frame(minHeight: 50) // matches the Sign in with Apple button's height, but lets the label grow
                 }
                 .background(Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
                 .disabled(isSigningInAnonymously)

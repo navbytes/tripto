@@ -632,6 +632,9 @@ struct ItineraryTabView: View {
     /// guidance sentence.
     private func filteredEmptyState(personName: String) -> some View {
         VStack(spacing: Spacing.xs) {
+            // Decorative empty-state art, deliberately fixed size (already
+            // hidden from VoiceOver below) — the guidance sentence right
+            // under it carries the message.
             Image(systemName: "sparkles")
                 .font(.system(size: 28))
                 .foregroundStyle(Palette.amber)
@@ -716,7 +719,11 @@ struct ItineraryTabView: View {
                     if offset == 0, canEdit {
                         RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
                             .strokeBorder(Palette.mist, style: StrokeStyle(lineWidth: 1.25, dash: [5, 4]))
-                            .frame(height: 54)
+                            // `minHeight` (not a fixed `height`) — the real
+                            // "Your first plan goes here" text inside would
+                            // otherwise clip if it wraps at larger Dynamic
+                            // Type sizes.
+                            .frame(minHeight: 54)
                             .overlay {
                                 Text("Your first plan goes here")
                                     .font(Typo.body(Typo.Size.caption))
