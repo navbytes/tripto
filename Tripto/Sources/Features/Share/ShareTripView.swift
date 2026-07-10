@@ -90,12 +90,33 @@ struct ShareTripView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toastOverlay($toast)
         .activityShareSheet(items: $shareSheetItems)
-        // TI-2: the fallback path beside `importCard`'s email-address card.
+        // TI-2/TI-3: the fallback path beside `importCard`'s email-address
+        // card — not one of the three tabs the paste-import consistency
+        // pass (TripView.pasteImportPill) targeted, left as its own entry
+        // point here, just updated to the unified sheet's new signature.
         .sheet(isPresented: $isPresentingPasteImport) {
             PasteImportSheet(
-                kind: .booking, tripId: tripId,
-                onBookingImported: { created in
-                    toast = "\(created) booking\(created == 1 ? "" : "s") added to review"
+                tripId: tripId,
+                onItineraryItemsImported: { created in
+                    toast = "\(created) item\(created == 1 ? "" : "s") added to review"
+                },
+                onPackingConfirmed: { candidates in
+                    // Bug fix (review): a bare `guard let userId =
+                    // authManager.userId else { return }` silently dropped
+                    // every confirmed item with no toast when signed out —
+                    // `?? trips.first?.createdBy` matches the fallback
+                    // `TripView`/`PackingListView.addItem` already use for
+                    // exactly this signed-out-local-creator case.
+                    let creatorId = authManager.userId ?? trips.first?.createdBy
+                    guard let creatorId else { return }
+                    for candidate in candidates {
+                        PackingItem.insert(
+                            label: candidate.label, groupKey: candidate.groupKey, assigneeProfileId: nil,
+                            tripId: tripId, createdBy: creatorId,
+                            modelContext: modelContext, syncEngine: syncEngine
+                        )
+                    }
+                    toast = "\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list"
                 }
             )
         }

@@ -118,13 +118,13 @@ final class TriptoUITests: XCTestCase {
 
     func testPackingAddAndCheckOff() {
         let app = launch(["-uitestOpenPacking"])
-        let fab = app.buttons["Add packing items"]
+        // TI-3: the FAB opens the add-item form directly again — its old
+        // confirmation-dialog choice ("Add item" vs "Paste a list") lost
+        // its second option to `TripView.pasteImportPill`, and a
+        // one-item menu isn't a menu, so the dialog was removed too.
+        let fab = app.buttons["Add a packing item"]
         XCTAssertTrue(fab.waitForExistence(timeout: 30), "Packing tab / FAB never appeared")
         fab.tap()
-
-        let addItem = app.buttons["Add item"]
-        XCTAssertTrue(addItem.waitForExistence(timeout: 5), "FAB confirmation dialog didn't show 'Add item'")
-        addItem.tap()
 
         let itemField = app.textFields["Passports, car seat, chargers\u{2026}"]
         XCTAssertTrue(itemField.waitForExistence(timeout: 5), "packing item form never appeared")
@@ -148,10 +148,12 @@ final class TriptoUITests: XCTestCase {
 
     // MARK: - Paste-to-import entry point (ShareTripView)
     //
-    // A second entry point beside the one below: `ShareTripView`'s "Or
-    // paste text instead" button next to the email-import address card,
-    // reachable on the already-seeded (non-empty) demo trip via
-    // `-uitestOpenShare`.
+    // A second, deliberately-kept-separate entry point beside
+    // `TripView.pasteImportPill` below: `ShareTripView`'s "Or paste text
+    // instead" button next to the email-import address card. Not one of
+    // the three tabs the TI-3 consistency pass targeted (Share is its own
+    // screen), so it kept its own trigger — reachable on the
+    // already-seeded (non-empty) demo trip via `-uitestOpenShare`.
     func testPasteImportEntryPointFromShare() {
         let app = launch(["-uitestOpenShare"])
         let pasteButton = app.buttons["Or paste text instead"]
@@ -159,29 +161,32 @@ final class TriptoUITests: XCTestCase {
         pasteButton.tap()
 
         XCTAssertTrue(
-            app.staticTexts["Paste a booking"].waitForExistence(timeout: 5),
-            "PasteImportSheet did not present with the booking title"
+            app.staticTexts["Paste to import"].waitForExistence(timeout: 5),
+            "PasteImportSheet did not present"
         )
     }
 
-    // MARK: - Paste-to-import entry point (AddItemSheet's dashed tile)
+    // MARK: - Paste-to-import entry point (the shared pill, TI-3)
     //
-    // The 6th "Paste" tile in `AddItemSheet`'s category row
-    // (`addItemCategoryTile-paste`). Tapping it dismisses `AddItemSheet`
-    // and, via `TripView`'s `onDismiss` handoff (`pasteRequestedFromAdd`),
-    // presents `PasteImportSheet(kind: .booking, ...)` — this is the
-    // click-through that was never actually driven end-to-end before this
-    // test existed (only visually confirmed via screenshot that the tile
-    // rendered).
-    func testAddItemSheetPasteTile() {
-        let app = launch(["-uitestOpenAdd"])
-        let pasteTile = app.buttons["addItemCategoryTile-paste"]
-        XCTAssertTrue(pasteTile.waitForExistence(timeout: 30), "Add-item sheet's Paste tile never appeared")
-        pasteTile.tap()
+    // TI-3: one consistent "Paste to import" pill (`pasteImportPill`,
+    // `TripView.swift`), rendered once in the trip screen's shared chrome
+    // so it's the same trigger/label/placement regardless of which of the
+    // three tabs (Itinerary/Bookings/Packing) is selected — replaces four
+    // previously-inconsistent doors a UX audit found (a disguised tile in
+    // `AddItemSheet`'s category row, an empty-state-only link on
+    // Itinerary, a confirmation-dialog item on Packing's FAB, and no
+    // affordance at all on Bookings). This test exercises it from the
+    // default (Itinerary) tab; the same identifier is reachable from
+    // Bookings and Packing too since it's the same view instance.
+    func testPasteImportPillOpensSheet() {
+        let app = launch()
+        let pasteButton = app.buttons["pasteImportPill"]
+        XCTAssertTrue(pasteButton.waitForExistence(timeout: 30), "Shared paste-import pill never appeared")
+        pasteButton.tap()
 
         XCTAssertTrue(
-            app.staticTexts["Paste a booking"].waitForExistence(timeout: 5),
-            "Tapping the Paste tile did not hand off to PasteImportSheet"
+            app.staticTexts["Paste to import"].waitForExistence(timeout: 5),
+            "Tapping the pill did not present PasteImportSheet"
         )
     }
 }

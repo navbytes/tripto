@@ -1,71 +1,74 @@
 import Supabase
 import SwiftUI
 
-/// TI-2 (`docs/BUILD_PLAN.md`): the app-side half of paste-to-import — a
-/// large free-text box the user pastes a booking confirmation or a packing
-/// list into, submitted to the already-deployed `ingest-text` Edge Function
-/// (`~/repos/backend/projects/tripto/functions/ingest-text`) via
-/// `Supa.invoke`. Two call sites share this one sheet, parameterized by
-/// `kind`:
-///   - Booking (`ItineraryTabView.importTeaser` / `ShareTripView.importCard`,
-///     "Or paste text instead" beside the email-import address card): the
-///     function inserts `status: "suggested"` itinerary items server-side
-///     (same review pipeline as email import — `ImportReviewBanner`/
-///     `SuggestedItemsSheet` pick them up on their own), so this sheet never
-///     touches SwiftData for booking imports — it only reports the created
-///     count back via `onBookingImported` so the caller (which already owns
-///     a `toast` state) can show it.
-///   - Packing (`PackingListView`'s FAB confirmation dialog, "Paste a
-///     list"): `ingest-text` does *not* write to the DB for packing (the app
-///     already has an offline-first insert path) — it only extracts and
-///     normalizes items. This sheet renders them as a pre-checked vetting
-///     checklist so the user can drop anything mis-extracted before
-///     confirming, then hands the still-checked rows to `onPackingConfirmed`
-///     so the caller inserts each one through its own
-///     `addItem(label:groupKey:assigneeProfileId:)` path — same "sheet is a
-///     dumb form, caller owns the writes" split `PackingItemFormSheet`
-///     already uses.
+/// TI-0→TI-3 (`docs/BUILD_PLAN.md`): the app-side half of paste-to-import —
+/// a large free-text box the user pastes anything trip-related into
+/// (a booking confirmation, a day plan, a packing list, or any mix),
+/// submitted to `ingest-text` via `Supa.invoke`.
+///
+/// TI-3: one sheet, one request, no caller-supplied mode. Earlier (TI-0/
+/// TI-2) this took a `Kind` (`.booking` vs `.packing`) the caller had to
+/// pick *before* the user typed anything — an invisible mode a user
+/// pasting a day plan under "booking" would silently fail against (no
+/// activities extracted) with no way to know a "packing" mode even
+/// existed elsewhere in the app. `ingest-text` now always runs both
+/// extractions server-side and returns both results in one response —
+/// this sheet just renders whichever of the two actually found
+/// something, in one screen:
+///   - Itinerary items (bookings + scheduled activities): the function
+///     already inserted `status: "suggested"` rows server-side (same
+///     review pipeline as email import — `ImportReviewBanner`/
+///     `SuggestedItemsSheet` pick them up on their own), so this sheet
+///     never touches SwiftData for those — it only reports the created
+///     count back via `onItineraryItemsImported` so the caller (which
+///     already owns a `toast` state) can show it.
+///   - Packing items: `ingest-text` does *not* write these to the DB (the
+///     app already has an offline-first insert path) — it only extracts
+///     and normalizes them. This sheet renders them as a pre-checked
+///     vetting checklist so the user can drop anything mis-extracted
+///     before confirming, then hands the still-checked rows to
+///     `onPackingConfirmed` so the caller inserts each one through
+///     `PackingItem.insert(...)` — same "sheet is a dumb form, caller
+///     owns the writes" split `PackingItemFormSheet` already uses.
+/// Every call site (Itinerary, Bookings, Packing tabs) wires up both
+/// callbacks identically now — which of the two actually fires depends on
+/// what was in the pasted text, not on which tab the user happened to be
+/// on when they opened this sheet.
 struct PasteImportSheet: View {
-    enum Kind: Equatable {
-        case booking
-        case packing
-
-        /// The exact wire value `ingest-text` expects (`index.ts`'s
-        /// `body.kind === "booking" || body.kind === "packing"` check) —
-        /// kept distinct from the Swift case names so a rename of one never
-        /// silently breaks the other.
-        var wireValue: String {
-            switch self {
-            case .booking: return "booking"
-            case .packing: return "packing"
-            }
-        }
-    }
-
-    let kind: Kind
     let tripId: UUID
-    /// Booking only: called once with the created count right before this
-    /// sheet dismisses itself (a non-zero result). The caller shows the
-    /// "toast + banner" (plan decision) — `ImportReviewBanner` on `TripView`
-    /// picks up the new suggested items on its own once they sync in.
-    var onBookingImported: ((Int) -> Void)? = nil
-    /// Packing only: called with the still-checked, possibly-edited rows
-    /// once the user confirms the vetting checklist. This sheet never
-    /// inserts anything itself — see the type's doc comment.
+    /// Called once with the created count as soon as the response comes
+    /// back, if non-zero — independent of whether packing items also came
+    /// back (the sheet may still be showing the packing checklist).
+    var onItineraryItemsImported: ((Int) -> Void)? = nil
+    /// Called with the still-checked, possibly-edited rows once the user
+    /// confirms the vetting checklist. This sheet never inserts anything
+    /// itself — see the type's doc comment.
     var onPackingConfirmed: (([(label: String, groupKey: PackingGroupKey)]) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var rawText = ""
     @State private var isSubmitting = false
     @State private var errorMessage: String?
-    /// Non-nil once a 200 response came back with nothing found
-    /// (`created: 0` / `items: []`) — not an error (this milestone's brief:
-    /// "a 200 response with created: 0 ... is NOT an error"), just an
-    /// invitation to edit and retry.
+    /// Non-nil once a 200 response came back with nothing found at all
+    /// (`created: 0` and no packing items) — not an error (this
+    /// milestone's brief: "a 200 response with nothing found ... is NOT an
+    /// error"), just an invitation to edit and retry.
     @State private var noResultsMessage: String?
-    /// Non-empty once a packing extraction found something — swaps the
-    /// sheet's body from the paste box to the vetting checklist.
+    /// Non-empty once extraction found packing items — swaps the sheet's
+    /// body from the paste box to the vetting checklist. Itinerary items
+    /// (if any) were already inserted server-side by this point regardless.
     @State private var packingCandidates: [PackingCandidate] = []
+    /// Set alongside `packingCandidates` so the checklist screen can show
+    /// "N items also added to your itinerary" above the packing list when
+    /// a single paste produced both.
+    @State private var itineraryItemsCreated = 0
+    /// Review fix: `ingest-text` runs both extractions independently
+    /// (`Promise.allSettled` server-side) — one side transiently failing
+    /// while the other succeeds used to be indistinguishable from "ran
+    /// fine, found nothing," which silently dropped whatever the failed
+    /// side would have found with zero user-visible signal. Non-nil text
+    /// here means "we couldn't check for X, not that there wasn't any."
+    @State private var partialFailureNote: String?
 
     private struct PackingCandidate: Identifiable {
         let id = UUID()
@@ -74,15 +77,14 @@ struct PasteImportSheet: View {
         var isChecked = true
     }
 
-    private var isReviewingPacking: Bool { kind == .packing && !packingCandidates.isEmpty }
+    private var isReviewingPacking: Bool { !packingCandidates.isEmpty }
     private var trimmedText: String { rawText.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSubmit: Bool { !trimmedText.isEmpty && !isSubmitting }
     /// Nit: the checked rows that will actually become packing items — a
     /// candidate edited down to an empty/whitespace-only label is dropped
     /// here rather than handed to `onPackingConfirmed`, where
-    /// `PackingListView.addItem`'s own `!label.isEmpty` guard would silently
-    /// no-op it while the confirm button's count still claimed it'd be
-    /// added.
+    /// `PackingItem.insert`'s own empty-label guard would silently no-op
+    /// it while the confirm button's count still claimed it'd be added.
     private var toAddCandidates: [(label: String, groupKey: PackingGroupKey)] {
         packingCandidates
             .filter(\.isChecked)
@@ -114,20 +116,18 @@ struct PasteImportSheet: View {
         }
     }
 
-    private var title: String {
-        switch kind {
-        case .booking: return "Paste a booking"
-        case .packing: return isReviewingPacking ? "Review packing list" : "Paste a packing list"
-        }
-    }
+    private var title: String { isReviewingPacking ? "Review packing list" : "Paste to import" }
 
-    // MARK: - Paste box (both kinds, initial state)
+    // MARK: - Paste box (initial state)
 
     private var pasteSection: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            Text(promptText)
-                .font(Typo.body(Typo.Size.caption))
-                .foregroundStyle(Palette.slate)
+            Text(
+                "Paste a booking confirmation, a day plan, a packing list, or any mix \u{2014} "
+                    + "we\u{2019}ll sort out what goes where."
+            )
+            .font(Typo.body(Typo.Size.caption))
+            .foregroundStyle(Palette.slate)
 
             TextEditor(text: $rawText)
                 .frame(minHeight: 220)
@@ -161,12 +161,6 @@ struct PasteImportSheet: View {
                         .font(Typo.body(weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
-                // Bug fix: `onAmber` is a fixed near-black, deliberately
-                // non-adaptive to stay readable against `amber` (also
-                // fixed) — see its doc comment. Blanket `.opacity(0.5)` on
-                // the whole button used to fade this near-black text toward
-                // the dark-mode page background instead of toward anything
-                // legible, making disabled CTAs unreadable in dark mode.
                 .foregroundStyle(canSubmit ? Palette.onAmber : Palette.slate)
                 .padding(.vertical, Spacing.md)
                 .background(
@@ -178,22 +172,27 @@ struct PasteImportSheet: View {
         }
     }
 
-    private var promptText: String {
-        switch kind {
-        case .booking:
-            return "Paste a confirmation email or booking text below \u{2014} we\u{2019}ll pull out the flight, "
-                + "stay, or reservation details for you to review."
-        case .packing:
-            return "Paste a packing list below \u{2014} one item per line works best."
-        }
-    }
-
-    // MARK: - Packing vetting checklist (packing only, post-extraction)
+    // MARK: - Packing vetting checklist (post-extraction, if any packing items were found)
 
     private var packingReviewSection: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
+            if itineraryItemsCreated > 0 {
+                Text(
+                    "\(itineraryItemsCreated) item\(itineraryItemsCreated == 1 ? "" : "s") also added to your "
+                        + "itinerary for review."
+                )
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(CategoryColor.activity.fg)
+            }
+
+            if let partialFailureNote {
+                Text(partialFailureNote)
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.rose)
+            }
+
             Text(
-                "We found \(packingCandidates.count) item\(packingCandidates.count == 1 ? "" : "s") "
+                "We found \(packingCandidates.count) packing item\(packingCandidates.count == 1 ? "" : "s") "
                     + "\u{2014} uncheck anything you don\u{2019}t want to add."
             )
             .font(Typo.body(Typo.Size.caption))
@@ -273,29 +272,44 @@ struct PasteImportSheet: View {
         isSubmitting = true
         errorMessage = nil
         noResultsMessage = nil
-        let request = IngestTextRequest(tripId: tripId, rawText: trimmedText, kind: kind.wireValue)
+        partialFailureNote = nil
+        let request = IngestTextRequest(tripId: tripId, rawText: trimmedText)
         do {
-            switch kind {
-            case .booking:
-                let response: IngestTextBookingResponse = try await Supa.invoke("ingest-text", params: request)
-                isSubmitting = false
-                if response.created > 0 {
-                    onBookingImported?(response.created)
+            let response: IngestTextResponse = try await Supa.invoke("ingest-text", params: request)
+            isSubmitting = false
+            itineraryItemsCreated = response.created
+            // A 200 never has both flags true — the server only returns
+            // one when the other extraction is expected to have run, and
+            // returns a hard 502 (caught below, in `catch`) when both fail.
+            let failedNote: String? = response.itineraryFailed
+                ? "Couldn\u{2019}t check for bookings or activities \u{2014} try again."
+                : response.packingFailed
+                    ? "Couldn\u{2019}t check for a packing list \u{2014} try again."
+                    : nil
+
+            if !response.packingItems.isEmpty {
+                packingCandidates = response.packingItems.map {
+                    PackingCandidate(label: $0.label, groupKey: PackingGroupKey(rawValue: $0.groupKey) ?? .custom)
+                }
+                partialFailureNote = failedNote
+                // The checklist screen itself shows the itinerary count
+                // (see `packingReviewSection`) — report it now since this
+                // sheet won't dismiss until the checklist is confirmed.
+                if response.created > 0 { onItineraryItemsImported?(response.created) }
+            } else if response.created > 0 {
+                onItineraryItemsImported?(response.created)
+                if let failedNote {
+                    // Don't auto-dismiss when the other side may have
+                    // silently dropped something the user pasted — give
+                    // them a chance to see the note and retry.
+                    noResultsMessage = failedNote
+                } else {
                     dismiss()
-                } else {
-                    noResultsMessage = "Couldn\u{2019}t find a booking in that text. Try editing it, or paste something else."
                 }
-            case .packing:
-                let response: IngestTextPackingResponse = try await Supa.invoke("ingest-text", params: request)
-                isSubmitting = false
-                if response.items.isEmpty {
-                    noResultsMessage =
-                        "Couldn\u{2019}t find a packing list in that text. Try editing it, or paste something else."
-                } else {
-                    packingCandidates = response.items.map {
-                        PackingCandidate(label: $0.label, groupKey: PackingGroupKey(rawValue: $0.groupKey) ?? .custom)
-                    }
-                }
+            } else if let failedNote {
+                noResultsMessage = failedNote
+            } else {
+                noResultsMessage = "Couldn\u{2019}t find anything to import in that text. Try editing it, or paste something else."
             }
         } catch {
             isSubmitting = false
@@ -339,25 +353,26 @@ struct PasteImportSheet: View {
 
 /// `ingest-text`'s request body — plain camelCase, matching that function's
 /// own `req.json()` shape exactly (see `Supa.invoke`'s doc comment for why
-/// this is encoded without `JSONCoding`'s snake_case conversion).
+/// this is encoded without `JSONCoding`'s snake_case conversion). No `kind`
+/// field anymore (TI-3) — the function always runs both extractions.
 private struct IngestTextRequest: Encodable {
     let tripId: UUID
     let rawText: String
-    let kind: String
 }
 
-private struct IngestTextBookingResponse: Decodable {
-    let created: Int
-}
-
-private struct IngestTextPackingResponse: Decodable {
-    struct Item: Decodable {
+private struct IngestTextResponse: Decodable {
+    struct PackingItemPayload: Decodable {
         let label: String
         let groupKey: String
     }
-    let items: [Item]
+    let created: Int
+    let packingItems: [PackingItemPayload]
+    /// Review fix: lets the sheet tell "extraction ran and found nothing"
+    /// apart from "extraction failed" — see `partialFailureNote`.
+    let itineraryFailed: Bool
+    let packingFailed: Bool
 }
 
 #Preview {
-    PasteImportSheet(kind: .packing, tripId: UUID())
+    PasteImportSheet(tripId: UUID())
 }

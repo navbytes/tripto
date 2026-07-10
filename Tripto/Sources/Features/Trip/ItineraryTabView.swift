@@ -83,10 +83,6 @@ struct ItineraryTabView: View {
     /// wired to `retryImportAddressFetch()`.
     @State private var importLoadState: ImportAddressCard.LoadState = .loading
     @State private var hasFetchedImportAddress = false
-    /// TI-2: "Or paste text instead" — the fallback path below
-    /// `importTeaser`'s email-address card, presenting `PasteImportSheet`
-    /// in `.booking` mode.
-    @State private var isPresentingPasteImport = false
     /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
     /// as `typeSize`, both so `TimelineLayout.gutterWidth` can step the
     /// gutter width with it and so their `.equatable()` short-circuit can't
@@ -268,16 +264,6 @@ struct ItineraryTabView: View {
         // -empty branch, but caching ahead of that means it's not waiting on
         // an RPC round trip the moment someone reaches it.
         .task { await fetchImportAddressIfNeeded() }
-        // TI-2: the fallback path beside `importTeaser`'s email-address
-        // card — see `pasteImportSecondaryAction`'s doc comment.
-        .sheet(isPresented: $isPresentingPasteImport) {
-            PasteImportSheet(
-                kind: .booking, tripId: trip.id,
-                onBookingImported: { created in
-                    toast = "\(created) booking\(created == 1 ? "" : "s") added to review"
-                }
-            )
-        }
     }
 
     /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): `get_or_create_trip_import_address`
@@ -766,24 +752,7 @@ struct ItineraryTabView: View {
             } onRetry: {
                 retryImportAddressFetch()
             }
-            pasteImportSecondaryAction
         }
         .padding(.horizontal, Spacing.xl)
-    }
-
-    /// TI-2: a deliberately lightweight fallback beside the primary
-    /// email-import card — pasting text is the secondary path, so this is a
-    /// plain text button, not another card competing for attention.
-    private var pasteImportSecondaryAction: some View {
-        Button {
-            isPresentingPasteImport = true
-        } label: {
-            Text("Or paste text instead")
-                .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                .foregroundStyle(Palette.slate)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
