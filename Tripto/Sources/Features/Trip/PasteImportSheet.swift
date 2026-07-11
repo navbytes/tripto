@@ -635,7 +635,7 @@ struct PasteImportSheet: View {
 /// before it. A not-yet-granted tap can therefore never reach the server
 /// without the user first seeing and accepting the prompt — see
 /// `AIImportConsentTests` for the pure (network-free) proof of that gate,
-/// and `ImportRoutingTests` for the proof that an `.onDevice` route never
+/// and `ImportExtractionTests` for the proof that an `.onDevice` route never
 /// even reaches this decision.
 enum AIImportConsent {
     private static let key = "aiImportConsentGranted"

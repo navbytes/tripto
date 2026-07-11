@@ -33,8 +33,17 @@ final class PasteImportSheetFriendlyMessageTests: XCTestCase {
         XCTAssertTrue(message.contains("Couldn\u{2019}t process"), "expected couldn't-process copy, got \(message)")
     }
 
+    /// B1 (`docs/BACKLOG.md`): backend's `ingest-text` rate limit lands
+    /// separately (`text_import_events`, 20/hr default) — this is just the
+    /// client-side friendly-message mapping for the 429 it returns.
+    func testHTTP429ReturnsRateLimitedCopy() {
+        let error = FunctionsError.httpError(code: 429, data: Data())
+        let message = PasteImportSheet.friendlyMessage(for: error)
+        XCTAssertTrue(message.contains("try again in an hour"), "expected rate-limited copy, got \(message)")
+    }
+
     func testOtherHTTPCodesReturnGenericTryAgainCopy() {
-        let codes = [403, 429, 500, 503]
+        let codes = [403, 500, 503]
         for code in codes {
             let error = FunctionsError.httpError(code: code, data: Data())
             let message = PasteImportSheet.friendlyMessage(for: error)
