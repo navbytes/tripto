@@ -1,4 +1,5 @@
 import Supabase
+import SwiftData
 import SwiftUI
 
 /// TI-0→TI-3 (`docs/BUILD_PLAN.md`): the app-side half of paste-to-import —
@@ -6,6 +7,15 @@ import SwiftUI
 /// (a booking confirmation, a day plan, a packing list, or any mix),
 /// submitted to `ingest-text` via `Supa.invoke`.
 ///
+/// On-device-first (Apple FoundationModels, iOS 26+): `currentRoute`
+/// decides, live as the user types, whether Import will run the extraction
+/// entirely on-device (`OnDeviceExtractor`, pasted text never leaves the
+/// phone) or fall back to the remote path above. Routing/consent-dialog
+/// rules are pure functions (`ImportRouting`, `Features/Trip/
+/// ImportExtraction.swift`) — see `submitOnDevice()`'s doc comment for the
+/// full on-device flow, including its own fallback-to-remote path.
+///
+
 /// TI-3: one sheet, one request, no caller-supplied mode. Earlier (TI-0/
 /// TI-2) this took a `Kind` (`.booking` vs `.packing`) the caller had to
 /// pick *before* the user typed anything — an invisible mode a user
@@ -44,8 +54,20 @@ struct PasteImportSheet: View {
     /// confirms the vetting checklist. This sheet never inserts anything
     /// itself — see the type's doc comment.
     var onPackingConfirmed: (([(label: String, groupKey: PackingGroupKey)]) -> Void)? = nil
+    /// The signed-out local trip creator's own uid (mirrors
+    /// `AddItemSheet.tripCreatedBy`'s doc comment exactly) — the on-device
+    /// path inserts suggested rows itself, through the same SwiftData +
+    /// outbox path `AddItemSheet.save()` uses, so it needs the identical
+    /// fallback creator id when `authManager.userId` is `nil`. `nil` is
+    /// only reachable in practice if a future call site forgets to pass
+    /// this; `submitOnDevice()` falls back to remote rather than inserting
+    /// with no creator at all in that case.
+    var tripCreatedBy: UUID? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.syncEngine) private var syncEngine
+    @Environment(AuthManager.self) private var authManager
     @State private var rawText = ""
     @State private var isSubmitting = false
     /// Guideline 5.1.2(i) (rewritten 2025-11-13): true while the AI-import
@@ -91,6 +113,31 @@ struct PasteImportSheet: View {
     private var isReviewingPacking: Bool { !packingCandidates.isEmpty }
     private var trimmedText: String { rawText.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSubmit: Bool { !trimmedText.isEmpty && !isSubmitting }
+
+    /// The runtime capability check (R4 §6's verified `canImport` +
+    /// `#available` combo): `OnDeviceExtractor` only exists inside that
+    /// guard, so nothing outside it may reference the type unguarded —
+    /// every other on-device-aware property/method below reads this
+    /// instead of repeating the guard inline.
+    private var isOnDeviceAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            return OnDeviceExtractor.isAvailable
+        }
+        #endif
+        return false
+    }
+
+    /// Live route for the CURRENTLY typed/pasted text (recomputed on every
+    /// keystroke) — drives both the footer copy below and the Import
+    /// button's tap action, so what the user reads before tapping always
+    /// matches what tapping will actually do.
+    private var currentRoute: ImportRoute {
+        ImportRouting.route(
+            isOnDeviceAvailable: isOnDeviceAvailable,
+            textFitsOnDevice: ImportContextBudget.textFits(trimmedText)
+        )
+    }
     /// Nit: the checked rows that will actually become packing items — a
     /// candidate edited down to an empty/whitespace-only label is dropped
     /// here rather than handed to `onPackingConfirmed`, where
@@ -124,6 +171,17 @@ struct PasteImportSheet: View {
             }
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
+        }
+        // R4 §4: give the system "at least ~1 second of lead time" before
+        // the user can plausibly tap Import. A hint only (see
+        // `OnDeviceExtractor.prewarm()`'s doc comment) — never blocks this
+        // appearance, and a no-op whenever on-device isn't available.
+        .onAppear {
+            #if canImport(FoundationModels)
+            if #available(iOS 26.0, *) {
+                OnDeviceExtractor.prewarm()
+            }
+            #endif
         }
         // Guideline 5.1.2(i) (rewritten 2025-11-13): explicit, affirmative
         // permission before sharing pasted text with the third-party AI —
@@ -182,12 +240,23 @@ struct PasteImportSheet: View {
                 // to paste, but isn't itself attached to this control.
                 .accessibilityLabel("Text to import")
 
-            Text(
-                "Pasted text is sent to an AI service to find your bookings \u{2014} "
-                    + "codes and notes aren\u{2019}t retained beyond that."
-            )
-            .font(Typo.body(Typo.Size.caption))
-            .foregroundStyle(Palette.slate)
+            // PLAN.md: the on-device route never shares this text with
+            // anyone, so its footer says so instead of the third-party
+            // disclosure below — the remote route's existing copy already
+            // covers that case (and its own consent dialog restates it),
+            // so no NEW line is added there, only this one swapped.
+            if currentRoute == .onDevice {
+                Text("Processed on this iPhone \u{2014} text never leaves your device.")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
+            } else {
+                Text(
+                    "Pasted text is sent to an AI service to find your bookings \u{2014} "
+                        + "codes and notes aren\u{2019}t retained beyond that."
+                )
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+            }
 
             if let noResultsMessage {
                 Text(noResultsMessage)
@@ -200,11 +269,11 @@ struct PasteImportSheet: View {
             }
 
             Button {
-                switch AIImportConsent.tapOutcome() {
-                case .sendImmediately:
-                    Task { await submit() }
-                case .showConsentPrompt:
-                    isPresentingAIConsent = true
+                switch currentRoute {
+                case .onDevice:
+                    Task { await submitOnDevice() }
+                case .remote:
+                    Task { await runRemoteImportFlow() }
                 }
             } label: {
                 HStack(spacing: Spacing.sm) {
@@ -341,44 +410,177 @@ struct PasteImportSheet: View {
         let request = IngestTextRequest(tripId: tripId, rawText: trimmedText)
         do {
             let response: IngestTextResponse = try await Supa.invoke("ingest-text", params: request)
-            isSubmitting = false
-            itineraryItemsCreated = response.created
-            // A 200 never has both flags true — the server only returns
-            // one when the other extraction is expected to have run, and
-            // returns a hard 502 (caught below, in `catch`) when both fail.
-            let failedNote: String? = response.itineraryFailed
-                ? "Couldn\u{2019}t check for bookings or activities \u{2014} try again."
-                : response.packingFailed
-                    ? "Couldn\u{2019}t check for a packing list \u{2014} try again."
-                    : nil
-
-            if !response.packingItems.isEmpty {
-                packingCandidates = response.packingItems.map {
-                    PackingCandidate(label: $0.label, groupKey: PackingGroupKey(rawValue: $0.groupKey) ?? .custom)
-                }
-                partialFailureNote = failedNote
-                // The checklist screen itself shows the itinerary count
-                // (see `packingReviewSection`) — report it now since this
-                // sheet won't dismiss until the checklist is confirmed.
-                if response.created > 0 { onItineraryItemsImported?(response.created) }
-            } else if response.created > 0 {
-                onItineraryItemsImported?(response.created)
-                if let failedNote {
-                    // Don't auto-dismiss when the other side may have
-                    // silently dropped something the user pasted — give
-                    // them a chance to see the note and retry.
-                    noResultsMessage = failedNote
-                } else {
-                    dismiss()
-                }
-            } else if let failedNote {
-                noResultsMessage = failedNote
-            } else {
-                noResultsMessage = "Couldn\u{2019}t find anything to import in that text. Try editing it, or paste something else."
+            let candidates = response.packingItems.map {
+                PackingCandidate(label: $0.label, groupKey: PackingGroupKey(rawValue: $0.groupKey) ?? .custom)
             }
+            handleImportOutcome(
+                created: response.created, packingCandidates: candidates,
+                itineraryFailed: response.itineraryFailed, packingFailed: response.packingFailed
+            )
         } catch {
             isSubmitting = false
             errorMessage = Self.friendlyMessage(for: error)
+        }
+    }
+
+    /// The Import button's `.remote`-route tap decision (Guideline
+    /// 5.1.2(i)) — factored out so `submitOnDevice()` can fall back into
+    /// the exact same gate rather than re-deriving it. `async` only because
+    /// its caller already runs inside a `Task`; `.sendImmediately` awaits
+    /// `submit()` directly instead of spawning a nested one.
+    private func runRemoteImportFlow() async {
+        switch AIImportConsent.tapOutcome() {
+        case .sendImmediately:
+            await submit()
+        case .showConsentPrompt:
+            isPresentingAIConsent = true
+        }
+    }
+
+    /// On-device paste-import (PLAN.md). Reachable only when `currentRoute
+    /// == .onDevice` at tap time — availability and the context-window
+    /// pre-estimate were already checked there, but both guards below are
+    /// repeated anyway: `#available`/`canImport` are per-call-site in
+    /// Swift, not something an earlier check elsewhere satisfies.
+    ///
+    /// No consent dialog on this path, ever — pasted text stays on the
+    /// device end to end. `OnDeviceExtractor.extractAll` already enforces
+    /// PLAN.md's all-or-nothing rule (either sub-extraction hard-failing
+    /// discards both), so `.fallback` here means "run the remote flow from
+    /// scratch," identical to what a `.remote`-routed tap would have done —
+    /// including its own consent gate, since a fallback is the one moment
+    /// pasted text is about to leave the device on what the user believed
+    /// was an on-device-only attempt.
+    private func submitOnDevice() async {
+        guard canSubmit else { return }
+        isSubmitting = true
+        errorMessage = nil
+        noResultsMessage = nil
+        partialFailureNote = nil
+
+        // Mirrors `AddItemSheet.save()`'s create-branch creator fallback
+        // (Finding 1 there) — the signed-out local trip creator is still
+        // entitled to add items (`TripView.canAddItems`), so this path must
+        // resolve a creator the exact same way, not just prefer one that
+        // happens to exist.
+        guard let creatorId = authManager.userId ?? tripCreatedBy else {
+            isSubmitting = false
+            await runRemoteImportFlow()
+            return
+        }
+
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            switch await OnDeviceExtractor.extractAll(from: trimmedText) {
+            case .success(let items, let packing):
+                let rows = items.compactMap(ImportExtraction.mapItemToRow)
+                let created = insertValidatedItineraryItems(rows, creatorId: creatorId)
+                let candidates = packing.compactMap { raw in
+                    ImportExtraction.mapPackingItem(raw).map { PackingCandidate(label: $0.label, groupKey: $0.groupKey) }
+                }
+                // Both sub-extractions succeeded by construction here (a
+                // hard failure on either side is the `.fallback` case
+                // below) — `itineraryFailed`/`packingFailed` are always
+                // false, matching PLAN.md's "no partial mixing."
+                handleImportOutcome(created: created, packingCandidates: candidates, itineraryFailed: false, packingFailed: false)
+            case .fallback:
+                isSubmitting = false
+                await runRemoteImportFlow()
+            }
+            return
+        }
+        #endif
+        // Unreachable in practice (the button only calls this method when
+        // `currentRoute == .onDevice`, which already implies both guards
+        // above hold) — kept as a safe fallback rather than an assertion,
+        // since "just try the remote path" is a correct response even to
+        // an impossible state.
+        isSubmitting = false
+        await runRemoteImportFlow()
+    }
+
+    /// Local-insert half of the on-device path — mirrors
+    /// `AddItemSheet.save()`'s create branch exactly (this milestone's
+    /// brief: "reuse the exact path"): SwiftData insert on the main
+    /// context, `try? modelContext.save()`, then `SyncEngine.enqueueUpsert`
+    /// for the offline-first outbox — the same "insert then `try?` save,
+    /// one row at a time" shape `PackingItem.insert` already uses for a
+    /// batch import. `status = .suggested`/`source = .textImport` (not
+    /// `.confirmed`/`.manual`) is the one difference from a manual add:
+    /// these land in the exact review pipeline (`ImportReviewBanner`/
+    /// `SuggestedItemsSheet`) email-import and remote paste-import
+    /// suggestions already use. Returns the count actually inserted, for
+    /// `handleImportOutcome`'s `created`.
+    private func insertValidatedItineraryItems(
+        _ rows: [ImportExtraction.ValidatedItineraryRow], creatorId: UUID
+    ) -> Int {
+        let now = Date()
+        var created = 0
+        for row in rows {
+            let item = ItineraryItem(
+                id: UUID(), tripId: tripId, categoryRaw: row.category.rawValue, title: row.title,
+                startsAt: row.startsAt, endsAt: row.endsAt, tz: row.tz,
+                locationName: row.locationName, locationLat: nil, locationLng: nil,
+                confirmation: row.confirmation, notes: nil, detailsJSON: "{}",
+                statusRaw: ItemStatus.suggested.rawValue, sourceRaw: ItemSource.textImport.rawValue,
+                createdBy: creatorId, createdAt: now, updatedAt: now, updatedBy: nil
+            )
+            item.details = row.details
+            modelContext.insert(item)
+            try? modelContext.save()
+            let dto = item.toDTO()
+            let rowId = item.id
+            let capturedTripId = tripId
+            Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: capturedTripId, payload: dto) }
+            created += 1
+        }
+        return created
+    }
+
+    /// Shared UI-state transition once EITHER path — remote `ingest-text`
+    /// or on-device `OnDeviceExtractor` — has a final result in this
+    /// sheet's own currency (PLAN.md: "on-device path produces the SAME
+    /// internal result shape the sheet already consumes"). Each path
+    /// builds its own `[PackingCandidate]` its own way (remote: straight
+    /// off the wire payload; on-device: through `ImportExtraction`'s
+    /// validation) — this only decides what the user sees next, exactly
+    /// the logic `submit()` used to inline before it had a second caller.
+    private func handleImportOutcome(
+        created: Int, packingCandidates newPackingCandidates: [PackingCandidate],
+        itineraryFailed: Bool, packingFailed: Bool
+    ) {
+        isSubmitting = false
+        itineraryItemsCreated = created
+        // A remote response never has both flags true (see `submit()`'s
+        // caller); the on-device path never sets either (see
+        // `submitOnDevice()`'s caller).
+        let failedNote: String? = itineraryFailed
+            ? "Couldn\u{2019}t check for bookings or activities \u{2014} try again."
+            : packingFailed
+                ? "Couldn\u{2019}t check for a packing list \u{2014} try again."
+                : nil
+
+        if !newPackingCandidates.isEmpty {
+            packingCandidates = newPackingCandidates
+            partialFailureNote = failedNote
+            // The checklist screen itself shows the itinerary count (see
+            // `packingReviewSection`) — report it now since this sheet
+            // won't dismiss until the checklist is confirmed.
+            if created > 0 { onItineraryItemsImported?(created) }
+        } else if created > 0 {
+            onItineraryItemsImported?(created)
+            if let failedNote {
+                // Don't auto-dismiss when the other side may have silently
+                // dropped something the user pasted — give them a chance
+                // to see the note and retry.
+                noResultsMessage = failedNote
+            } else {
+                dismiss()
+            }
+        } else if let failedNote {
+            noResultsMessage = failedNote
+        } else {
+            noResultsMessage = "Couldn\u{2019}t find anything to import in that text. Try editing it, or paste something else."
         }
     }
 
@@ -407,6 +609,8 @@ struct PasteImportSheet: View {
                 return "You\u{2019}re signed out, so this can\u{2019}t be imported right now. Sign back in and try again."
             case 404:
                 return "Couldn\u{2019}t access that trip."
+            case 429:
+                return "You\u{2019}ve imported a lot recently \u{2014} try again in an hour."
             case 502:
                 return "Couldn\u{2019}t process that text. Try again."
             default:
@@ -424,12 +628,15 @@ struct PasteImportSheet: View {
 /// without touching the real `UserDefaults.standard`).
 ///
 /// `PasteImportSheet.submit()` — the only call site that actually reaches
-/// the network — is reachable from exactly two places: the Import button's
-/// `.sendImmediately` branch below, and the consent dialog's "Continue"
-/// button, which calls `grant()` immediately before it. A not-yet-granted
-/// tap can therefore never reach the server without the user first seeing
-/// and accepting the prompt — see `AIImportConsentTests` for the pure
-/// (network-free) proof of that gate.
+/// the network — is reachable from exactly two places: `runRemoteImportFlow()`'s
+/// `.sendImmediately` branch (itself reached only from the Import button's
+/// `.remote`-route tap, or from `submitOnDevice()` falling back), and the
+/// consent dialog's "Continue" button, which calls `grant()` immediately
+/// before it. A not-yet-granted tap can therefore never reach the server
+/// without the user first seeing and accepting the prompt — see
+/// `AIImportConsentTests` for the pure (network-free) proof of that gate,
+/// and `ImportRoutingTests` for the proof that an `.onDevice` route never
+/// even reaches this decision.
 enum AIImportConsent {
     private static let key = "aiImportConsentGranted"
 
@@ -474,6 +681,10 @@ private struct IngestTextResponse: Decodable {
     let packingFailed: Bool
 }
 
-#Preview {
-    PasteImportSheet(tripId: UUID())
-}
+// No `#Preview` here (like every other `@Environment(AuthManager.self)`
+// consumer in this codebase, e.g. `TripView`/`SuggestedItemsSheet` — only
+// `RootView`'s own preview hand-builds the full auth/sync/router stack):
+// this sheet now reads `authManager`/`modelContext`/`syncEngine` directly
+// for the on-device path's local insert, so a bare
+// `PasteImportSheet(tripId: UUID())` preview would fail at render time
+// with no Observable `AuthManager` in the environment.
