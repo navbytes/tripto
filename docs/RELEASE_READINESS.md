@@ -51,8 +51,8 @@ Last updated: 2026-07-11.
   language, **price Free**.
 - [ ] Paste the metadata (§6); upload the six 6.9" screenshots
   (1320×2868 — home, itinerary/now-line, boarding pass, share, packing,
-  privacy), in `.claude/company/handoffs/appstore-shots/` (gitignored, so
-  local-only). Reframe/caption as you like. To regenerate: see §7.
+  privacy) in [`docs/screenshots/`](screenshots/). Reframe/caption as you
+  like. To regenerate: see §7.
 - [ ] Fill **App Privacy** (§5) — note the **Yes** to third-party access.
 - [ ] Confirm **`TriptoWidgets`** is listed under "Included Bundles" when you
   upload the archive.
