@@ -167,20 +167,38 @@ trips from the DB (harmless, RLS-isolated, but tidy up before real users).
 - **User content** — trips, itinerary items (incl. locations, confirmation
   codes, notes), packing lists, trip-member profiles. Stored in Supabase
   (Postgres) under the user's account, protected by RLS. Purpose: app
-  functionality; shared only with trip members the user invites, and — for
-  items the user share-links — a **sanitized** subset (no codes/notes/emails)
-  on the public page.
+  functionality; shared with trip members the user invites, a **sanitized**
+  subset (no codes/notes/emails) on any public share link the user creates,
+  and — only when the user chooses to import via paste/email — the booking
+  text is sent to a third-party AI sub-processor (the LLM provider, currently
+  OpenAI, via Cloudflare AI Gateway) to extract bookings.
 
 **Not collected:** no tracking, no analytics/ads SDKs, no location tracking
-(location text/coords are user-entered content, not device tracking), no
-third-party data sharing. **App Privacy → Tracking: No.**
+(location text/coords are user-entered content, not device tracking). **App
+Privacy → Tracking: No.**
+
+**Third-party sharing — YES (import feature only).** Correcting an earlier
+draft that said "no third-party data sharing": the paste/email import sends
+user booking text to the LLM provider (currently OpenAI) via Cloudflare AI
+Gateway. The App Store Connect answer to "third parties have access to user
+data" must be **Yes** (data type: user content; purpose: app functionality;
+not tracking). Exact App-Privacy answers: `docs/PRIVACY_DISCLOSURE.md`. Under
+Apple Guideline 5.1.2(i) (rewritten 2025-11-13) this third-party AI sharing
+requires disclosure **and explicit permission** — see the "AI import consent"
+item; a passive notice may not suffice.
 
 **Required-reason APIs (`PrivacyInfo.xcprivacy`):**
 - `NSPrivacyAccessedAPICategoryUserDefaults` → reason **CA92.1** (access to
   the app's own stored values: waitlist tap count, last-used time zones).
-- `NSPrivacyTracking` = false; `NSPrivacyTrackingDomains` = []. Verify
-  supabase-swift ships its own manifest (recent versions do); if not, cover its
-  required-reason usage here too.
+- `NSPrivacyTracking` = false; `NSPrivacyTrackingDomains` = [].
+- **SDK manifests VERIFIED (2026-07-11):** of the shipping SPM deps only
+  swift-crypto ships its own `PrivacyInfo.xcprivacy`. supabase-swift,
+  swift-asn1, swift-http-types, swift-concurrency-extras, swift-clocks do
+  not — but a source scan found **none of them use any required-reason API**
+  (no file-timestamp, system-boot-time, disk-space, or active-keyboard
+  usage), so the app manifest needs no additions beyond UserDefaults, and
+  none of these SDKs is on Apple's designated-SDK list (no signed-manifest
+  mandate). Re-scan if the Supabase SDK is upgraded.
 
 ## 5. Account deletion & Sign in with Apple (compliance detail)
 

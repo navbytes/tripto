@@ -228,7 +228,7 @@ ${SHARED_STYLES}
   <article class="article">
     <p class="eyebrow">Privacy</p>
     <h1>How Tripto handles your data</h1>
-    <p class="updated">Last updated 8 July 2026</p>
+    <p class="updated">Last updated 11 July 2026</p>
 
     <p class="lead">Tripto helps families and groups turn scattered bookings into
       one shared itinerary. We collect as little as possible, never sell your
@@ -271,6 +271,20 @@ ${SHARED_STYLES}
       over encrypted HTTPS. Your session is kept securely in the iOS Keychain on
       your device, and the app keeps a local copy of your trips so they work
       offline.</p>
+
+    <h2>Importing bookings: AI processing</h2>
+    <p>When you choose to import trip details by pasting text or forwarding an
+      email, Tripto sends that booking text — which may include confirmation
+      codes, names, and email addresses — to a <strong>third-party
+      large-language-model provider</strong> (currently OpenAI) through
+      <strong>Cloudflare's AI Gateway</strong> to pull out structured booking
+      details. This happens only when you explicitly choose to import; it is
+      never automatic. Only the extracted details are kept — the raw text is
+      not stored in your Tripto account afterward. The current provider,
+      OpenAI, does not use API data to train or improve its models, and request
+      logging is disabled in the gateway. Cloudflare and the model provider act
+      as <strong>sub-processors</strong> for this feature only. You are never
+      required to use import; you can always enter trips manually.</p>
 
     <h2>Deleting your data</h2>
     <p>You can delete your account from <strong>Settings → Delete account</strong>

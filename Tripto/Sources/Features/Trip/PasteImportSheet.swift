@@ -48,6 +48,11 @@ struct PasteImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var rawText = ""
     @State private var isSubmitting = false
+    /// Guideline 5.1.2(i) (rewritten 2025-11-13): true while the AI-import
+    /// consent dialog is up — shown instead of calling `submit()` directly
+    /// the first time (see `AIImportConsent`), never again once consent is
+    /// on record.
+    @State private var isPresentingAIConsent = false
     @State private var errorMessage: String?
     /// Non-nil once a 200 response came back with nothing found at all
     /// (`created: 0` and no packing items) — not an error (this
@@ -120,6 +125,33 @@ struct PasteImportSheet: View {
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
         }
+        // Guideline 5.1.2(i) (rewritten 2025-11-13): explicit, affirmative
+        // permission before sharing pasted text with the third-party AI —
+        // the passive disclosure line in `pasteSection` is no longer
+        // sufficient on its own. Native `confirmationDialog` (same idiom as
+        // `AddItemSheet`'s "Discard changes?"/`SettingsView`'s "Delete your
+        // account?"): system chrome, so Dynamic Type, VoiceOver, Reduce
+        // Motion, and the 44pt tap-target floor all come for free. Only
+        // "Continue" records consent; "Not now" (the dialog's own cancel
+        // action) leaves the sheet exactly as the user left it — `rawText`
+        // untouched, nothing sent.
+        .confirmationDialog(
+            "Send this text to AI?",
+            isPresented: $isPresentingAIConsent,
+            titleVisibility: .visible
+        ) {
+            Button("Continue") {
+                AIImportConsent.grant()
+                Task { await submit() }
+            }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text(
+                "To find your bookings, this text is sent to a third-party AI service (via Cloudflare) "
+                    + "and used only to extract booking details \u{2014} it isn\u{2019}t stored afterward. "
+                    + "You can add trips manually instead if you\u{2019}d rather not."
+            )
+        }
     }
 
     private var title: String { isReviewingPacking ? "Review packing list" : "Paste to import" }
@@ -168,7 +200,12 @@ struct PasteImportSheet: View {
             }
 
             Button {
-                Task { await submit() }
+                switch AIImportConsent.tapOutcome() {
+                case .sendImmediately:
+                    Task { await submit() }
+                case .showConsentPrompt:
+                    isPresentingAIConsent = true
+                }
             } label: {
                 HStack(spacing: Spacing.sm) {
                     if isSubmitting {
@@ -376,6 +413,42 @@ struct PasteImportSheet: View {
                 return "Something went wrong. Try again."
             }
         }
+    }
+}
+
+/// Apple Guideline 5.1.2(i) (rewritten 2025-11-13): explicit, affirmative
+/// permission before sharing user data with a third-party AI — a passive
+/// disclosure line alone no longer satisfies it. One `UserDefaults` bool,
+/// remembered forever once granted (same injectable-`UserDefaults` recipe as
+/// `PassEffects.isTornStub`/`setTornStub`, for the same reason: testable
+/// without touching the real `UserDefaults.standard`).
+///
+/// `PasteImportSheet.submit()` — the only call site that actually reaches
+/// the network — is reachable from exactly two places: the Import button's
+/// `.sendImmediately` branch below, and the consent dialog's "Continue"
+/// button, which calls `grant()` immediately before it. A not-yet-granted
+/// tap can therefore never reach the server without the user first seeing
+/// and accepting the prompt — see `AIImportConsentTests` for the pure
+/// (network-free) proof of that gate.
+enum AIImportConsent {
+    private static let key = "aiImportConsentGranted"
+
+    static func isGranted(defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: key)
+    }
+
+    static func grant(defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: key)
+    }
+
+    /// The Import button's tap decision.
+    enum TapOutcome: Equatable {
+        case sendImmediately
+        case showConsentPrompt
+    }
+
+    static func tapOutcome(defaults: UserDefaults = .standard) -> TapOutcome {
+        isGranted(defaults: defaults) ? .sendImmediately : .showConsentPrompt
     }
 }
 
