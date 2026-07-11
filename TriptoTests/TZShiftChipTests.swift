@@ -16,9 +16,10 @@ final class TZShiftChipTests: XCTestCase {
         return utc.date(from: components)!
     }
 
-    private func makeFlight(depTz: String, arrTz: String, starts: Date, ends: Date) -> ItineraryItem {
+    private func makeFlight(depTz: String, arrTz: String, starts: Date, ends: Date, toIATA: String? = nil) -> ItineraryItem {
         var details = ItemDetails.empty
         details.arrivalTz = arrTz
+        details.toIATA = toIATA
         return TestFixtures.makeItineraryItem(
             category: .flight, title: "Test flight", startsAt: starts, endsAt: ends, tz: depTz, details: details
         )
@@ -56,6 +57,44 @@ final class TZShiftChipTests: XCTestCase {
             ends: utcInstant(2026, 5, 27, 18, 25) // 14:25 EDT
         )
         XCTAssertEqual(TZShiftChip.landingText(for: flight), "Lands 14:25 in New York — clocks go back 5h")
+    }
+
+    /// The reported bug: a flight to Okinawa (OKA) is on Asia/Tokyo, so
+    /// deriving the place from the *timezone* said "Tokyo". The destination
+    /// airport is what names the arrival place now.
+    func testLandingCityIsTheDestinationAirportNotItsTimezoneCity() {
+        let flight = makeFlight(
+            depTz: "Asia/Hong_Kong", arrTz: "Asia/Tokyo",
+            starts: utcInstant(2026, 7, 22, 19, 0),
+            ends: utcInstant(2026, 7, 22, 21, 5), // 06:05 JST
+            toIATA: "OKA"
+        )
+        XCTAssertEqual(TZShiftChip.landingText(for: flight), "Lands 06:05 in Okinawa — clocks jump ahead 1h")
+    }
+
+    /// Systemic, not Japan-specific: Boston shares America/New_York with New
+    /// York, so the old timezone-city approach mislabeled a BOS arrival "New
+    /// York". The airport wins.
+    func testLandingCityUsesTheAirportEvenWhenItSharesAHubTimezone() {
+        let flight = makeFlight(
+            depTz: "America/Los_Angeles", arrTz: "America/New_York",
+            starts: utcInstant(2026, 5, 14, 15, 0), // 08:00 PDT
+            ends: utcInstant(2026, 5, 14, 20, 30), // 16:30 EDT
+            toIATA: "BOS"
+        )
+        XCTAssertEqual(TZShiftChip.landingText(for: flight), "Lands 16:30 in Boston — clocks jump ahead 3h")
+    }
+
+    /// An airport outside the small hub list falls back to its own IATA code
+    /// (still accurate, matches the flight card) — never the timezone city.
+    func testLandingCityFallsBackToTheIATACodeForAnUnmappedAirport() {
+        let flight = makeFlight(
+            depTz: "Asia/Hong_Kong", arrTz: "Asia/Tokyo",
+            starts: utcInstant(2026, 7, 22, 19, 0),
+            ends: utcInstant(2026, 7, 22, 21, 5), // 06:05 JST
+            toIATA: "ISG" // Ishigaki — real, on Asia/Tokyo, not in the hub map
+        )
+        XCTAssertEqual(TZShiftChip.landingText(for: flight), "Lands 06:05 in ISG — clocks jump ahead 1h")
     }
 
     func testNoLandingChipWhenArrivalZoneMatchesDeparture() {

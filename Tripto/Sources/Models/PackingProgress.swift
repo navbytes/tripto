@@ -70,7 +70,13 @@ enum PackingPermissions {
     /// later demoted to viewer could still delete that one item. Matches
     /// the policy exactly rather than reusing `ItemPermissions.canEdit`'s
     /// stricter "must currently hold companion" shape.
+    ///
+    /// `item.createdBy == nil` (F3 migration: original creator's account
+    /// deleted) is never "my own item" — denied explicitly, same reasoning
+    /// as `ItemPermissions.canEdit`.
     static func canDelete(item: PackingItem, role: TripRole?, userId: UUID?) -> Bool {
-        role == .organizer || (userId != nil && item.createdBy == userId)
+        if role == .organizer { return true }
+        guard let userId, let createdBy = item.createdBy else { return false }
+        return createdBy == userId
     }
 }

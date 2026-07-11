@@ -354,12 +354,16 @@ struct TripView: View {
                 .revealStagger(0.06, revealed: contentRevealed, reduceMotion: reduceMotion)
 
             // TI-3: same trigger, same spot, on every tab — see
-            // `pasteImportPill`'s doc comment for what this replaced.
+            // `pasteImportPill`'s doc comment for what this replaced. Option A
+            // (2026-07-11): at normal text sizes the pill now rides the tab
+            // row (see `tabBar()`), reclaiming this row; it keeps its own
+            // labeled row ONLY at accessibility sizes, where the tab row turns
+            // into a horizontal scroller with no room for it.
             VStack(spacing: 0) {
-                if canAddItems {
+                if canAddItems && dynamicTypeSize.isAccessibilitySize {
                     HStack {
                         Spacer()
-                        pasteImportPill
+                        pasteImportPill(compact: false)
                     }
                     .padding(.horizontal, Spacing.xl)
                     .padding(.top, Spacing.xs)
@@ -573,14 +577,18 @@ struct TripView: View {
     /// (Bookings had none at all). One pill, always visible (not
     /// empty-state-gated — that was itself part of the inconsistency),
     /// same place on every tab.
-    private var pasteImportPill: some View {
+    private func pasteImportPill(compact: Bool = false) -> some View {
         Button { isPresentingPasteImport = true } label: {
             HStack(spacing: 4) {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: pasteImportIconSize, weight: .medium))
                     // Decorative — the label right next to it says the same thing.
                     .accessibilityHidden(true)
-                Text("Paste to import")
+                // Compact rides the tab row (trailing edge) where a full
+                // "Paste to import" would crowd the three tabs; the standalone
+                // row at accessibility sizes keeps the full label. VoiceOver
+                // hears the full phrase either way (see accessibilityLabel).
+                Text(compact ? "Paste" : "Paste to import")
                     .font(Typo.body(11, weight: .semibold))
             }
             .foregroundStyle(Palette.ink)
@@ -602,6 +610,9 @@ struct TripView: View {
         // default accessibility label, same reasoning as `AddItemSheet`'s
         // category tile identifiers.
         .accessibilityIdentifier("pasteImportPill")
+        // Spoken label stays "Paste to import" even when the visible text is
+        // the compact "Paste" on the tab row.
+        .accessibilityLabel("Paste to import")
         .buttonStyle(.plain)
     }
 
@@ -621,20 +632,30 @@ struct TripView: View {
                     HStack(spacing: Spacing.xl) { tabButtons }
                         .lineLimit(1)
                 }
+                // Finding 9a: `.isTabBar` (iOS 17+, matches this app's
+                // SwiftData/@Observable baseline) so VoiceOver announces tab
+                // role and "tab N of M" position; `.contain` groups the row
+                // as one navigable unit rather than three unrelated elements.
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(.isTabBar)
             } else {
                 HStack(spacing: Spacing.xl) {
-                    tabButtons
+                    HStack(spacing: Spacing.xl) { tabButtons }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityAddTraits(.isTabBar)
                     Spacer()
+                    // Option A: the paste-import pill rides the trailing edge
+                    // of the tab row (compact label) instead of a dedicated
+                    // band below — reclaiming a full row on the core screen.
+                    // It sits OUTSIDE the `.isTabBar` group above: it's an
+                    // action, not a tab. At accessibility sizes the tab row
+                    // is a horizontal scroller with no room, so the pill keeps
+                    // its own labeled row (in the body, gated the same way).
+                    if canAddItems { pasteImportPill(compact: true) }
                 }
             }
         }
         .padding(.horizontal, Spacing.xl)
-        // Finding 9a: `.isTabBar` (iOS 17+, matches this app's SwiftData/
-        // @Observable baseline) so VoiceOver announces tab role and "tab N
-        // of M" position; `.contain` groups the row as one navigable unit
-        // rather than three unrelated static elements.
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isTabBar)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.mist).frame(height: 1)
         }

@@ -16,10 +16,17 @@ enum ItemPermissions {
 
     /// Edit/delete a specific item: organizer may touch any item; a
     /// companion only one they created themselves; a viewer never.
+    ///
+    /// `item.createdBy == nil` means the original creator's account was
+    /// deleted (F3 migration: `ON DELETE SET NULL`) — that's never "my own
+    /// item," so the companion own-path is explicitly denied rather than
+    /// left to an implicit `nil`-vs-`nil` optional comparison.
     static func canEdit(item: ItineraryItem, role: TripRole?, userId: UUID?) -> Bool {
         switch role {
         case .organizer: return true
-        case .companion: return userId != nil && item.createdBy == userId
+        case .companion:
+            guard let userId, let createdBy = item.createdBy else { return false }
+            return createdBy == userId
         case .viewer, .none: return false
         }
     }

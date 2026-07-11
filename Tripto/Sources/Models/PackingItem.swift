@@ -11,7 +11,9 @@ final class PackingItem {
     var groupKeyRaw: String
     var assigneeProfileId: UUID?
     var isDone: Bool
-    var createdBy: UUID
+    /// Nullable since the F3 account-deletion migration
+    /// (`ON DELETE SET NULL`) — see `ItineraryItem.createdBy`'s doc comment.
+    var createdBy: UUID?
     var createdAt: Date
     var updatedAt: Date
     var updatedBy: UUID?
@@ -23,7 +25,7 @@ final class PackingItem {
         groupKeyRaw: String,
         assigneeProfileId: UUID?,
         isDone: Bool,
-        createdBy: UUID,
+        createdBy: UUID?,
         createdAt: Date,
         updatedAt: Date,
         updatedBy: UUID?
@@ -53,7 +55,7 @@ struct PackingItemDTO: Codable, Sendable, Equatable {
     var groupKey: String
     var assigneeProfileId: UUID?
     var isDone: Bool
-    var createdBy: UUID
+    var createdBy: UUID?
     var createdAt: Date
     var updatedAt: Date
     var updatedBy: UUID?

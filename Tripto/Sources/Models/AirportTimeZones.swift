@@ -26,7 +26,7 @@ enum AirportTimeZones {
         "DXB": "Asia/Dubai", "DOH": "Asia/Qatar",
         "DEL": "Asia/Kolkata", "BOM": "Asia/Kolkata", "BLR": "Asia/Kolkata",
         "SIN": "Asia/Singapore", "HKG": "Asia/Hong_Kong", "BKK": "Asia/Bangkok",
-        "NRT": "Asia/Tokyo", "HND": "Asia/Tokyo", "KIX": "Asia/Tokyo",
+        "NRT": "Asia/Tokyo", "HND": "Asia/Tokyo", "KIX": "Asia/Tokyo", "OKA": "Asia/Tokyo",
         "ICN": "Asia/Seoul", "PEK": "Asia/Shanghai", "PVG": "Asia/Shanghai",
         "SYD": "Australia/Sydney", "MEL": "Australia/Melbourne", "AKL": "Pacific/Auckland",
         // South America / Africa
@@ -66,7 +66,7 @@ enum AirportTimeZones {
         "DXB": "Dubai", "DOH": "Doha",
         "DEL": "Delhi", "BOM": "Mumbai", "BLR": "Bangalore",
         "SIN": "Singapore", "HKG": "Hong Kong", "BKK": "Bangkok",
-        "NRT": "Tokyo", "HND": "Tokyo", "KIX": "Osaka",
+        "NRT": "Tokyo", "HND": "Tokyo", "KIX": "Osaka", "OKA": "Okinawa",
         "ICN": "Seoul", "PEK": "Beijing", "PVG": "Shanghai",
         "SYD": "Sydney", "MEL": "Melbourne", "AKL": "Auckland",
         "GRU": "S\u{E3}o Paulo", "EZE": "Buenos Aires",

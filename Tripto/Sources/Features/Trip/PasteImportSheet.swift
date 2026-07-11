@@ -150,6 +150,13 @@ struct PasteImportSheet: View {
                 // to paste, but isn't itself attached to this control.
                 .accessibilityLabel("Text to import")
 
+            Text(
+                "Pasted text is sent to an AI service to find your bookings \u{2014} "
+                    + "codes and notes aren\u{2019}t retained beyond that."
+            )
+            .font(Typo.body(Typo.Size.caption))
+            .foregroundStyle(Palette.slate)
+
             if let noResultsMessage {
                 Text(noResultsMessage)
                     .font(Typo.body(Typo.Size.caption))

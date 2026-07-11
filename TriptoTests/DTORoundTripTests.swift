@@ -98,4 +98,52 @@ final class DTORoundTripTests: XCTestCase {
         XCTAssertEqual(roundTripped.details, dto.details)
         XCTAssertEqual(roundTripped, dto)
     }
+
+    /// F3 (backend account-deletion migration, `ON DELETE SET NULL`): an
+    /// item a since-deleted user added to someone else's trip comes back
+    /// over the wire with `created_by = null` instead of failing to decode
+    /// — and a nil creator must never be usable as a companion's "own
+    /// item" edit path (`ItemPermissions.canEdit`'s key use of this field).
+    func testItineraryItemDTODecodesNullCreatedByAndDeniesCompanionOwnPathEdit() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "category": "activity",
+          "title": "City walk",
+          "starts_at": "2026-05-14T12:20:00.000+00:00",
+          "ends_at": null,
+          "tz": "America/New_York",
+          "location_name": "",
+          "location_lat": null,
+          "location_lng": null,
+          "confirmation": null,
+          "notes": null,
+          "details": {},
+          "status": "confirmed",
+          "created_by": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_by": null
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ItineraryItemDTO.self, from: Data(json.utf8))
+        XCTAssertNil(dto.createdBy)
+
+        let model = ItineraryItem(dto: dto)
+        XCTAssertNil(model.createdBy)
+
+        // Must never fall through to "mine" just because a companion's own
+        // id happens to be compared against a nil creator.
+        let someCompanion = UUID()
+        XCTAssertFalse(
+            ItemPermissions.canEdit(item: model, role: .companion, userId: someCompanion),
+            "an anonymized item (creator account deleted) must never be editable via the companion own-item path"
+        )
+        // The organizer's "edit anything" path is unaffected by the nil creator.
+        XCTAssertTrue(ItemPermissions.canEdit(item: model, role: .organizer, userId: someCompanion))
+    }
 }
