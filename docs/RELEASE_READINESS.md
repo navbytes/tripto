@@ -1,32 +1,32 @@
 # Tripto — Release checklist
 
-The app is built, tested, and privacy-complete. What remains to submit to the
-App Store is below — all of it needs your Apple account, a real device, or a
-launch-timing decision. Paste-ready metadata and privacy answers are at the end.
+**Status: SUBMITTED to App Review 2026-07-12 — Build 4 (1.0 (4)), Waiting for
+Review.** The app is built, tested, privacy-complete, and now in Apple's review
+queue. What remains is the **manual release** (after the §2 backend cutover) once
+review passes. Paste-ready metadata and privacy answers are at the end.
 
-Last updated: 2026-07-11.
+Last updated: 2026-07-12.
 
 ---
 
-## 1. Build & sign (needs your Apple account)
+## 1. Build & sign — DONE (built via Xcode Cloud)
 
-- [ ] **Build with Xcode 26.** Apple requires the iOS 26 SDK / Xcode 26 for all
-  new App Store submissions (in force since 28 Apr 2026). The deployment target
-  stays iOS 17 — only the build toolchain must be current.
-- [ ] **App ID `io.navbytes.tripto`** — enable the **Sign in with Apple** and
-  **App Groups** (`group.io.navbytes.tripto`) capabilities.
-- [ ] **Provisioning profile** — regenerate after enabling App Groups; both the
-  app and the `io.navbytes.tripto.widgets` extension must carry the App Group
-  entitlement.
-- [ ] **Sign in with Apple key (.p8)** — create it; note the **Key ID**
-  (`5YX6JK6K9A`) and **Team ID** (`59J9RQXYYP`). Never paste the `.p8` contents
-  into the repo.
-- [ ] **Add the `.p8` as a Supabase secret** (enables the Apple token revoke on
-  account deletion):
-  ```
-  cd ~/repos/backend/projects/tripto
-  supabase secrets set APPLE_SIWA_PRIVATE_KEY="$(cat /path/to/AuthKey_5YX6JK6K9A.p8)"
-  ```
+Built and signed in **Xcode Cloud** on Apple's released **Xcode 26.5 (17F42)**.
+The build Mac runs a beta macOS whose local SDK is a pre-release seed that App
+Review rejects (ITMS-90111) — reasoning + recipe in
+[APP_STORE_SUBMISSION.md](APP_STORE_SUBMISSION.md) §0, §9–§10.
+
+- [x] **Build with the Xcode 26 SDK** — Xcode Cloud, released Xcode 26.5.
+  Deployment target stays iOS 17.
+- [x] **App ID `io.navbytes.tripto`** — **Sign in with Apple** + **App Groups**
+  (`group.io.navbytes.tripto`) enabled (SiwA verified on device 2026-07-11).
+- [x] **Provisioning** — automatic signing generated the profiles; the signed
+  archive (app + `io.navbytes.tripto.widgets` extension) succeeded, proving the
+  App Group entitlement carried on both targets.
+- [x] **Sign in with Apple key (.p8)** — Key ID `5YX6JK6K9A`, Team ID
+  `59J9RQXYYP`. (`.p8` contents never committed.)
+- [x] **`.p8` set as a Supabase secret** — the Apple token revoke fired on the
+  device account-deletion test (§3), confirming it's live.
 
 ## 2. Pre-launch backend (before real users)
 
@@ -46,20 +46,23 @@ Last updated: 2026-07-11.
 - [ ] **Airplane-mode round-trip** (recommended, not a blocker) — edit offline,
   reconnect, confirm it reconciles and shows "edited by X".
 
-## 4. App Store Connect
+## 4. App Store Connect — SUBMITTED (Waiting for Review)
+
+**Submitted to App Review 2026-07-12, 1:21 AM — Build 4 (1.0 (4)), status Waiting
+for Review.** Submission ID `5f53b010-8cb0-4d8c-b7ce-2fe48fb64c9b`.
 
 - [x] Create the app: listing name **Tripto — Trip Organizer** (bare "Tripto"
   was taken; on-device name stays "Tripto"), bundle `io.navbytes.tripto`,
   primary language, **price Free**. _(created 2026-07-11)_
-- [ ] Paste the metadata (§6); upload the six 6.9" screenshots
-  (1320×2868 — home, itinerary/now-line, boarding pass, share, packing,
-  privacy) in [`docs/screenshots/`](screenshots/). Reframe/caption as you
-  like. To regenerate: see §7.
-- [ ] Fill **App Privacy** (§5) — note the **Yes** to third-party access.
-- [ ] Confirm **`TriptoWidgets`** is listed under "Included Bundles" when you
-  upload the archive.
-- [ ] **Archive & upload:** Xcode → Product → Archive → Distribute → App Store
-  Connect → submit for review.
+- [x] Metadata pasted (§6) + the six screenshots uploaded. _(2026-07-11)_
+- [x] **App Privacy** filled (§5) — Name, Email, Other User Content, User ID; all
+  App Functionality / linked / no tracking. _(2026-07-11)_
+- [x] Age Rating **4+**, Categories (Travel / Productivity), Pricing (Free, all
+  countries). _(2026-07-11)_
+- [x] **Build attached + submitted:** Build 4 delivered via Xcode Cloud → App
+  Store Connect (no local archive — see §1). Superseded Build 1, which was
+  rejected **ITMS-90111** (seed SDK). _(2026-07-12)_
+- [ ] **Manually release** once review passes — gated on the §2 backend cutover.
 
 ## 5. App Privacy answers (App Store Connect form)
 
