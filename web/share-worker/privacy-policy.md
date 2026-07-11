@@ -47,11 +47,32 @@ or pick them for an itinerary item.
 
 We never share your data with advertisers or data brokers.
 
-## Where it's stored
+## Where it's stored and who processes it
 
 Trip data is stored in a Supabase (PostgreSQL) database and transmitted over
 encrypted HTTPS. Your session is kept securely in the iOS Keychain on your
 device, and the app keeps a local copy of your trips so they work offline.
+
+### Import feature: third-party processing
+
+When you import trip details via paste or email, Tripto extracts booking
+information (flights, hotel stays, activities, and confirmation codes) by
+sending your booking text — which may contain confirmation codes, personal
+names, and email addresses — to a **third-party large-language-model
+provider** (currently OpenAI) through **Cloudflare's AI Gateway**. This
+processing:
+
+- Happens only when you explicitly choose to import; it is not automatic.
+- Extracts and returns structured booking details only; the raw text is not
+  stored in your Tripto account after extraction.
+- Is sent over encrypted HTTPS to Cloudflare and the model provider.
+- Does not train the provider's models: the current provider, OpenAI, does
+  not use API data to train or improve its models per its data-usage terms.
+  Request logging is disabled in the Cloudflare gateway.
+
+Cloudflare and the model provider are sub-processors of your data for this
+function only. You are not required to use the import feature; you can
+enter trips manually.
 
 ## Deleting your data
 

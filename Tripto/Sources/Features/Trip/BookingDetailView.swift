@@ -917,9 +917,13 @@ struct BookingDetailView: View {
     }
 
     /// updated_by → name lookup mirroring `TripView.profileNames` (checks
-    /// account profiles, then trip profiles linked to that account).
-    private func displayName(for userId: UUID) -> String {
-        guard let tripId = item?.tripId else { return "Traveler" }
+    /// account profiles, then trip profiles linked to that account). `nil`
+    /// (F3 migration: creator's account deleted, or — pre-sync — a
+    /// suggested/local item with no creator attributed yet) falls back to
+    /// the same generic "Traveler" label as an id that resolves to no
+    /// known profile.
+    private func displayName(for userId: UUID?) -> String {
+        guard let userId, let tripId = item?.tripId else { return "Traveler" }
         if let profile = profiles.first(where: { $0.id == userId }) {
             return profile.displayName
         }

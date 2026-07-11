@@ -31,7 +31,12 @@ final class ItineraryItem {
     /// Compact JSON text of the `details` jsonb column — see type doc comment.
     var detailsJSON: String
     var statusRaw: String
-    var createdBy: UUID
+    /// Nullable since the F3 account-deletion migration
+    /// (`ON DELETE SET NULL`): an item a since-departed user added to
+    /// someone else's trip survives with `createdBy == nil` rather than
+    /// cascading away. Never treat `nil` as "mine" — see
+    /// `ItemPermissions.canEdit`.
+    var createdBy: UUID?
     var createdAt: Date
     var updatedAt: Date
     var updatedBy: UUID?
@@ -51,7 +56,7 @@ final class ItineraryItem {
         notes: String?,
         detailsJSON: String,
         statusRaw: String,
-        createdBy: UUID,
+        createdBy: UUID?,
         createdAt: Date,
         updatedAt: Date,
         updatedBy: UUID?
@@ -126,7 +131,7 @@ struct ItineraryItemDTO: Codable, Sendable, Equatable {
     var notes: String?
     var details: AnyJSON
     var status: String
-    var createdBy: UUID
+    var createdBy: UUID?
     var createdAt: Date
     var updatedAt: Date
     var updatedBy: UUID?
