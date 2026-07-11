@@ -575,14 +575,10 @@ struct HomeView: View {
         ScrollView {
             VStack(spacing: Spacing.lg) {
                 Spacer()
-                Image(systemName: "airplane.departure")
-                    // Decorative empty-state glyph — capped rather than
-                    // scaled: a big illustrative icon above a headline, not
-                    // text-adjacent, and growing it ~3x at AX5 would
-                    // dominate the screen more than help comprehension.
-                    .font(.system(size: 40))
-                    .foregroundStyle(Palette.amber)
-                    .accessibilityHidden(true)
+                // W1-D: EmptyStateArt replaces the old bare glyph here —
+                // decorative, fixed size, accessibilityHidden internally;
+                // the headline right below already carries the message.
+                EmptyStateArt(scene: .home)
                 VStack(spacing: Spacing.xs) {
                     Text("Plan your first trip")
                         .font(Typo.display(Typo.Size.title))

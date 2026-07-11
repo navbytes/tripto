@@ -564,6 +564,13 @@ struct ItineraryTabView: View {
                     daySkeleton
                         .padding(.top, Spacing.xl)
 
+                    // W1-D (plan §D5): EmptyStateArt slots above the
+                    // settled-empty headline — decorative, fixed size,
+                    // accessibilityHidden internally; the headline right
+                    // below already carries the message. daySkeleton above
+                    // is untouched.
+                    EmptyStateArt(scene: .itinerary)
+
                     VStack(spacing: Spacing.xs) {
                         Text(canEdit ? "Add your first flight, stay, or plan" : "Nothing planned yet")
                             .font(Typo.display(Typo.Size.title))
