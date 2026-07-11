@@ -116,7 +116,7 @@ struct TimelineCardRow: View, Equatable {
     /// column `card` sits beside.
     private var axTimeRow: some View {
         HStack(spacing: Spacing.xs) {
-            RailNode(category: model.category)
+            RailNode(category: model.category, dimmed: model.isPast)
             Text(model.timeText)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.ink)
@@ -213,7 +213,7 @@ struct TimelineCardRow: View, Equatable {
                 .fill(Palette.mist)
                 .frame(width: 2)
                 .frame(maxHeight: .infinity)
-            RailNode(category: model.category)
+            RailNode(category: model.category, dimmed: model.isPast)
                 .padding(.top, 15)
         }
         .frame(width: TimelineLayout.railWidth)
@@ -221,7 +221,7 @@ struct TimelineCardRow: View, Equatable {
 
     private var card: some View {
         HStack(spacing: Spacing.md) {
-            CategoryIconTile(category: model.category)
+            CategoryIconTile(category: model.category, dimmed: model.isPast)
                 // D2 defect 2: capped, not left to keep growing — shared
                 // conventions' sanctioned recipe for a glyph in a
                 // fixed-role container ("cap with .dynamicTypeSize(...
@@ -286,7 +286,10 @@ struct TimelineCardRow: View, Equatable {
                     style: StrokeStyle(lineWidth: 1.25, dash: model.isPending ? [5, 4] : [])
                 )
         }
-        .shadow(color: Palette.shadow.opacity(0.08), radius: 6, y: 3)
+        // D4: de-elevation for past rows — shadow removed rather than
+        // faded via a shared opacity multiplier, so it composites out
+        // entirely rather than leaving a faint halo.
+        .shadow(color: Palette.shadow.opacity(model.isPast ? 0 : 0.08), radius: 6, y: 3)
         .padding(.leading, Spacing.sm)
     }
 }
@@ -363,9 +366,14 @@ struct CheckOutRow: View, Equatable {
         NavigationLink(value: ItemRoute(id: model.itemId)) {
             HStack(spacing: Spacing.sm) {
                 timeGutter
+                // D4: same slate-accent-drain as `CategoryIconTile`/
+                // `RailNode`'s `dimmed` param — this row has neither (it's
+                // already a flat, shadow-free chip), so the glyph itself
+                // carries the past treatment for consistency with a past
+                // day's dimmed cards sitting right above/below it.
                 Image(systemName: "arrow.up.forward.square")
                     .font(.system(size: arrowIconSize))
-                    .foregroundStyle(CategoryColor.hotel.fg)
+                    .foregroundStyle(model.isPast ? Palette.slate : CategoryColor.hotel.fg)
                 Text(model.title)
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(Palette.ink)
@@ -419,6 +427,43 @@ struct CheckOutRow: View, Equatable {
             }
         }
         .frame(width: TimelineLayout.gutterWidth(for: typeSize), alignment: .trailing)
+    }
+}
+
+/// D4 ("now" presence): the shared "now" marker `TimelineBuilder` inserts
+/// into today's section — a static hairline across the content column with
+/// a small dot on the rail and a caption, no time text (the status bar
+/// already shows a clock). Deliberately motion-free (no pulse/breathe): D4
+/// never specifies one, and a static marker trivially satisfies "respects
+/// Reduce Motion" rather than needing an RM-gated animation. One VoiceOver
+/// stop, not `accessibilityHidden` — the plan calls for a labeled element.
+struct NowLineRow: View, Equatable {
+    /// See `TimelineCardRow.typeSize`'s doc comment — same alignment need:
+    /// the dot must land in the same rail column cards/check-outs use,
+    /// whose width steps with Dynamic Type.
+    var typeSize: DynamicTypeSize = .large
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: TimelineLayout.gutterWidth(for: typeSize))
+            Circle()
+                .fill(Palette.amber)
+                .frame(width: 8, height: 8)
+                .frame(width: TimelineLayout.railWidth)
+            HStack(spacing: Spacing.sm) {
+                Rectangle()
+                    .fill(Palette.amber)
+                    .frame(height: 2)
+                Text("Now")
+                    .font(Typo.body(Typo.Size.caption, weight: .bold))
+                    .foregroundStyle(Palette.amberInk)
+                    .fixedSize()
+            }
+            .padding(.leading, Spacing.sm)
+        }
+        .padding(.vertical, Spacing.xs)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Now")
     }
 }
 
@@ -516,7 +561,7 @@ struct TZShiftChipRow: View, Equatable {
                 model: TimelineCardModel(
                     id: UUID(), category: .flight, timeText: "08:20", zoneLabel: "GMT+5:30",
                     title: "Flight to Delhi", subtitle: "JFK → DEL · Seat 14C", hasTicket: true,
-                    isPending: false, editedBy: nil, assignees: [], tags: []
+                    isPending: false, editedBy: nil, assignees: [], tags: [], isPast: false
                 ),
                 typeSize: .xxLarge
             )
@@ -525,7 +570,7 @@ struct TZShiftChipRow: View, Equatable {
                 model: TimelineCardModel(
                     id: UUID(), category: .activity, timeText: "14:00", zoneLabel: "Kathmandu",
                     title: "Boudhanath walking tour", subtitle: "Kathmandu", hasTicket: false,
-                    isPending: false, editedBy: nil, assignees: [], tags: []
+                    isPending: false, editedBy: nil, assignees: [], tags: [], isPast: false
                 ),
                 typeSize: .xxLarge
             )
@@ -544,7 +589,7 @@ struct TZShiftChipRow: View, Equatable {
                         .init(id: UUID(), initial: "P", colorName: "moss", name: "Priya"),
                         .init(id: UUID(), initial: "K", colorName: "plum", name: "Kiran"),
                     ],
-                    tags: ["nap", "stroller-ok", "kids-menu"]
+                    tags: ["nap", "stroller-ok", "kids-menu"], isPast: false
                 ),
                 typeSize: .xxLarge
             )
@@ -569,7 +614,7 @@ struct TZShiftChipRow: View, Equatable {
                 model: TimelineCardModel(
                     id: UUID(), category: .flight, timeText: "08:20", zoneLabel: "GMT+5:30",
                     title: "Flight to Delhi", subtitle: "JFK → DEL · Seat 14C", hasTicket: true,
-                    isPending: false, editedBy: nil, assignees: [], tags: []
+                    isPending: false, editedBy: nil, assignees: [], tags: [], isPast: false
                 ),
                 typeSize: .accessibility2
             )
@@ -578,5 +623,38 @@ struct TZShiftChipRow: View, Equatable {
         .padding(Spacing.lg)
     }
     .dynamicTypeSize(.accessibility2)
+    .background(Palette.paper)
+}
+
+/// D4's own validate-first artifact: a past card (de-elevated — no shadow,
+/// slate icon tile/rail) directly above the "now" marker directly above an
+/// upcoming card (full elevation/accent) — the exact boundary
+/// `TimelineBuilder.nowLineIndex` positions the line at. No seeded fixture
+/// spans "today" (`DemoSeeder`'s trip is a fixed past date range), so this
+/// is the fastest way to see the two D4 treatments together in one frame.
+#Preview("Now line + past dimming") {
+    ScrollView {
+        VStack(alignment: .leading, spacing: 0) {
+            TimelineCardRow(
+                model: TimelineCardModel(
+                    id: UUID(), category: .food, timeText: "08:00", zoneLabel: nil,
+                    title: "Breakfast", subtitle: "Time Out Market", hasTicket: false,
+                    isPending: false, editedBy: nil, assignees: [], tags: [], isPast: true
+                )
+            )
+            .equatable()
+            NowLineRow()
+                .equatable()
+            TimelineCardRow(
+                model: TimelineCardModel(
+                    id: UUID(), category: .activity, timeText: "14:00", zoneLabel: nil,
+                    title: "São Jorge Castle", subtitle: "Alfama, Lisbon", hasTicket: true,
+                    isPending: false, editedBy: nil, assignees: [], tags: [], isPast: false
+                )
+            )
+            .equatable()
+        }
+        .padding(Spacing.lg)
+    }
     .background(Palette.paper)
 }

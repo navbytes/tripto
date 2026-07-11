@@ -28,6 +28,11 @@ enum TimelineRowModel: Identifiable, Equatable {
     case staying(StayingStripModel)
     case checkOut(CheckOutRowModel)
     case tzShift(TZShiftModel)
+    /// D4 ("now" presence): the shared "now" marker, inserted by
+    /// `TimelineBuilder.build` only into today's section (see its doc
+    /// comment) — a bare case since the row carries no per-instance data,
+    /// just a fixed id and static rendering (`NowLineRow`).
+    case nowLine
 
     var id: String {
         switch self {
@@ -35,6 +40,7 @@ enum TimelineRowModel: Identifiable, Equatable {
         case .staying(let model): model.id
         case .checkOut(let model): model.id
         case .tzShift(let model): model.id
+        case .nowLine: "now-line"
         }
     }
 }
@@ -64,6 +70,14 @@ struct TimelineCardModel: Identifiable, Equatable {
     /// rendered via `ItemTag`'s label/icon where recognized, plain text
     /// otherwise (`TimelineRowViews.swift`'s tag chip).
     let tags: [String]
+    /// D4 ("now" presence): true once this card reads as behind the shared
+    /// clock — a day section strictly before today is past regardless of
+    /// its own clock time; within today it's `startsAt < now` (an instant
+    /// exactly equal to `now` still reads as upcoming). Drives
+    /// `TimelineCardRow`'s de-elevation (shadow removed, `CategoryIconTile`/
+    /// `RailNode` in slate) — never text color, which AA requires stays
+    /// untouched (see `TimelineBuilder.build`'s doc comment).
+    let isPast: Bool
 }
 
 struct StayingStripModel: Identifiable, Equatable {
@@ -80,6 +94,9 @@ struct CheckOutRowModel: Identifiable, Equatable {
     let zoneLabel: String?
     let title: String
     let isPending: Bool
+    /// D4 ("now" presence): same rule as `TimelineCardModel.isPast`, keyed
+    /// off `endsAt` (a check-out's own instant) rather than `startsAt`.
+    let isPast: Bool
 }
 
 struct TZShiftModel: Identifiable, Equatable {
@@ -94,6 +111,22 @@ enum TimelineBuilder {
     /// zone-label decisions track the previous *instant-bearing* row
     /// (cards and check-out rows; staying strips are all-day backdrops and
     /// never participate in zone comparisons).
+    ///
+    /// D4 ("now" presence): `now` also drives two additions beyond the
+    /// existing `editedByText` use — each instant-bearing row's `isPast`
+    /// (a day section strictly before `today` is past outright, regardless
+    /// of the row's own clock time; within today's own section it's the
+    /// row's own instant `< now`, so an instant exactly equal to `now`
+    /// still reads as upcoming) and a `.nowLine` row inserted **only into
+    /// today's section**, positioned right before the first still-upcoming
+    /// instant-bearing row (at the end if every one has already passed).
+    /// The line reuses each row's own freshly-computed `isPast` rather
+    /// than re-deriving a second now-comparison, so the line and the
+    /// dimming boundary can never disagree. A today section with no
+    /// instant-bearing row at all (a free day, or a staying-only day) gets
+    /// no line — inserting one would turn an empty `rows` non-empty and
+    /// silently swallow the view's own "Free day" placeholder, which this
+    /// feature doesn't touch.
     static func build(
         sections: [ItineraryDayBucketing.Section],
         pendingRowIds: Set<UUID>,
@@ -113,6 +146,18 @@ enum TimelineBuilder {
         var previous: ItineraryItem?
 
         return sections.map { section in
+            // D4: unwrap `today` once per section rather than force-
+            // unwrapping inline — `DayDate` has no `Comparable` bridge for
+            // the bare-`T`-vs-`T?` case the way `Equatable`'s `==` does.
+            let isSectionToday: Bool
+            let dayIsPast: Bool
+            if let today {
+                isSectionToday = section.day == today
+                dayIsPast = section.day < today
+            } else {
+                isSectionToday = false
+                dayIsPast = false
+            }
             var rows: [TimelineRowModel] = []
 
             for row in section.rows {
@@ -135,7 +180,8 @@ enum TimelineBuilder {
                         myUserId: myUserId,
                         namesById: namesById,
                         assignees: assigneesByItem[item.id] ?? [],
-                        now: now
+                        now: now,
+                        isPast: dayIsPast || (isSectionToday && item.startsAt < now)
                     )))
                     // The landing chip rides directly under its flight —
                     // even when the next item is already in the arrival
@@ -155,19 +201,44 @@ enum TimelineBuilder {
                         zoneLabel: zoneChanged
                             ? ItineraryTimeZone.zoneLabel(for: item.primaryTz, at: endsAt) : nil,
                         title: "Check-out · \(item.title)",
-                        isPending: pendingRowIds.contains(item.id)
+                        isPending: pendingRowIds.contains(item.id),
+                        isPast: dayIsPast || (isSectionToday && endsAt < now)
                     )))
                     previous = item
                 }
+            }
+
+            if isSectionToday, let nowLineIndex = nowLineIndex(in: rows) {
+                rows.insert(.nowLine, at: nowLineIndex)
             }
 
             return TimelineDayModel(
                 id: section.day.stringValue,
                 title: dayTitle(for: section, tripDayCount: tripDayCount),
                 rows: rows,
-                isToday: today != nil && section.day == today
+                isToday: isSectionToday
             )
         }
+    }
+
+    /// D4: the "now" marker's insertion point — right before the first
+    /// still-upcoming instant-bearing row (`.card`/`.checkOut`), or at
+    /// `rows.count` (section bottom) once every instant-bearing row has
+    /// already passed. `nil` when the section has no instant-bearing row
+    /// at all (see `build`'s doc comment for why that means "no line").
+    private static func nowLineIndex(in rows: [TimelineRowModel]) -> Int? {
+        var sawInstantBearingRow = false
+        for (index, row) in rows.enumerated() {
+            let isPast: Bool
+            switch row {
+            case .card(let model): isPast = model.isPast
+            case .checkOut(let model): isPast = model.isPast
+            case .staying, .tzShift, .nowLine: continue
+            }
+            sawInstantBearingRow = true
+            if !isPast { return index }
+        }
+        return sawInstantBearingRow ? rows.count : nil
     }
 
     /// Finding F8: "Day N" only reads sensibly for days inside the trip's
@@ -193,7 +264,8 @@ enum TimelineBuilder {
         myUserId: UUID?,
         namesById: [UUID: String],
         assignees: [AvatarStack.Person],
-        now: Date
+        now: Date,
+        isPast: Bool
     ) -> TimelineCardModel {
         let zoneChanged = ItineraryTimeZone.zoneChanged(from: previous, to: item)
         // Flights always label their departure time (A1.1: never a bare
@@ -211,7 +283,8 @@ enum TimelineBuilder {
             isPending: pendingRowIds.contains(item.id),
             editedBy: editedByText(for: item, myUserId: myUserId, namesById: namesById, now: now),
             assignees: assignees,
-            tags: item.details.tags
+            tags: item.details.tags,
+            isPast: isPast
         )
     }
 
