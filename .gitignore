@@ -19,6 +19,7 @@ DerivedData/
 # Run `xcodegen generate` (or scripts/bootstrap.sh) after cloning.
 *.xcodeproj/
 Tripto/Generated/
+TriptoWidgets/Generated/
 
 # Python (scripts/gen_tokens.py)
 __pycache__/

@@ -55,6 +55,10 @@ extension SyncEngine {
 
             await status.markSynced()
             await status.setHomePullFailed(false)
+            // PLAN-signature-layer.md §D6: home-scope tables cover
+            // `trips` — a rename, cover-gradient change, or a trip
+            // appearing/disappearing all belong in the next snapshot.
+            await snapshotWriter.notifyDataChanged()
             schedulePush()
         } catch {
             logDebug("pullHome failed: \(error)")
@@ -138,6 +142,10 @@ extension SyncEngine {
 
             await status.markSynced()
             await status.setTripPullFailed(tripId, false)
+            // PLAN-signature-layer.md §D6: trip-scope tables cover
+            // `itinerary_items` — a remote edit/add/delete on the focus
+            // trip's items belongs in the next snapshot.
+            await snapshotWriter.notifyDataChanged()
         } catch {
             logDebug("pullTrip(\(tripId)) failed: \(error)")
             await status.setTripPullFailed(tripId, true)

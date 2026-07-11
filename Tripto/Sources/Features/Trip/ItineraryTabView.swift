@@ -103,28 +103,39 @@ struct ItineraryTabView: View {
         ItineraryDayBucketing.dayCount(from: tripStartDay, to: tripEndDay, calendar: Calendar(identifier: .gregorian)) + 1
     }
 
-    private var dayModels: [TimelineDayModel] {
+    /// D4 ("now" presence): takes the caller's `now` instead of reading
+    /// `.now` internally, so the one shared clock (`TimelineView
+    /// (.everyMinute)` in `body`, below) is the single source of "now" for
+    /// both `today`/`isToday` and the now-line/`isPast` — reusing the
+    /// existing `today: DayDate.from(now, calendar: .current)` derivation
+    /// rather than inventing a second one.
+    private func dayModels(now: Date) -> [TimelineDayModel] {
         let sections = ItineraryDayBucketing.sections(items: items, tripStart: tripStartDay, tripEnd: tripEndDay)
         return TimelineBuilder.build(
             sections: sections, pendingRowIds: pendingRowIds, myUserId: myUserId, namesById: namesById,
             assigneesByItem: assigneesByItem,
-            today: DayDate.from(.now, calendar: .current),
+            now: now,
+            today: DayDate.from(now, calendar: .current),
             tripDayCount: tripDayCount
         )
     }
 
-    /// Finding F5: `dayModels` re-runs `ItineraryDayBucketing` +
-    /// `TimelineBuilder` in full every time it's read — the old `body`
-    /// read it 4-5 separate times per render pass (the `isEmpty` check, the
-    /// `ForEach`, both DEBUG scroll-target lookups, and `firstFreeDayId`).
-    /// Evaluating it once into `models` here and threading that single
-    /// snapshot through the rest of `body` (including into the `.task`
-    /// closure, which captures it by value) cuts that to one run per pass.
-    /// Deliberately stops there — no cross-pass cache — since there's no
-    /// observed jank to justify the cache-key complexity a memoized version
-    /// would need.
+    /// Finding F5: `dayModels(now:)` re-runs `ItineraryDayBucketing` +
+    /// `TimelineBuilder` in full every time it's called — the old `body`
+    /// called it 4-5 separate times per render pass (the `isEmpty` check,
+    /// the `ForEach`, both DEBUG scroll-target lookups, and
+    /// `firstFreeDayId`). Evaluating it once into `models` here and
+    /// threading that single snapshot through `hintDayId`/`todayTargetId`
+    /// (day-granularity concerns that don't need a live per-minute value)
+    /// keeps those at one run per outer render pass, same as before. D4
+    /// ("now" presence) adds exactly one more call inside the
+    /// `TimelineView(.everyMinute)` below (`liveModels`) so the rows
+    /// actually rendered — and only those — pick up a fresh `now` each
+    /// minute; on a 14-day/~70-row trip this second pass is noise (PLAN
+    /// -signature-layer.md §D4's own perf call), not worth threading the
+    /// live value back out through `hintDayId`/`todayTargetId` too.
     var body: some View {
-        let models = dayModels
+        let models = dayModels(now: .now)
         let hintDayId = firstFreeDayId(in: models)
         let todayTargetId = todayScrollTargetId(in: models)
         return Group {
@@ -137,123 +148,139 @@ struct ItineraryTabView: View {
                     // hero collapsed over nothing to scroll.
                     .onAppear { heroScrollModel.offsets[.itinerary] = 0 }
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            ForEach(models) { day in
-                                Section {
-                                    if day.isFreeDay {
-                                        // UX audit finding 7: also gated on
-                                        // the filter being inactive — see
-                                        // `freeDayRow`'s doc comment.
-                                        freeDayRow(
-                                            day,
-                                            showsAddHint: canEdit && filteredPersonName == nil && day.id == hintDayId
-                                        )
-                                    } else {
-                                        ForEach(day.rows) { row in
-                                            rowView(for: row)
+                // D4 ("now" presence): the timeline's one shared clock —
+                // wraps only the populated branch, since the now-line/
+                // `isPast` are the only things that need a live per-minute
+                // refresh (`hintDayId`/`todayTargetId` above are day-
+                // granularity and stay driven by the outer `models`, same
+                // as before). `context.date` flows into `dayModels(now:)`;
+                // no per-row timers anywhere, and the existing
+                // `.equatable()` row views (below) short-circuit every row
+                // whose snapshot didn't change, so a minute tick re-renders
+                // at most the couple of rows whose past/now state flipped.
+                TimelineView(.everyMinute) { context in
+                    let liveModels = dayModels(now: context.date)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                                ForEach(liveModels) { day in
+                                    Section {
+                                        if day.isFreeDay {
+                                            // UX audit finding 7: also gated on
+                                            // the filter being inactive — see
+                                            // `freeDayRow`'s doc comment.
+                                            freeDayRow(
+                                                day,
+                                                showsAddHint: canEdit && filteredPersonName == nil && day.id == hintDayId
+                                            )
+                                        } else {
+                                            ForEach(day.rows) { row in
+                                                rowView(for: row)
+                                            }
                                         }
+                                    } header: {
+                                        dayHeader(day)
                                     }
-                                } header: {
-                                    dayHeader(day)
                                 }
                             }
+                            .heroScrollTracking(tab: .itinerary, model: heroScrollModel)
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.bottom, Fab.scrollClearance)
                         }
-                        .heroScrollTracking(tab: .itinerary, model: heroScrollModel)
-                        .padding(.horizontal, Spacing.lg)
-                        .padding(.bottom, Fab.scrollClearance)
-                    }
-                    .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .itinerary)))
-                    .scrollDismissesKeyboard(.immediately)
-                    // UX audit finding 2: manual pull-to-refresh, matching
-                    // Home — previously the only way to recover from a
-                    // failed-while-online pull here was closing and
-                    // reopening the trip.
-                    .refreshable { await onRefresh?() }
-                    // UX audit finding 2: a quiet "jump to today" pill,
-                    // shown whenever today falls inside the trip's date
-                    // range — trade-off deliberately taken to show it
-                    // regardless of current scroll position (not just after
-                    // the user has scrolled away from today's section),
-                    // since tracking scroll offset just to hide it while
-                    // already there isn't justified for this pass; a
-                    // possible later refinement.
-                    .overlay(alignment: .bottomLeading) {
-                        if let todayTargetId {
-                            todayPill(proxy: proxy, targetId: todayTargetId)
-                                .padding(.leading, Spacing.xl)
-                                .padding(.bottom, Spacing.xxl)
-                        }
-                    }
-                    .task {
-                        // Finding F1: one-shot scroll to "today"'s section
-                        // on first appearance, skipped when a DEBUG uitest
-                        // drill below is about to claim the scroll position
-                        // for its own screenshot target instead.
-                        #if DEBUG
-                        let hasUITestScrollTarget = ProcessInfo.processInfo.arguments.contains("-uitestScrollTimeline")
-                            || ProcessInfo.processInfo.arguments.contains("-uitestScrollToTag")
-                        #else
-                        let hasUITestScrollTarget = false
-                        #endif
-                        if !hasUITestScrollTarget, !hasAutoScrolledToToday {
-                            hasAutoScrolledToToday = true
-                            let today = DayDate.from(.now, calendar: .current)
-                            if today >= tripStartDay, today <= tripEndDay,
-                                let target = models.first(where: { $0.id >= today.stringValue }) {
-                                // Finding 4: always an instant jump, not an
-                                // animated one — a `withAnimation` slide
-                                // here used to yank content out from under a
-                                // user who'd already started reading Day 1
-                                // during the brief pre-jump flash. The
-                                // shorter sleep below (was 300ms) minimizes
-                                // that flash instead of animating over it.
-                                try? await Task.sleep(nanoseconds: 120_000_000)
-                                proxy.scrollTo("day-header-\(target.id)", anchor: .top)
+                        .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .itinerary)))
+                        .scrollDismissesKeyboard(.immediately)
+                        // UX audit finding 2: manual pull-to-refresh, matching
+                        // Home — previously the only way to recover from a
+                        // failed-while-online pull here was closing and
+                        // reopening the trip.
+                        .refreshable { await onRefresh?() }
+                        // UX audit finding 2: a quiet "jump to today" pill,
+                        // shown whenever today falls inside the trip's date
+                        // range — trade-off deliberately taken to show it
+                        // regardless of current scroll position (not just after
+                        // the user has scrolled away from today's section),
+                        // since tracking scroll offset just to hide it while
+                        // already there isn't justified for this pass; a
+                        // possible later refinement.
+                        .overlay(alignment: .bottomLeading) {
+                            if let todayTargetId {
+                                todayPill(proxy: proxy, targetId: todayTargetId)
+                                    .padding(.leading, Spacing.xl)
+                                    .padding(.bottom, Spacing.xxl)
                             }
                         }
-                        #if DEBUG
-                        // M2 verify-drill autopilot only (see
-                        // `WelcomeView`/`HomeView`/`TripView`'s matching
-                        // hooks) — scrolls to the first tz-shift chip
-                        // (anchored near the top) so a screenshot can show
-                        // it *and* the following day's staying strip in the
-                        // same frame, with no scroll-gesture automation
-                        // available in this environment.
-                        if ProcessInfo.processInfo.arguments.contains("-uitestScrollTimeline") {
-                            let firstChipId = models
-                                .flatMap(\.rows)
-                                .first { if case .tzShift = $0 { true } else { false } }?
-                                .id
-                            let target = firstChipId ?? models.dropFirst().first?.id
-                            if let target {
-                                try? await Task.sleep(nanoseconds: 300_000_000)
-                                // `.top` lands the row exactly under the
-                                // pinned section header, which can cover
-                                // it; centering keeps it (and the day
-                                // header, and the next day's staying
-                                // strip) all clear of that overlap.
-                                withAnimation { proxy.scrollTo(target, anchor: .center) }
+                        .task {
+                            // Finding F1: one-shot scroll to "today"'s section
+                            // on first appearance, skipped when a DEBUG uitest
+                            // drill below is about to claim the scroll position
+                            // for its own screenshot target instead. Tied to
+                            // the ScrollView's own identity (unaffected by the
+                            // surrounding TimelineView re-invoking this closure
+                            // every minute) so it still only ever runs once.
+                            #if DEBUG
+                            let hasUITestScrollTarget = ProcessInfo.processInfo.arguments.contains("-uitestScrollTimeline")
+                                || ProcessInfo.processInfo.arguments.contains("-uitestScrollToTag")
+                            #else
+                            let hasUITestScrollTarget = false
+                            #endif
+                            if !hasUITestScrollTarget, !hasAutoScrolledToToday {
+                                hasAutoScrolledToToday = true
+                                let today = DayDate.from(.now, calendar: .current)
+                                if today >= tripStartDay, today <= tripEndDay,
+                                    let target = liveModels.first(where: { $0.id >= today.stringValue }) {
+                                    // Finding 4: always an instant jump, not an
+                                    // animated one — a `withAnimation` slide
+                                    // here used to yank content out from under a
+                                    // user who'd already started reading Day 1
+                                    // during the brief pre-jump flash. The
+                                    // shorter sleep below (was 300ms) minimizes
+                                    // that flash instead of animating over it.
+                                    try? await Task.sleep(nanoseconds: 120_000_000)
+                                    proxy.scrollTo("day-header-\(target.id)", anchor: .top)
+                                }
                             }
-                        }
-                        // M4 verify drill: scrolls to the first card
-                        // carrying a kid-aware tag (BUILD_PLAN.md §5.4) —
-                        // same no-gesture-automation reasoning as
-                        // `-uitestScrollTimeline` above.
-                        if ProcessInfo.processInfo.arguments.contains("-uitestScrollToTag") {
-                            let target = models
-                                .flatMap(\.rows)
-                                .first {
-                                    if case .card(let model) = $0 { !model.tags.isEmpty } else { false }
-                                }?
-                                .id
-                            if let target {
-                                try? await Task.sleep(nanoseconds: 300_000_000)
-                                withAnimation { proxy.scrollTo(target, anchor: .center) }
+                            #if DEBUG
+                            // M2 verify-drill autopilot only (see
+                            // `WelcomeView`/`HomeView`/`TripView`'s matching
+                            // hooks) — scrolls to the first tz-shift chip
+                            // (anchored near the top) so a screenshot can show
+                            // it *and* the following day's staying strip in the
+                            // same frame, with no scroll-gesture automation
+                            // available in this environment.
+                            if ProcessInfo.processInfo.arguments.contains("-uitestScrollTimeline") {
+                                let firstChipId = liveModels
+                                    .flatMap(\.rows)
+                                    .first { if case .tzShift = $0 { true } else { false } }?
+                                    .id
+                                let target = firstChipId ?? liveModels.dropFirst().first?.id
+                                if let target {
+                                    try? await Task.sleep(nanoseconds: 300_000_000)
+                                    // `.top` lands the row exactly under the
+                                    // pinned section header, which can cover
+                                    // it; centering keeps it (and the day
+                                    // header, and the next day's staying
+                                    // strip) all clear of that overlap.
+                                    withAnimation { proxy.scrollTo(target, anchor: .center) }
+                                }
                             }
+                            // M4 verify drill: scrolls to the first card
+                            // carrying a kid-aware tag (BUILD_PLAN.md §5.4) —
+                            // same no-gesture-automation reasoning as
+                            // `-uitestScrollTimeline` above.
+                            if ProcessInfo.processInfo.arguments.contains("-uitestScrollToTag") {
+                                let target = liveModels
+                                    .flatMap(\.rows)
+                                    .first {
+                                        if case .card(let model) = $0 { !model.tags.isEmpty } else { false }
+                                    }?
+                                    .id
+                                if let target {
+                                    try? await Task.sleep(nanoseconds: 300_000_000)
+                                    withAnimation { proxy.scrollTo(target, anchor: .center) }
+                                }
+                            }
+                            #endif
                         }
-                        #endif
                     }
                 }
             }
@@ -305,6 +332,7 @@ struct ItineraryTabView: View {
         case .staying(let model): StayingStripRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .checkOut(let model): CheckOutRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .tzShift(let model): TZShiftChipRow(model: model, typeSize: dynamicTypeSize).equatable()
+        case .nowLine: NowLineRow(typeSize: dynamicTypeSize).equatable()
         }
     }
 
@@ -536,6 +564,13 @@ struct ItineraryTabView: View {
                     daySkeleton
                         .padding(.top, Spacing.xl)
 
+                    // W1-D (plan §D5): EmptyStateArt slots above the
+                    // settled-empty headline — decorative, fixed size,
+                    // accessibilityHidden internally; the headline right
+                    // below already carries the message. daySkeleton above
+                    // is untouched.
+                    EmptyStateArt(scene: .itinerary)
+
                     VStack(spacing: Spacing.xs) {
                         Text(canEdit ? "Add your first flight, stay, or plan" : "Nothing planned yet")
                             .font(Typo.display(Typo.Size.title))
@@ -632,14 +667,11 @@ struct ItineraryTabView: View {
     /// guidance sentence.
     private func filteredEmptyState(personName: String) -> some View {
         VStack(spacing: Spacing.xs) {
-            // Decorative empty-state art, deliberately fixed size (already
-            // hidden from VoiceOver below) — the guidance sentence right
-            // under it carries the message.
-            Image(systemName: "sparkles")
-                .font(.system(size: 28))
-                .foregroundStyle(Palette.amber)
+            // W1-D nit: same EmptyStateArt swap as the settled-empty block
+            // above (§D5) — art is already accessibilityHidden internally,
+            // the guidance sentence right under it carries the message.
+            EmptyStateArt(scene: .itinerary)
                 .padding(.bottom, Spacing.sm)
-                .accessibilityHidden(true)
             Text(filteredEmptyGuidance(personName: personName))
                 .font(Typo.body())
                 .foregroundStyle(Palette.slate)

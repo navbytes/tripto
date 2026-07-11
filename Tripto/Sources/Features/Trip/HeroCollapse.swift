@@ -105,6 +105,39 @@ extension View {
             )
         }
     }
+
+    /// Reports this hero's own `.global` frame into `model.destFrame` --
+    /// the flight overlay's convergence target
+    /// (PLAN-signature-layer.md §D1 point 3). Gated to only write while a
+    /// flight is actually in progress (`model.state != .idle`) so this
+    /// costs nothing the rest of the hero's lifetime, and filtered through
+    /// `HeroFlightGate.isPlausibleDestFrame` -- see that function's doc
+    /// comment for the transient pre-layout report it exists to reject.
+    /// Same iOS 17/18 dual `GeometryReader` recipe as
+    /// `heroScrollTracking(tab:model:)` above, and, like it, deliberately
+    /// not `PreferenceKey`-based -- see that extension's doc comment for
+    /// the root-caused propagation gap this sidesteps.
+    @ViewBuilder
+    func heroFrameReporting(model: HeroFlightModel) -> some View {
+        if #available(iOS 18, *) {
+            onGeometryChange(for: CGRect.self) { geo in
+                geo.frame(in: .global)
+            } action: { newValue in
+                guard model.state != .idle, HeroFlightGate.isPlausibleDestFrame(newValue) else { return }
+                model.destFrame = newValue
+            }
+        } else {
+            background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onChange(of: geo.frame(in: .global), initial: true) { _, frame in
+                            guard model.state != .idle, HeroFlightGate.isPlausibleDestFrame(frame) else { return }
+                            model.destFrame = frame
+                        }
+                }
+            )
+        }
+    }
 }
 
 /// Owns the per-tab scroll offsets that drive the hero's collapse. A
@@ -148,6 +181,12 @@ struct TripHeroView: View {
     let model: HeroScrollModel
 
     @Environment(\.dismiss) private var dismiss
+    /// PLAN-signature-layer.md §D1: reachable via `.environment` from
+    /// `HomeView`'s `NavigationStack` (an ancestor of every pushed
+    /// destination, `TripView` included) -- same mechanism
+    /// `AuthManager`/`SyncStatus` already rely on. Read/written only by
+    /// `heroFrameReporting(model:)` below.
+    @Environment(HeroFlightModel.self) private var heroFlight
 
     /// `metaRow`'s traveler-count icon, next to its own count text — see the
     /// shared `@ScaledMetric` recipe used throughout Features/Trip. The
@@ -332,6 +371,10 @@ struct TripHeroView: View {
                 .overlay(CoverGradient.textScrim)
                 .ignoresSafeArea(edges: .top)
         }
+        // PLAN-signature-layer.md §D1 point 3: the flight's convergence
+        // target. A no-op outside a flight (see the modifier's own doc
+        // comment).
+        .heroFrameReporting(model: heroFlight)
     }
 
     /// Finding 4 + 9b: two VoiceOver-distinct pieces instead of one run-on

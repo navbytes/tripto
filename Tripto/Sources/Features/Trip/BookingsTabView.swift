@@ -72,9 +72,26 @@ struct BookingsTabView: View {
         }
     }
 
+    /// W1-D evidence-capture only — forces the settled-empty branch so
+    /// `EmptyStateArt(scene: .bookings)` can be screenshotted for real.
+    /// `DemoSeeder`'s only seeded trip always has a confirmed item in most
+    /// categories, so `groups` is never actually empty, and this
+    /// environment has no touch-injection tool to build a fresh trip by
+    /// hand — same `-uitestX` launch-argument convention as
+    /// `HomeView`/`TripView`'s existing autopilot (chain: `-uitestAutoSignIn
+    /// -uitestSeedIfEmpty -uitestOpenFirstTrip -uitestOpenBookings
+    /// -uitestForceEmptyBookings`). Always `false` in Release.
+    private var isForcedEmptyForScreenshot: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-uitestForceEmptyBookings")
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         Group {
-            if groups.isEmpty {
+            if groups.isEmpty || isForcedEmptyForScreenshot {
                 emptyState
                     // See `ItineraryTabView`'s matching `.onAppear` for why
                     // an empty tab must explicitly reset its offset rather
@@ -150,12 +167,10 @@ struct BookingsTabView: View {
             } else if onAdd == nil && (isOffline || didLoadFail) {
                 unavailableState
             } else {
-                // Decorative empty-state art, deliberately fixed size — the
-                // sentence right below already carries the message.
-                Image(systemName: "ticket")
-                    .font(.system(size: 34))
-                    .foregroundStyle(Palette.slate)
-                    .accessibilityHidden(true)
+                // W1-D: EmptyStateArt replaces the old bare glyph here —
+                // decorative, fixed size, accessibilityHidden internally;
+                // the sentence right below already carries the message.
+                EmptyStateArt(scene: .bookings)
                 Text(
                     onAdd != nil
                         ? "Add a flight or stay with its confirmation code \u{2014} bookings collect here automatically."

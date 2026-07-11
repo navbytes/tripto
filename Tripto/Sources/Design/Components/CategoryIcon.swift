@@ -41,6 +41,13 @@ extension ItemCategory {
 /// The 38pt icon tile on timeline cards and booking rows.
 struct CategoryIconTile: View {
     let category: ItemCategory
+    /// D4 ("now" presence): past-row de-elevation — a neutral slate fill/
+    /// glyph instead of the category's own accent, so a past card reads as
+    /// "receded" without touching any text color (AA stays untouched by
+    /// construction). Defaults `false` so every other call site (bookings
+    /// list, booking detail, suggested-items sheet) renders exactly as
+    /// before.
+    var dimmed: Bool = false
     /// UX-audit residue (T1 report): `side` used to be a plain stored
     /// `CGFloat`, so every Features/Trip call site's tile — and its
     /// `side * 0.47` glyph — stayed pinned at its base point size while the
@@ -53,19 +60,20 @@ struct CategoryIconTile: View {
     /// Features/Trip does) is unchanged.
     @ScaledMetric private var side: CGFloat
 
-    init(category: ItemCategory, side: CGFloat = 38) {
+    init(category: ItemCategory, side: CGFloat = 38, dimmed: Bool = false) {
         self.category = category
+        self.dimmed = dimmed
         self._side = ScaledMetric(wrappedValue: side, relativeTo: .body)
     }
 
     var body: some View {
         RoundedRectangle(cornerRadius: side * 0.29, style: .continuous)
-            .fill(category.colorPair.soft)
+            .fill(dimmed ? Palette.mist : category.colorPair.soft)
             .frame(width: side, height: side)
             .overlay {
                 Image(systemName: category.symbolName)
                     .font(.system(size: side * 0.47, weight: .medium))
-                    .foregroundStyle(category.colorPair.fg)
+                    .foregroundStyle(dimmed ? Palette.slate : category.colorPair.fg)
             }
             .accessibilityLabel(category.displayName)
     }
@@ -75,13 +83,16 @@ struct CategoryIconTile: View {
 struct RailNode: View {
     let category: ItemCategory
     var diameter: CGFloat = 12
+    /// D4: see `CategoryIconTile.dimmed`'s doc comment — same past-row
+    /// treatment, same default-`false`/unchanged-elsewhere guarantee.
+    var dimmed: Bool = false
 
     var body: some View {
         Circle()
             .fill(Palette.elevated)
             .frame(width: diameter, height: diameter)
             .overlay {
-                Circle().stroke(category.colorPair.fg, lineWidth: 2.5)
+                Circle().stroke(dimmed ? Palette.slate : category.colorPair.fg, lineWidth: 2.5)
             }
     }
 }

@@ -19,6 +19,9 @@ struct HomeView: View {
     /// D2 defect 1: `header`'s AX-size restack, same `isAccessibilitySize`
     /// convention as `TripCard.swift`/`TripView.tabBar()`.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// PLAN-signature-layer.md §D1: gates the card -> hero flight (RM ->
+    /// plain push, same convention as everywhere else this app checks it).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var selectedTab = "Upcoming"
     /// Guards `chooseInitialTabIfNeeded()` to a one-time redirect (finding
@@ -60,6 +63,13 @@ struct HomeView: View {
     /// chevron from appearing: `List` only draws that accessory for a
     /// `NavigationLink`-shaped row, never for a plain `Button`.
     @State private var path = NavigationPath()
+    /// PLAN-signature-layer.md §D1: owns the card -> hero flight clone,
+    /// injected via `.environment` on the `NavigationStack` below so
+    /// `TripHeroView` can read/write it once pushed (see `HeroFlight.swift`'s
+    /// doc comment).
+    @State private var heroFlight = HeroFlightModel()
+    /// Per-card frames, read at tap time to seed a flight's source rect.
+    @State private var cardFrameIndex = CardFrameIndex()
 
     @ScaledMetric(relativeTo: .caption) private var valueRowIconSize: CGFloat = 13
 
@@ -262,6 +272,14 @@ struct HomeView: View {
                 Text(inviteErrorMessage ?? "")
             }
         }
+        // PLAN-signature-layer.md §D1: injects the flight model down into
+        // whatever gets pushed (`TripHeroView` reads it via `@Environment`),
+        // then draws the flight clone above the pushed content itself --
+        // both attached to the `NavigationStack`, not the outer `ZStack`
+        // sibling above it, so the overlay tracks whichever screen is
+        // currently on top of the stack.
+        .environment(heroFlight)
+        .overlay { HeroFlightOverlay(model: heroFlight) }
     }
 
     /// M2/M3 verify-drill autopilot (see `WelcomeView`'s matching hook) —
@@ -452,11 +470,42 @@ struct HomeView: View {
 
     // MARK: - List
 
+    /// Card tap -> trip screen (PLAN-signature-layer.md §D1). Flies the
+    /// tapped card's clone to the hero when motion/text-size allow and a
+    /// source frame was actually measured (`HeroFlightGate`); otherwise
+    /// falls back to exactly today's plain push. Deep-link/autopilot pushes
+    /// (`appRouter.tripToOpen`'s `.onChange`, `applyUITestAutopilotIfNeeded`)
+    /// call `path.append` directly and never go through here, so they stay
+    /// plain pushes unconditionally -- they don't originate from a visible
+    /// card to fly from.
+    private func openTrip(_ trip: Trip) {
+        // Ignore taps while a flight is already in flight.
+        guard heroFlight.state == .idle else { return }
+        let sourceFrame = cardFrameIndex.frames[trip.id]
+        guard HeroFlightGate.shouldFly(
+            reduceMotion: reduceMotion, isAccessibilitySize: dynamicTypeSize.isAccessibilitySize,
+            hasSourceFrame: sourceFrame != nil
+        ), let sourceFrame else {
+            path.append(TripRoute(id: trip.id))
+            return
+        }
+        heroFlight.destFrame = nil
+        heroFlight.state = .flying(
+            trip: trip, people: people(for: trip),
+            isPending: syncStatus.pendingRowIds.contains(trip.id), sourceFrame: sourceFrame
+        )
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            path.append(TripRoute(id: trip.id))
+        }
+    }
+
     private var tripList: some View {
         List {
             ForEach(visibleTrips) { trip in
                 Button {
-                    path.append(TripRoute(id: trip.id))
+                    openTrip(trip)
                 } label: {
                     TripCard(
                         trip: trip,
@@ -464,6 +513,10 @@ struct HomeView: View {
                         isPending: syncStatus.pendingRowIds.contains(trip.id)
                     )
                     .padding(.horizontal, Spacing.xl)
+                    // PLAN-signature-layer.md §D1: measures this exact
+                    // (padded) card rect -- what `openTrip` reads as the
+                    // flight's source frame.
+                    .cardFrameTracking(id: trip.id, index: cardFrameIndex)
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets())
@@ -522,14 +575,10 @@ struct HomeView: View {
         ScrollView {
             VStack(spacing: Spacing.lg) {
                 Spacer()
-                Image(systemName: "airplane.departure")
-                    // Decorative empty-state glyph — capped rather than
-                    // scaled: a big illustrative icon above a headline, not
-                    // text-adjacent, and growing it ~3x at AX5 would
-                    // dominate the screen more than help comprehension.
-                    .font(.system(size: 40))
-                    .foregroundStyle(Palette.amber)
-                    .accessibilityHidden(true)
+                // W1-D: EmptyStateArt replaces the old bare glyph here —
+                // decorative, fixed size, accessibilityHidden internally;
+                // the headline right below already carries the message.
+                EmptyStateArt(scene: .home)
                 VStack(spacing: Spacing.xs) {
                     Text("Plan your first trip")
                         .font(Typo.display(Typo.Size.title))

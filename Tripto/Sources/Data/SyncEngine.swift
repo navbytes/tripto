@@ -16,6 +16,13 @@ import SwiftData
 actor SyncEngine {
     let store: SyncStore
     let status: SyncStatus
+    /// PLAN-signature-layer.md §D6: the glanceable-surface pipeline (app
+    /// group snapshot -> widgets/Live Activity/Spotlight/intents). Exposed
+    /// so `TriptoApp` can call `notifyDataChanged()` on the
+    /// `scenePhase -> .background` hook and (W2-C) attach
+    /// `SnapshotWriter.onWrite` — see that type's doc comment for the full
+    /// hook set.
+    let snapshotWriter: SnapshotWriter
 
     /// DEBUG-only: `-simulateOffline` (M1 brief) pins `isOffline` and pauses
     /// both push and pull regardless of what `NWPathMonitor` reports — the
@@ -63,6 +70,7 @@ actor SyncEngine {
     init(modelContainer: ModelContainer, status: SyncStatus) {
         store = SyncStore(modelContainer: modelContainer)
         self.status = status
+        snapshotWriter = SnapshotWriter(store: store)
         forcedOffline = ProcessInfo.processInfo.arguments.contains("-simulateOffline")
 
         pathMonitor.pathUpdateHandler = { [weak self] path in
@@ -121,6 +129,14 @@ actor SyncEngine {
 
     // MARK: - Enqueue (SYNC_DESIGN.md "Local store" coalescing rules)
 
+    /// Tables a local mutation should trigger a debounced snapshot rebuild
+    /// for (PLAN-signature-layer.md §D6) — every other mirrored table
+    /// (packing, assignees, share links, invites, profiles) never appears
+    /// in `TripSnapshot`, so enqueuing against them would just be churn.
+    /// `enqueueDeleteItemAssignee` below always targets `.itemAssignees`
+    /// (never in this set), so it doesn't need this check at all.
+    private static let snapshotRelevantTables: Set<SyncTable> = [.trips, .itineraryItems]
+
     /// Records/coalesces a pending upsert and kicks the debounced push loop.
     /// Callers pass the row's own DTO — this is the "SwiftData write →
     /// SyncEngine.enqueue" half of the mutation flow; the SwiftData write
@@ -132,6 +148,9 @@ actor SyncEngine {
             try await store.enqueueUpsert(table: table, rowId: rowId, tripId: tripId, payloadJSON: json)
             await refreshStatusCounts()
             schedulePush()
+            if Self.snapshotRelevantTables.contains(table) {
+                await snapshotWriter.notifyDataChanged()
+            }
         } catch {
             logDebug("enqueueUpsert(\(table.rawValue)) failed: \(error)")
         }
@@ -142,6 +161,9 @@ actor SyncEngine {
             try await store.enqueueDelete(table: table, rowId: rowId, tripId: tripId)
             await refreshStatusCounts()
             schedulePush()
+            if Self.snapshotRelevantTables.contains(table) {
+                await snapshotWriter.notifyDataChanged()
+            }
         } catch {
             logDebug("enqueueDelete(\(table.rawValue)) failed: \(error)")
         }
@@ -187,6 +209,9 @@ actor SyncEngine {
         try? await store.wipeAll()
         await refreshStatusCounts()
         await status.resetInitialPullState()
+        // PLAN-signature-layer.md §D6: a widget/Live Activity/Spotlight
+        // result must never keep showing the previous account's trip.
+        await snapshotWriter.clear()
     }
 }
 
