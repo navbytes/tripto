@@ -93,6 +93,11 @@ targets:
           - CFBundleURLName: io.navbytes.tripto
             CFBundleURLSchemes:
               - tripto
+        # iPhone-only (TARGETED_DEVICE_FAMILY 1), portrait-by-design — every
+        # screen is a vertical layout. App Store validation (error 90474)
+        # rejects a bundle with no UISupportedInterfaceOrientations.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
     entitlements:
       # Written into the generated .entitlements so it survives `xcodegen
       # generate` (adding the capability via Xcode's UI would be wiped).
@@ -123,6 +128,13 @@ targets:
         PRODUCT_NAME: Tripto
         PRODUCT_BUNDLE_IDENTIFIER: io.navbytes.tripto
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # MUST be set at the TARGET level: XcodeGen's target setting-preset
+        # injects a default "1,2" that overrides project.settings.base's "1",
+        # so the app shipped as iPad-capable and App Store validation rejected
+        # it (90474 — iPad multitasking requires all 4 orientations). iPad is a
+        # post-v1 fast-follow (BUILD_PLAN §2) and the UI is portrait-only, so
+        # iPhone-only is correct and keeps the single-orientation design valid.
+        TARGETED_DEVICE_FAMILY: "1"
         # Owner's Apple Developer team — required for a signed archive and for
         # the Sign in with Apple entitlement's provisioning profile. Automatic
         # signing generates that profile (the App ID has SiwA enabled). Local
@@ -155,6 +167,9 @@ targets:
     info:
       path: TriptoWidgets/Generated/Info.plist
       properties:
+        # App Store validation (error 90360) requires the extension's
+        # Info.plist to carry a CFBundleDisplayName.
+        CFBundleDisplayName: Tripto
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         # Fraunces on widgets is the signature look (§D6) — `Typo`
