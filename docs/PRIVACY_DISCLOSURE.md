@@ -58,10 +58,31 @@ structured booking information. The provider is set by the `LLM_MODEL` env var
 - **Not for training:** OpenAI API data is not used to train or improve models
   (per OpenAI's data-usage terms). Reconfirm if the provider changes. On-device
   processing uses Apple's first-party model and is not used for training.
-- **No raw storage:** extracted booking details are stored; raw import text is
-  not.
+- **No long-term raw storage:** extracted booking details are stored; raw import text is not retained beyond extraction.
 - **Request logging disabled:** Cloudflare gateway logs are disabled for this
   endpoint (remote path only).
+
+### When email import is enabled: Does your app process forwarded emails?
+
+**YES, when email-import address is revealed.** User must explicitly consent
+to email processing before the import address is shown. Forwarded emails are
+sent to a **third-party LLM provider (currently OpenAI)** through **Cloudflare
+AI Gateway** (with logs disabled) for booking-extraction. The provider is set
+by the `LLM_MODEL` env var.
+
+**Email handling:**
+- **Consent-gated:** address reveal requires affirmative tap on a dialog
+  disclosing "third-party AI service," "Cloudflare gateway," "raw email kept
+  7 days, then deleted," and "codes stay private to trip members"
+  (ImportAddressCard.swift).
+- **Raw email retention:** raw_text and raw_html are purged via pg_cron after
+  6 days (≤7d guarantee); metadata (subject, timestamp, status) persists for
+  audit.
+- **Extracted data:** booking details (flight numbers, hotel names, dates,
+  confirmation codes parsed from raw text) are stored on the user's trip.
+- **Not for training:** OpenAI API terms apply; reconfirm if provider changes.
+- **Account deletion:** delete-account scrubs raw_text, raw_html, AND
+  parsed_json from email_imports rows (backend PR #7).
 
 ### Does your app engage in tracking across other apps or websites?
 
@@ -89,8 +110,8 @@ When completing App Store Connect's form:
   - Tracking: No.
 - ✅ "Third parties have access to user data"? **YES** (check).
   - Sub-processors: the LLM provider (currently OpenAI), Cloudflare (AI Gateway).
-  - Data type: User Content (booking text for import extraction only).
-  - Purpose: App Functionality (import feature).
+  - Data type: User Content (booking text for paste + email import extraction only).
+  - Purpose: App Functionality (import features). Email-import requires explicit consent before use.
 - ✅ "App tracks users across other apps/websites"? **NO** (uncheck).
 
 ---

@@ -5,8 +5,7 @@ current server-side privacy phase**. Owner-gated launch steps live in
 [RELEASE_READINESS.md](RELEASE_READINESS.md) — this file is the working
 backlog of things we chose to defer, not re-list.
 
-Last updated: 2026-07-11 (added §E trip import/export evaluation; after the
-server-side data-handling privacy audit).
+Last updated: 2026-07-12 (§A status updates: email-import worker built + audited, consent gate shipped, crons live; §E1 shipped).
 
 ---
 
@@ -15,47 +14,27 @@ server-side data-handling privacy audit).
 The inbound email-import feature (EI) is partially built and **not live** (MX
 not switched on). These belong together and should ship as a unit:
 
-- **A1 — Build the EI-3 Cloudflare Email Worker.** Inbound MIME parsing +
-  forwarding to the `ingest-email` edge function. Not built yet
-  (`backend/projects/tripto/functions/ingest-email/index.ts` notes this).
+- **A1 — Build the EI-3 Cloudflare Email Worker.** ✅ **SHIPPED (PR #19).** Inbound MIME parsing +
+  forwarding to the `ingest-email` edge function. Code complete, tested, security-audited (20s timeout + gitignore hardening landed).
 - **A2 — Enable the email-import pipeline** (MX / routing to
-  `plans.tripto.navbytes.io`). Feature-enablement, owner action.
-- **A3 — [WAS F2, privacy] Automated purge of raw import emails.**
-  `email_imports.raw_text/raw_html` hold raw booking emails (PII +
-  confirmation codes); the intended 7-day auto-delete is comment-only
-  (`migrations/20260709103528_tripto_email_import.sql:40-42`) — no cron
-  exists. **HARD prerequisite before email import serves real users.** Fix:
-  a `pg_cron` job nulling `raw_*` older than 7 days (pg_cron is on the free
-  tier). Deferred here (not this phase) because the table is empty until A2;
-  must land with A1/A2.
-- **A4 — Privacy-audit the EI-3 worker once built** (what headers/metadata
-  reach `ingest-email`; the shared-secret is the only auth today).
-- **A5 — Explicit AI-processing consent for email import** (Apple Guideline
-  5.1.2(i)). Paste-import now gates its AI send behind an explicit one-time
-  consent dialog; email import uses the same LLM gateway but is triggered by a
-  forwarded email, so there's no in-app send moment to gate. When email import
-  ships, obtain explicit permission at the point the user enables their import
-  email address (and disclose the AI processing there), or the forwarded
-  content is shared with the third-party AI without consent.
+  `plans.tripto.navbytes.io`). 🔑 **Owner action.** Prerequisites before go-live: ✅ retention crons live (PR #6 in backend, verified 2026-07-12); ⏳ worker deployed + `EMAIL_INGEST_SHARED_SECRET` set on both ingest-email (Supabase) and email Worker (wrangler); ⏳ DNS MX scoped to `plans.tripto.navbytes.io` only, catch-all rule → Worker.
+- **A3 — [WAS F2, privacy] Automated purge of raw import emails.** ✅ **LIVE (backend PR #6, deployed 2026-07-12).** `pg_cron` jobs active: `raw_text`/`raw_html`/`parsed_json` nulled >6 days (≤7d guarantee), `text_import_events` pruned >1d, `accounts.deleted_at` scrub includes `parsed_json`. Verified active in production cron.job. Account deletion (PR #7, deployed) now includes parsed_json sanitation.
+- **A4 — Privacy-audit the EI-3 worker once built.** ✅ **AUDITED (2026-07-12).** Worker MIME parsing, token/From/Subject/body extraction, shared-secret auth verified; no extraneous headers or metadata passed to edge function. No further security concerns identified.
+- **A5 — Explicit AI-processing consent for email import.** ✅ **SHIPPED (PR #20).** Apple Guideline 5.1.2(i) compliance: `ImportAddressCard` gates address reveal behind a consent dialog; users must tap "Continue" on the confirmation dialog (disclosing third-party AI, 7-day raw retention, code privacy) before the address is shown. Shared by `ItineraryTabView` and `ShareTripView`; one dialog, consistent copy. "Not now" leaves card in `.needsConsent` state, re-tappable.
 
 ## B. Cost / abuse hardening
 
-- **B1 — [F5] Rate-limit `ingest-text`.** The paste-import edge function has
-  no rate limit; each call hits the LLM (cost + abuse surface). `ingest-email`
-  already limits 20/hr/token; mirror it. Do before meaningful scale.
+- **B1 — [F5] Rate-limit `ingest-text`.** ✅ **SHIPPED (backend PR #5).** `ingest-text` edge function now rate-limited 20/hr/user, matching `ingest-email`. Cost + abuse surface hardened before meaningful scale.
 
 ## C. Ops & security hygiene (post-launch)
 
-- **C1 — Secrets rotation procedure** for `EMAIL_INGEST_SHARED_SECRET` and the
-  Cloudflare gateway / LLM keys (emergency revocation if a worker leaks). No
-  rotation schedule today.
+- **C1 — Secrets rotation procedure.** ✅ **DOCUMENTED (backend RUNBOOK.md, PR #8).** `EMAIL_INGEST_SHARED_SECRET` and Cloudflare gateway / LLM keys emergency revocation procedures captured. Rotation schedules and guardrails ready for ops handoff.
 - **C2 — Supabase auth advisors** (low relevance while Sign-in-with-Apple is
   the only method — no passwords, Apple provides 2FA): leaked-password
   protection and additional MFA options are OFF. Revisit only if password or
   other auth methods are ever added.
 - **C3 — Confirm the production LLM model actually works via Cloudflare AI
-  Gateway** (`openai/gpt-4.1-mini`); `anthropic/*` is known-broken there. A
-  live smoke test, not yet run.
+  Gateway.** ✅ **VERIFIED (2026-07-12).** Live smoke test passed: anon → trip → ingest-text 200 (1 flight + 3 packing items via CF AI Gateway/gpt-4.1-mini), delete-account 204 (zero residue). Production LLM routing confirmed working end-to-end.
 - **C4 — Make the UI tests hermetic (durable fix for the anon-sign-in
   coupling).** Today `TriptoUITests` call the real `signInAnonymously()` via
   `-uitestAutoSignIn`, so they only pass while backend anonymous sign-in is
@@ -83,13 +62,7 @@ The tz-correct, confirmation-code-stripped `EKEvent` building already exists
 per-item (`Models/CalendarEventDraft.swift` + `Features/Trip/BookingDetailView.swift`),
 which is what makes E1 cheap.
 
-- **E1 — Whole-trip Calendar export (near-term quick win).** Add the entire
-  itinerary to Calendar / emit one `.ics`, vs. today's per-booking "Add to
-  calendar". Mostly wiring already-tested code: loop items → `CalendarEventBuilder.draft(for:)`
-  → batch `EKEvent` add, or generate a single `.ics` to share. Client-only, no
-  backend, no opex. Highest value-per-effort of the four; the thing travelers
-  actually mean by "export". Reuse the notes-without-confirmation-code trust
-  boundary already in the draft builder.
+- **E1 — Whole-trip Calendar export.** ✅ **SHIPPED (PR #21).** Add entire itinerary to Calendar + .ics export via EKEvent batch. Client-only, zero-opex. Highest value-per-effort. Also fixed calendar-permission crash that occurred on devices without prior calendar access grant.
 - **E2 — "Duplicate trip" (retention hook).** Clone an existing trip as a
   template (re-run an annual trip): copy items with dates rebased, drop
   confirmation codes/bookings, keep the owner as sole member. This is the

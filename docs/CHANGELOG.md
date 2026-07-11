@@ -4,6 +4,15 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Email-import & calendar features (2026-07-12)
+
+#### Added
+- **Whole-trip calendar export:** "Add to Calendar" now exports the entire itinerary as a batch EKEvent operation, or as a shareable .ics file. Zero-opex, client-only, dates/times respect each item's local timezone.
+- **Email-import consent gate:** forwarded emails are now consent-gated — users must explicitly tap "Continue" on a disclosure dialog (third-party AI, Cloudflare gateway, 7-day raw retention, code privacy) before revealing their import address. Shared dialog consistent across ItineraryTabView and ShareTripView.
+
+#### Fixed
+- **Calendar-permission crash:** app no longer crashes on devices without prior calendar access grant when attempting calendar export. Permission request is graceful and recovery is user-controlled.
+
 ### On-device import processing (2026-07-12)
 
 #### Added
