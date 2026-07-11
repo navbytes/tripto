@@ -69,12 +69,25 @@ enum ImportContextBudget {
     /// assuming FEWER characters per token overestimates a given paste's
     /// token cost, so a borderline paste routes remote instead of risking
     /// a wasted on-device round trip.
-    static let charsPerToken = 3
+    ///
+    /// Review fix (CJK under-count): this used to divide `String.count`
+    /// (character count) directly, which is fine for English but wildly
+    /// wrong for CJK — Japanese/Chinese run closer to ~1 char/token, not
+    /// ~3-4, so a character budget let a long CJK paste look "under
+    /// budget," route on-device, and overflow `exceededContextWindowSize`
+    /// at runtime anyway (a full wasted round-trip before falling back to
+    /// remote). UTF-8 BYTE count fixes both scripts with the same
+    /// constant, no per-script branching: an ASCII char is 1 byte, so
+    /// "3 bytes/token" is the identical "~3 chars/token" English estimate
+    /// above; a CJK char is 3 UTF-8 bytes (U+0800–U+FFFF) and ~1 token,
+    /// which is ALSO ~3 bytes/token. One conservative divisor, correct
+    /// (or conservative) either way.
+    static let bytesPerToken = 3
 
-    static var maxPastedTextCharacters: Int { (totalTokens - reservedTokens) * charsPerToken }
+    static var maxPastedTextBytes: Int { (totalTokens - reservedTokens) * bytesPerToken }
 
     static func textFits(_ text: String) -> Bool {
-        text.count <= maxPastedTextCharacters
+        text.utf8.count <= maxPastedTextBytes
     }
 }
 

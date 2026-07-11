@@ -42,14 +42,40 @@ final class ImportExtractionTests: XCTestCase {
     // MARK: - Context-window pre-estimate
 
     func testTextAtOrUnderBudgetFits() {
-        let text = String(repeating: "a", count: ImportContextBudget.maxPastedTextCharacters)
+        // ASCII: 1 byte/char, so a byte budget behaves exactly like the old
+        // char budget here.
+        let text = String(repeating: "a", count: ImportContextBudget.maxPastedTextBytes)
         XCTAssertTrue(ImportContextBudget.textFits(text))
         XCTAssertTrue(ImportContextBudget.textFits(""))
     }
 
     func testTextOverBudgetDoesNotFit() {
-        let text = String(repeating: "a", count: ImportContextBudget.maxPastedTextCharacters + 1)
+        let text = String(repeating: "a", count: ImportContextBudget.maxPastedTextBytes + 1)
         XCTAssertFalse(ImportContextBudget.textFits(text))
+    }
+
+    /// Review fix (D2): a char-count budget wildly under-counts CJK scripts
+    /// (~1 char/token, not ~3-4) — this Japanese text is short enough it
+    /// would have "fit" under the OLD char-count budget (the same numeric
+    /// value `maxPastedTextBytes` has now, just re-interpreted as bytes),
+    /// but each of its characters is 3 UTF-8 bytes, so the fixed, byte-aware
+    /// budget correctly rejects it and routes remote instead of silently
+    /// overflowing on-device at runtime.
+    func testLongJapaneseTextUnderOldCharLimitRoutesRemote() {
+        let text = String(repeating: "\u{65C5}\u{884C}", count: 3000) // "旅行" (travel) x3000 = 6000 chars
+        XCTAssertLessThan(
+            text.count, ImportContextBudget.maxPastedTextBytes,
+            "sanity: this would have fit the old character-count budget"
+        )
+        XCTAssertGreaterThan(
+            text.utf8.count, ImportContextBudget.maxPastedTextBytes,
+            "sanity: CJK is ~3 bytes/char, so this blows the byte budget"
+        )
+        XCTAssertFalse(ImportContextBudget.textFits(text))
+        XCTAssertEqual(
+            ImportRouting.route(isOnDeviceAvailable: true, textFitsOnDevice: ImportContextBudget.textFits(text)),
+            .remote
+        )
     }
 
     // MARK: - mapItemToRow: valid items map with correct, category-scoped details keys
