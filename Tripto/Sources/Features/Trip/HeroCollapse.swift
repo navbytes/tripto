@@ -201,7 +201,8 @@ struct TripHeroView: View {
     /// makes the row taller than its text alone. 44 is only the sane
     /// first-frame fallback before the first measurement lands, chosen to
     /// match that pill's real height so the row is never clipped even on
-    /// frame one.
+    /// frame one. AX sizes never reach this path at all — see the
+    /// `.frame(minHeight:)` call in `body` this feeds.
     @State private var metaNaturalHeight: CGFloat = 44
 
     private var progress: Double {
@@ -210,7 +211,7 @@ struct TripHeroView: View {
 
     var body: some View {
         let p = progress
-        VStack(alignment: .leading, spacing: 0) {
+        let hero = VStack(alignment: .leading, spacing: 0) {
             HStack {
                 GlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
                     dismiss()
@@ -271,11 +272,7 @@ struct TripHeroView: View {
                     // Measuring after the clamp would instead report the
                     // already-clamped size, which would self-reinforce down
                     // to 0 rather than the row's real height.
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(key: HeroMetaHeightKey.self, value: geo.size.height)
-                        }
-                    )
+                    .background(measureMetaHeight)
                     .onPreferenceChange(HeroMetaHeightKey.self) { height in
                         // Only trust a measurement taken while the row is
                         // fully expanded/unclamped (`p == 0`) — otherwise
@@ -317,43 +314,45 @@ struct TripHeroView: View {
         // taller), so this stays compatible with the accessibility-size
         // handling above.
         .fixedSize(horizontal: false, vertical: true)
-        // Finding 2: `minHeight` (not a fixed `height`) so the hero grows
-        // instead of clipping when Dynamic Type scales the title/meta —
-        // the gradient background and scrim below are `.background`/
-        // `.overlay`, so they scale with it for free. The `150 - 54 * p`
-        // term is the scroll-collapse range added on top of that: fully
-        // expanded at `p == 0`, compact (96pt floor — clears the notch +
-        // 44pt button row) at `p == 1`.
-        //
-        // D2 defect 3: `alignment: .bottom` here (kept for the default/
-        // non-AX case — unaffected, verified pixel-identical) is what let
-        // the button row render on top of the status bar at accessibility
-        // sizes, on whichever tab is `TripView`'s *initial* `selectedTab`
-        // (Itinerary) specifically — live-instrumented via three nested
-        // `GeometryReader`s reading `.global` frames: this frame's own box
-        // consistently settles at the correct safe-area-respecting origin
-        // (confirmed identical on Itinerary vs Packing), but the button
-        // row's *measured* position landed ~48pt above that box's own top
-        // — almost exactly the gap between this view's first and second
-        // layout pass's differing ideal heights (`.fixedSize` re-resolving
-        // the AX-branch `metaRow`'s wrapped height once real width
-        // settles). `alignment: .bottom` computes a child's position from
-        // `frameHeight - contentHeight`, i.e. from *two* independently-
-        // resolving measurements; when they disagree across passes (as
-        // observed only on the tab mounted on the very first render, never
-        // on a tab reached by a later state change), the button row is
-        // placed as if inside a taller phantom box. `alignment: .top`
-        // places content directly from the box's own top edge — one
-        // measurement, not a difference of two — sidestepping the mismatch
-        // regardless of its deeper cause. Safe to scope to `isAccessibilitySize`
-        // only: `metaRow` never height-collapses there anyway (this file's
-        // "Finding 2" above), so content already meets or exceeds
-        // `minHeight` at every `p`, meaning there's rarely real slack for
-        // `.bottom` vs `.top` to visibly disagree over even when the bug
-        // isn't triggered — confirmed via the same instrumentation
-        // (screenshot + logged global frames) before/after on both the
-        // Itinerary and Packing tabs at AX5.
-        .frame(minHeight: 150 - 54 * p, alignment: dynamicTypeSize.isAccessibilitySize ? .top : .bottom)
+        Group {
+            // AX5 overlap fix, root cause (qa-evidence-s5 B /
+            // J-itinerary / J-home / J-bookingdetail; live-isolated on
+            // device with a bisected diagnostic build — colored placeholder
+            // blocks swapped in for the title/metaRow one at a time to
+            // strip out every red herring: not `NavigationLink`, not
+            // `GeometryReader`/`PreferenceKey` measurement, not `Group`/`if`
+            // branching, not the `Spacer` above): this `.frame(minHeight:)`
+            // itself is what corrupts `.fixedSize(vertical: true)`'s ideal-
+            // height probe above once total content exceeds the floor —
+            // confirmed by removing only this one modifier from an
+            // otherwise-untouched chain and watching previously-vanished
+            // content (up to two full sibling rows' worth) reappear, with
+            // the shortfall tracking almost exactly how much height the
+            // *other* siblings ahead of the cut content occupy. Root cause
+            // stops there (on-device bisection, not framework source); the
+            // fix doesn't need to go further, because — per finding 2 above
+            // and D2 defect 3's own note ("content already meets or exceeds
+            // `minHeight` at every `p`") — this floor is dead weight at AX
+            // sizes in the first place: `150 - 54 * p` tops out at 150,
+            // title+metaRow alone clear that by hundreds of points once
+            // Dynamic Type is scaled this far. Skipping the call outright
+            // for `isAccessibilitySize` removes the one modifier that was
+            // corrupting the probe without changing what it ever actually
+            // constrained. Non-AX (`else`) is untouched — same modifier,
+            // same value, same `.bottom` alignment as before.
+            if dynamicTypeSize.isAccessibilitySize {
+                hero
+            } else {
+                // Finding 2: `minHeight` (not a fixed `height`) so the hero
+                // grows instead of clipping when Dynamic Type scales the
+                // title/meta — the gradient background and scrim below are
+                // `.background`/`.overlay`, so they scale with it for free.
+                // The `150 - 54 * p` term is the scroll-collapse range added
+                // on top of that: fully expanded at `p == 0`, compact (96pt
+                // floor — clears the notch + 44pt button row) at `p == 1`.
+                hero.frame(minHeight: 150 - 54 * p, alignment: .bottom)
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             CoverGradient.from(key: trip.coverGradient)
@@ -381,55 +380,95 @@ struct TripHeroView: View {
     /// row of literal "·" fragments — dates/duration read as a single
     /// sentence, and the traveler count is a real tappable route (not just
     /// decorative text) to `ShareRoute`'s "who's coming" screen.
+    ///
+    /// AX5 overlap fix (qa-evidence-s5 B / J-itinerary / J-home): the
+    /// default single HStack below squeezes `dateDurationGroup` against
+    /// `travelerPill` — at accessibility sizes the date/duration string
+    /// alone is wider than the screen, forcing two separate `Text`s to
+    /// each independently decide where to wrap while sharing one HStack
+    /// row's width, the exact "two Texts negotiating a squeezed row" shape
+    /// `flightHeader`/`transportHeader` (BookingDetailView.swift) already
+    /// document giving up on in favor of a vertical stack. This alone
+    /// isn't the overlap's root cause (see the `.frame(minHeight:)` call
+    /// this feeds, in `body`, for that) but it's real, independent
+    /// fragility worth removing on its own terms: the AX branch here gives
+    /// the traveler pill its own row and folds the date/duration into one
+    /// plain `Text` (a single view wrapping on its own — not three views
+    /// negotiating shared width). Default rendering (the `else` branch) is
+    /// untouched.
     private var metaRow: some View {
-        HStack(spacing: Spacing.sm) {
-            HStack(spacing: Spacing.sm) {
-                Text(dateRangeText)
-                metaDot
-                Text("\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")")
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                "\(accessibleDateRangeText), \(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")"
-            )
-
-            metaDot
-
-            NavigationLink(value: ShareRoute(tripId: trip.id)) {
-                HStack(spacing: Spacing.xxs) {
-                    Image(systemName: "person.2.fill").font(.system(size: travelerIconSize))
-                    Text("\(max(tripProfileCount, 1))")
-                    // Finding 5: a small tappability cue for sighted users —
-                    // VoiceOver already gets the same signal from the
-                    // `.accessibilityHint` below, so this glyph adds nothing
-                    // there and is hidden from it.
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: travelerChevronSize))
-                        .accessibilityHidden(true)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text("\(dateRangeText) \u{00B7} \(durationText)")
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(accessibleDateRangeText), \(durationText)")
+                    travelerPill
                 }
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xxs)
-                .background(Palette.coverPillFill, in: Capsule())
-                // Finding 4: the visual capsule (a `.background`, so it
-                // doesn't grow with the frame) was rendering under 44pt
-                // wide — `minWidth` added alongside the existing
-                // `minHeight` so the hit target meets the 44pt floor on
-                // both axes; `.contentShape(Rectangle())` below already
-                // extends hit-testing to the enlarged frame, which only
-                // borders non-interactive text.
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+            } else {
+                HStack(spacing: Spacing.sm) {
+                    dateDurationGroup
+                    metaDot
+                    travelerPill
+                }
             }
-            .accessibilityLabel("\(max(tripProfileCount, 1)) traveler\(max(tripProfileCount, 1) == 1 ? "" : "s")")
-            .accessibilityHint("Manage people and invites")
         }
         .font(Typo.body(Typo.Size.caption))
         .foregroundStyle(.white.opacity(0.92))
     }
 
+    private var dateDurationGroup: some View {
+        HStack(spacing: Spacing.sm) {
+            Text(dateRangeText)
+            metaDot
+            Text(durationText)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(accessibleDateRangeText), \(durationText)")
+    }
+
+    private var travelerPill: some View {
+        NavigationLink(value: ShareRoute(tripId: trip.id)) {
+            HStack(spacing: Spacing.xxs) {
+                Image(systemName: "person.2.fill").font(.system(size: travelerIconSize))
+                Text("\(max(tripProfileCount, 1))")
+                // Finding 5: a small tappability cue for sighted users —
+                // VoiceOver already gets the same signal from the
+                // `.accessibilityHint` below, so this glyph adds nothing
+                // there and is hidden from it.
+                Image(systemName: "chevron.right")
+                    .font(.system(size: travelerChevronSize))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
+            .background(Palette.coverPillFill, in: Capsule())
+            // Finding 4: the visual capsule (a `.background`, so it
+            // doesn't grow with the frame) was rendering under 44pt
+            // wide — `minWidth` added alongside the existing
+            // `minHeight` so the hit target meets the 44pt floor on
+            // both axes; `.contentShape(Rectangle())` below already
+            // extends hit-testing to the enlarged frame, which only
+            // borders non-interactive text.
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("\(max(tripProfileCount, 1)) traveler\(max(tripProfileCount, 1) == 1 ? "" : "s")")
+        .accessibilityHint("Manage people and invites")
+    }
+
     private var metaDot: some View {
         Text("·").opacity(0.6)
             .accessibilityHidden(true)
+    }
+
+    /// Shared by both `metaRow` measurement sites in `body` — see
+    /// `metaNaturalHeight`'s doc comment for why `metaRow`'s real height is
+    /// measured rather than trusted from `.fixedSize`'s own probe.
+    private var measureMetaHeight: some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: HeroMetaHeightKey.self, value: geo.size.height)
+        }
     }
 
     /// Finding 5: delegates to `TripDateRangeFormat` so a trip outside the
@@ -444,5 +483,12 @@ struct TripHeroView: View {
     /// as literal fragments, not implied connectors (finding 9b).
     private var accessibleDateRangeText: String {
         TripDateRangeFormat.spokenText(start: trip.startDate, end: trip.endDate)
+    }
+
+    /// Shared by `dateDurationGroup` (default) and `metaRow`'s AX branch —
+    /// same string either way, just rendered via a plain `Text` at AX sizes
+    /// instead of split across an `HStack` (see `metaRow`'s doc comment).
+    private var durationText: String {
+        "\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")"
     }
 }

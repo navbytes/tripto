@@ -693,13 +693,27 @@ struct BookingDetailView: View {
         }
     }
 
+    /// Findings 1/2/6's "give up on side-by-side, go vertical" convention
+    /// (`flightHeader`/`transportHeader`/`actionRowLayout` above), applied
+    /// to the grid itself: two fixed `.flexible()` columns halve the row's
+    /// width for every label, and at AX5 a label like "Passenger" alone
+    /// needs more than half the card's width, truncating/overlapping into
+    /// its neighboring column (qa-evidence-s5
+    /// J-bookingdetail-ax5-{light,dark}-DEFECT.png — "PASSENGER"/"PASSENGE"
+    /// overlapping "SEAT", both appearances, so it's the fixed columns, not
+    /// a color-scheme-specific bug). One column at accessibility sizes
+    /// gives every label/value pair the card's full width; default
+    /// rendering (2 columns) is untouched.
+    private var stubGridColumns: [GridItem] {
+        dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.flexible(), alignment: .leading)]
+            : [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)]
+    }
+
     private func stubContent(for item: ItineraryItem, dashProgress: Double) -> some View {
         VStack(spacing: Spacing.lg) {
             dashedRule(progress: dashProgress)
-            LazyVGrid(
-                columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
-                spacing: Spacing.lg
-            ) {
+            LazyVGrid(columns: stubGridColumns, spacing: Spacing.lg) {
                 ForEach(gridCells(for: item), id: \.0) { cell in
                     gridCell(label: cell.0, value: cell.1)
                 }
