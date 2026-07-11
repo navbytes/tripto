@@ -31,6 +31,13 @@ final class ItineraryItem {
     /// Compact JSON text of the `details` jsonb column — see type doc comment.
     var detailsJSON: String
     var statusRaw: String
+    /// `itinerary_items.source` (`Models/Enums.swift`'s `ItemSource` doc
+    /// comment). Defaulted at both the property and the initializer —
+    /// mirrors `SyncIssue.retriable`'s doc comment — so adding this column
+    /// is a purely additive, lightweight-migration-safe change: an
+    /// already-installed app's existing local rows simply read "manual" on
+    /// next launch, the same value the server itself defaults absent one.
+    var sourceRaw: String = ItemSource.manual.rawValue
     /// Nullable since the F3 account-deletion migration
     /// (`ON DELETE SET NULL`): an item a since-departed user added to
     /// someone else's trip survives with `createdBy == nil` rather than
@@ -56,6 +63,7 @@ final class ItineraryItem {
         notes: String?,
         detailsJSON: String,
         statusRaw: String,
+        sourceRaw: String = ItemSource.manual.rawValue,
         createdBy: UUID?,
         createdAt: Date,
         updatedAt: Date,
@@ -75,6 +83,7 @@ final class ItineraryItem {
         self.notes = notes
         self.detailsJSON = detailsJSON
         self.statusRaw = statusRaw
+        self.sourceRaw = sourceRaw
         self.createdBy = createdBy
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -89,6 +98,11 @@ final class ItineraryItem {
     var status: ItemStatus {
         get { ItemStatus(rawValue: statusRaw) ?? .confirmed }
         set { statusRaw = newValue.rawValue }
+    }
+
+    var source: ItemSource {
+        get { ItemSource(rawValue: sourceRaw) ?? .manual }
+        set { sourceRaw = newValue.rawValue }
     }
 
     /// DBG-bookings: the single definition of "is this a booking," replacing
@@ -131,6 +145,12 @@ struct ItineraryItemDTO: Codable, Sendable, Equatable {
     var notes: String?
     var details: AnyJSON
     var status: String
+    /// `Models/Enums.swift`'s `ItemSource` doc comment. Defaulted so
+    /// existing call sites/fixtures that predate this column (built via the
+    /// plain memberwise init, not decoded off the wire) keep compiling
+    /// unchanged — real PostgREST rows always carry a value (`not null
+    /// default 'manual'`), so this default only ever matters for those.
+    var source: String = ItemSource.manual.rawValue
     var createdBy: UUID?
     var createdAt: Date
     var updatedAt: Date
@@ -154,6 +174,7 @@ extension ItineraryItem {
             notes: dto.notes,
             detailsJSON: dto.details.jsonText,
             statusRaw: dto.status,
+            sourceRaw: dto.source,
             createdBy: dto.createdBy,
             createdAt: dto.createdAt,
             updatedAt: dto.updatedAt,
@@ -175,6 +196,7 @@ extension ItineraryItem {
         notes = dto.notes
         detailsJSON = dto.details.jsonText
         statusRaw = dto.status
+        sourceRaw = dto.source
         createdBy = dto.createdBy
         createdAt = dto.createdAt
         updatedAt = dto.updatedAt
@@ -197,6 +219,7 @@ extension ItineraryItem {
             notes: notes,
             details: AnyJSON(jsonText: detailsJSON),
             status: statusRaw,
+            source: sourceRaw,
             createdBy: createdBy,
             createdAt: createdAt,
             updatedAt: updatedAt,

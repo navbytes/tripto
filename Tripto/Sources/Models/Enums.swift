@@ -41,6 +41,18 @@ enum ItemStatus: String, Codable, CaseIterable, Sendable {
     case confirmed
 }
 
+/// `itinerary_items.source` (backend migrations 20260709103528/
+/// 20260709164427 — `text not null default 'manual' check (...)`). Added
+/// for on-device/remote paste-import parity: a client-inserted suggested
+/// row now needs to carry the same provenance tag the server's own
+/// `ingest-text`/`ingest-email` inserts already stamp, so a pulled row
+/// round-trips the value it was created with instead of silently losing it.
+enum ItemSource: String, Codable, CaseIterable, Sendable {
+    case manual
+    case emailImport = "email_import"
+    case textImport = "text_import"
+}
+
 /// `packing_items.group_key` (BUILD_PLAN.md §3.3; named `group_key` not
 /// `group` — `group` is a reserved SQL keyword, RESEARCH_FINDINGS defect #3).
 enum PackingGroupKey: String, Codable, CaseIterable, Sendable {
