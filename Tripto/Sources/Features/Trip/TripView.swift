@@ -1,3 +1,4 @@
+import EventKit
 import SwiftData
 import SwiftUI
 
@@ -225,6 +226,72 @@ struct TripView: View {
         await syncEngine?.pullTrip(tripId)
     }
 
+    // MARK: - Add Trip to Calendar (E1, docs/BACKLOG.md §E1)
+
+    /// The whole-trip sibling of `BookingDetailView.addToCalendar` — same
+    /// "EventKit is the one place this screen leaves pure SwiftUI" seam,
+    /// looped over every confirmed item (`TripCalendarExport.eligibleItems`)
+    /// and made idempotent by stamping each `EKEvent.url` with
+    /// `TripCalendarExport.exportTagURL` and skipping (`shouldSkip`) an item
+    /// whose tag is already present in its own date window — E1's brief §3:
+    /// re-running the export must not duplicate. Needs *read* access to run
+    /// that duplicate search, unlike the per-item add, hence `.full` here
+    /// vs. `BookingDetailView`'s `.writeOnly` (`CalendarAccess`'s own doc
+    /// comment).
+    private func addTripToCalendar() {
+        let eligible = TripCalendarExport.eligibleItems(items)
+        guard !eligible.isEmpty else {
+            toast = "No confirmed items to add to calendar yet"
+            return
+        }
+        let store = EKEventStore()
+        Task {
+            do {
+                let granted = try await CalendarAccess.request(.full, store: store)
+                guard granted else {
+                    toast = CalendarAccess.deniedMessage
+                    return
+                }
+                var added = 0
+                var skipped = 0
+                for item in eligible {
+                    let draft = CalendarEventBuilder.draft(for: item)
+                    // ponytail: `predicateForEvents` traps if `end <= start`.
+                    // `AddItemSheet`'s own form validation makes that
+                    // unreachable through the app's UI today, so this is a
+                    // one-line insurance clamp on the *search* window, not a
+                    // rewrite of that validation — the created event below
+                    // still uses `draft.endDate` untouched.
+                    let searchEnd = max(draft.endDate, draft.startDate.addingTimeInterval(1))
+                    let predicate = store.predicateForEvents(withStart: draft.startDate, end: searchEnd, calendars: nil)
+                    let existingURLs = Set(store.events(matching: predicate).compactMap(\.url))
+                    if TripCalendarExport.shouldSkip(itemId: item.id, existingEventURLs: existingURLs) {
+                        skipped += 1
+                        continue
+                    }
+                    let event = EKEvent(eventStore: store)
+                    event.title = draft.title
+                    event.startDate = draft.startDate
+                    event.endDate = draft.endDate
+                    event.timeZone = draft.timeZone
+                    event.location = draft.locationName
+                    event.notes = draft.notes
+                    event.url = TripCalendarExport.exportTagURL(itemId: item.id)
+                    event.calendar = store.defaultCalendarForNewEvents
+                    do {
+                        try store.save(event, span: .thisEvent)
+                        added += 1
+                    } catch {
+                        // Section 4: a per-item failure doesn't abort the batch.
+                    }
+                }
+                toast = TripCalendarExport.Summary(added: added, skipped: skipped).message
+            } catch {
+                toast = "Couldn\u{2019}t save to Calendar. Try again in a moment."
+            }
+        }
+    }
+
     var body: some View {
         ZStack {
             Palette.paper.ignoresSafeArea()
@@ -340,6 +407,7 @@ struct TripView: View {
                 dynamicTypeSize: dynamicTypeSize,
                 canEditTrip: canEditTrip,
                 isEditingTrip: $isEditingTrip,
+                onAddToCalendar: addTripToCalendar,
                 model: heroScrollModel
             )
 
