@@ -49,15 +49,29 @@ enum TripCalendarExport {
 
     /// E1's brief §4's result toast — two shapes, verbatim, pluralized the
     /// same way `TripView`'s own "N item(s) added to review" toast already
-    /// does.
+    /// does. `failed` (review D2) defaults to 0 so both this initializer and
+    /// every pre-existing call site/test keep working unchanged.
     struct Summary: Equatable {
         var added: Int
         var skipped: Int
+        /// Review D2 (minor/honesty): per-item `store.save` failures used to
+        /// vanish silently — an all-fail run showed "Added 0 events" as if
+        /// nothing had gone wrong. Counted now; reflected in `message` below.
+        var failed: Int = 0
 
         var message: String {
-            skipped == 0
-                ? "Added \(added) event\(added == 1 ? "" : "s")"
-                : "Added \(added), skipped \(skipped) already there"
+            guard failed > 0 else {
+                return skipped == 0
+                    ? "Added \(added) event\(added == 1 ? "" : "s")"
+                    : "Added \(added), skipped \(skipped) already there"
+            }
+            guard added > 0 || skipped > 0 else {
+                return "Couldn\u{2019}t add events — check calendar access"
+            }
+            var parts = ["Added \(added)"]
+            if skipped > 0 { parts.append("skipped \(skipped) already there") }
+            parts.append("\(failed) failed")
+            return parts.joined(separator: ", ")
         }
     }
 }

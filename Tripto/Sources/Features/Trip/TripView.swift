@@ -291,6 +291,7 @@ struct TripView: View {
         let store = EKEventStore()
         var added = 0
         var skipped = 0
+        var failed = 0
         for candidate in candidates {
             let draft = candidate.draft
             // ponytail: `predicateForEvents` traps if `end <= start`.
@@ -319,10 +320,13 @@ struct TripView: View {
                 try store.save(event, span: .thisEvent)
                 added += 1
             } catch {
-                // Section 4: a per-item failure doesn't abort the batch.
+                // Review D2 (minor/honesty): counted instead of swallowed —
+                // Section 4 only said a per-item failure shouldn't abort the
+                // batch, not that it should be invisible in the toast.
+                failed += 1
             }
         }
-        return TripCalendarExport.Summary(added: added, skipped: skipped)
+        return TripCalendarExport.Summary(added: added, skipped: skipped, failed: failed)
     }
 
     var body: some View {

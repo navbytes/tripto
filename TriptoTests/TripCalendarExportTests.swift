@@ -77,4 +77,27 @@ final class TripCalendarExportTests: XCTestCase {
         // A full re-run once everything's already exported.
         XCTAssertEqual(TripCalendarExport.Summary(added: 0, skipped: 5).message, "Added 0, skipped 5 already there")
     }
+
+    // MARK: - Summary toast with failures (review D2: failures used to be invisible)
+
+    func testSummaryMessageReportsFailuresAlongsideAdded() {
+        XCTAssertEqual(TripCalendarExport.Summary(added: 2, skipped: 0, failed: 3).message, "Added 2, 3 failed")
+    }
+
+    func testSummaryMessageReportsFailuresAndSkipsTogether() {
+        XCTAssertEqual(
+            TripCalendarExport.Summary(added: 1, skipped: 2, failed: 3).message,
+            "Added 1, skipped 2 already there, 3 failed"
+        )
+    }
+
+    /// Nothing added, nothing skipped, everything failed — the case that
+    /// used to read "Added 0 events" as if the export had simply found no
+    /// work to do, when it had actually failed outright.
+    func testSummaryMessageWhenEveryItemFailsReadsAsAFailureNotAsSuccess() {
+        XCTAssertEqual(
+            TripCalendarExport.Summary(added: 0, skipped: 0, failed: 4).message,
+            "Couldn\u{2019}t add events — check calendar access"
+        )
+    }
 }
