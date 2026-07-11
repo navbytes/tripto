@@ -3,8 +3,11 @@ import Foundation
 /// Everything "Add to calendar" (BUILD_PLAN.md §4.4) needs to fill in an
 /// `EKEvent` — deliberately Foundation-only (no `import EventKit`) so this
 /// half is testable with no calendar permission and no `EKEventStore`
-/// involved; `Features/Trip/BookingDetailView.swift` is the only place that
-/// touches EventKit itself, mapping this draft onto a real event.
+/// involved. `Features/Trip/BookingDetailView.swift` (per item) and
+/// `Features/Trip/TripView.swift` (whole trip, E1 — docs/BACKLOG.md §E1)
+/// are the only places that touch EventKit itself, mapping this draft onto
+/// a real event; `Support/CalendarAccess.swift` is their shared permission
+/// seam.
 struct CalendarEventDraft: Equatable {
     var title: String
     var startDate: Date
