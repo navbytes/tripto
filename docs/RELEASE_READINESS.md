@@ -48,8 +48,10 @@ Last updated: 2026-07-11.
 
 - [ ] Create the app: name **Tripto**, bundle `io.navbytes.tripto`, primary
   language, **price Free**.
-- [ ] Paste the metadata (§6); upload the 6.9" screenshots (captured in
-  `/tmp/appstore-*.png` — reframe/caption as you like).
+- [ ] Paste the metadata (§6); upload the six 6.9" screenshots
+  (1320×2868 — home, itinerary/now-line, boarding pass, share, packing,
+  privacy), in `.claude/company/handoffs/appstore-shots/` (gitignored, so
+  local-only). Reframe/caption as you like. To regenerate: see §7.
 - [ ] Fill **App Privacy** (§5) — note the **Yes** to third-party access.
 - [ ] Confirm **`TriptoWidgets`** is listed under "Included Bundles" when you
   upload the archive.
@@ -135,3 +137,34 @@ privacy migrations applied to production; AI-gateway request logging disabled.
 
 Deferred to their own features (not blockers): the email-import lifecycle and
 its consent point, and other items in [`BACKLOG.md`](BACKLOG.md).
+
+---
+
+## 7. Regenerating the screenshots
+
+The six 6.9" shots are captured from a **Debug build + DemoSeeder**, driven by
+`-uitest*` launch args (no manual navigation), on an **iPhone 17 Pro Max**
+simulator (1320×2868). `-screenshotMode` hides the Home debug menu; the seed is
+deterministic and today-relative so the timeline's "Now" line lands in-trip.
+
+```sh
+# build once (own derivedDataPath — see CLAUDE.md gotcha)
+xcodebuild -scheme Tripto -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' \
+  -derivedDataPath /tmp/dd build
+UDID=$(xcrun simctl create AppStore-6.9 "iPhone 17 Pro Max"); xcrun simctl boot $UDID
+xcrun simctl status_bar $UDID override --time 9:41 --batteryState charged \
+  --batteryLevel 100 --cellularBars 4 --wifiBars 3 --dataNetwork wifi
+xcrun simctl install $UDID /tmp/dd/Build/Products/Debug-iphonesimulator/Tripto.app
+BASE="-screenshotMode -uitestAutoSignIn -uitestSeedIfEmpty -uitestSeedToday"
+# per screen: terminate, launch with the screen's arg(s), wait ~9s, screenshot
+#   home       : (BASE only)
+#   itinerary  : -uitestOpenFirstTrip
+#   boarding   : -uitestOpenFirstTrip -uitestOpenBookingDetail
+#   share      : -uitestOpenFirstTrip -uitestOpenShare
+#   packing    : -uitestOpenFirstTrip -uitestOpenPacking
+#   privacy    : -uitestOpenSettings, then tap the Privacy row (no deep-link)
+```
+
+First launch on a fresh sim can land on the springboard if the seed/auth race
+loses — relaunch and it seeds. The full `-uitest*` catalog is in the source
+(`grep -rhoE '"-uitest[A-Za-z]+"' Tripto/Sources`).
