@@ -124,6 +124,28 @@ enum DemoSeeder {
             tripId: tripId, userId: userId, now: now, meeraId: meeraProfile.id, grandmaId: grandmaProfile.id
         )
 
+        // -uitestSeedToday: shift the whole fixture forward by whole days so
+        // the JFK→LIS flight lands on the sim's *today* — the now-line,
+        // travel-day tear-off, and Live Activity are undemoable against the
+        // fixed May dates otherwise. Flat 86400s multiples are exact here:
+        // the fixture's zones (NY/Lisbon/Madrid) are all already on summer
+        // time in May, so no DST boundary is crossed by the shift. The
+        // hotel/stay detail strings inside `details` keep their May wording —
+        // cosmetic only, acceptable for demo evidence. Default seeding (DEBUG
+        // menu, existing drills) is unchanged.
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedToday") {
+            let fixtureStart = tripStartDay.asDate(calendar: deviceCalendar)
+            let todayStart = deviceCalendar.startOfDay(for: now)
+            let deltaDays = deviceCalendar.dateComponents([.day], from: fixtureStart, to: todayStart).day ?? 0
+            let delta = TimeInterval(deltaDays) * 86_400
+            trip.startDate = trip.startDate.addingTimeInterval(delta)
+            trip.endDate = trip.endDate.addingTimeInterval(delta)
+            for item in items {
+                item.startsAt = item.startsAt.addingTimeInterval(delta)
+                if let ends = item.endsAt { item.endsAt = ends.addingTimeInterval(delta) }
+            }
+        }
+
         modelContext.insert(trip)
         modelContext.insert(member) // local-only; never enqueued (see note above)
         modelContext.insert(meeraProfile)
