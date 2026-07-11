@@ -175,6 +175,83 @@ final class ImportExtractionTests: XCTestCase {
         XCTAssertNil(row.details.room)
     }
 
+    // MARK: - Details encode direction: a mapped row's `details.json` wire
+    // payload contains EXACTLY the expected snake_case keys and no others.
+    //
+    // The tests above assert the DECODE-adjacent Swift properties
+    // (`row.details.flightNo == "..."` / `XCTAssertNil(row.details.room)`),
+    // which already proves cross-category leakage doesn't happen at the
+    // Swift-struct level. This section instead inspects what
+    // `ItemDetails.json` (`ItineraryItem+Details.swift`) actually ENCODES
+    // to the `itinerary_items.details` jsonb blob — the direction that
+    // matters for what a pulled/synced row's wire payload really contains.
+    // `ItemDetails.json` only emits a key when its backing field is
+    // non-nil, so a stray field silently populated for the wrong category
+    // would show up here as an extra key, not just a value the decode-side
+    // tests above never happened to check.
+    //
+    // Two categories below carry one MORE key than the category groupings
+    // in `RawExtractedItem`'s field comments suggest at a glance: `.food`
+    // also writes the same shared `address` field `.activity` uses (both
+    // read `raw.address`), and `.transport` also writes `arrivalTz` (the
+    // drop-off zone, same field `.flight` uses for its arrival zone) — both
+    // confirmed directly from `ImportExtraction.mapItemToRow`'s switch.
+
+    private func detailsWireKeys(_ details: ItemDetails) -> Set<String> {
+        guard case .object(let object) = details.json else {
+            XCTFail("expected details.json to be a JSON object")
+            return []
+        }
+        return Set(object.keys)
+    }
+
+    func testFlightDetailsEncodeExactlyItsEightWireKeys() {
+        let raw = makeRawItem(
+            category: "flight", tz: "America/New_York",
+            airline: "TAP Air Portugal", flightNo: "TP1234", fromIATA: "JFK", toIATA: "LIS",
+            seat: "14A", terminal: "4", gate: "B12", arrivalTz: "Europe/Lisbon"
+        )
+        guard let row = ImportExtraction.mapItemToRow(raw) else { return XCTFail("expected a valid row") }
+        XCTAssertEqual(
+            detailsWireKeys(row.details),
+            ["airline", "flight_no", "from_iata", "to_iata", "seat", "terminal", "gate", "arrival_tz"]
+        )
+    }
+
+    func testHotelDetailsEncodeExactlyRoom() {
+        let raw = makeRawItem(category: "hotel", tz: "Europe/Lisbon", room: "Deluxe 502")
+        guard let row = ImportExtraction.mapItemToRow(raw) else { return XCTFail("expected a valid row") }
+        XCTAssertEqual(detailsWireKeys(row.details), ["room"])
+    }
+
+    func testActivityDetailsEncodeExactlyTicketRefAndAddress() {
+        let raw = makeRawItem(category: "activity", tz: "Asia/Tokyo", ticketRef: "A-99", address: "Okinawa")
+        guard let row = ImportExtraction.mapItemToRow(raw) else { return XCTFail("expected a valid row") }
+        XCTAssertEqual(detailsWireKeys(row.details), ["ticket_ref", "address"])
+    }
+
+    /// See this section's header comment: `.food` also writes the shared
+    /// `address` field, so its full wire key set is three keys.
+    func testFoodDetailsEncodeExactlyPartySizeReservationNameAndAddress() {
+        let raw = makeRawItem(
+            category: "food", tz: "Europe/Lisbon", partySize: 4, reservationName: "Silva", address: "Rua X 12"
+        )
+        guard let row = ImportExtraction.mapItemToRow(raw) else { return XCTFail("expected a valid row") }
+        XCTAssertEqual(detailsWireKeys(row.details), ["party_size", "reservation_name", "address"])
+    }
+
+    /// See this section's header comment: `.transport` also writes the
+    /// shared `arrival_tz` field (the drop-off zone), so its full wire key
+    /// set is three keys.
+    func testTransportDetailsEncodeExactlyProviderDropoffLocationAndArrivalTz() {
+        let raw = makeRawItem(
+            category: "transport", tz: "Europe/Lisbon", arrivalTz: "Europe/Lisbon",
+            provider: "Hertz", dropoffLocation: "Porto"
+        )
+        guard let row = ImportExtraction.mapItemToRow(raw) else { return XCTFail("expected a valid row") }
+        XCTAssertEqual(detailsWireKeys(row.details), ["provider", "dropoff_location", "arrival_tz"])
+    }
+
     // MARK: - mapItemToRow: rejection cases
 
     func testUnknownCategoryRejected() {
@@ -288,6 +365,86 @@ final class ImportExtractionTests: XCTestCase {
         XCTAssertNil(ImportDateParsing.parse("", fallbackTz: tz))
         XCTAssertNil(ImportDateParsing.parse("   ", fallbackTz: tz))
         XCTAssertNil(ImportDateParsing.parse("2026-07-14T09:00:00 approx", fallbackTz: tz))
+    }
+
+    // MARK: - DST edge cases for floating (no-offset) timestamps
+    //
+    // These are regression PINS on Foundation's actual `DateFormatter`
+    // behavior, not a claim that this is the "correct" way to resolve a
+    // DST-affected floating time — `ImportDateParsing` only ever hands the
+    // floating-format leg to a plain `DateFormatter` (no `Calendar`
+    // involved), so whatever that formatter happens to do IS the app's
+    // chosen semantics. Every expected value below was captured by running
+    // the exact same formatter setup via `xcrun swift` (a throwaway probe
+    // script, not hand arithmetic) — the coder's own verification note on
+    // this file's date-parsing logic ("I initially hand-computed two epoch
+    // values wrong — caught by running the formatter") applies just as much
+    // here.
+
+    /// 2026-03-08 is America/New_York's spring-forward day: clocks jump
+    /// 2:00am straight to 3:00am, so every local wall-clock time from
+    /// 02:00:00 through 02:59:59 that day never happens. Verified
+    /// empirically that `DateFormatter` REJECTS a nonexistent local time
+    /// outright (`date(from:)` returns `nil`) rather than snapping it to
+    /// either side of the gap — confirmed at the exact boundary (01:59
+    /// parses, 02:00-02:59 all fail, 03:00 parses again, and 01:59/03:00
+    /// are exactly 60 seconds apart in real time, i.e. the entire missing
+    /// hour truly vanishes). Because `ImportExtraction.mapItemToRow`
+    /// requires a parseable `startsAt`, a booking whose extracted start
+    /// time happens to land in this one-hour local gap is silently DROPPED
+    /// from the import — same "unparseable -> whole item skipped" path as
+    /// garbage text (`testUnparseableStartsAtRejected` above). Pinned so a
+    /// future Foundation/ICU behavior change, or a switch to
+    /// `Calendar`-based parsing, is caught rather than silently accepted.
+    func testFloatingSpringForwardNonexistentLocalTimeFailsToParseEntirely() {
+        let nyTz = TimeZone(identifier: "America/New_York")!
+        XCTAssertNil(
+            ImportDateParsing.parse("2026-03-08T02:30", fallbackTz: nyTz),
+            "02:00-02:59 doesn't exist in America/New_York on 2026-03-08 (spring-forward) — " +
+                "DateFormatter must reject it, not silently round to either side of the gap"
+        )
+        // Boundary confirmation: the gap is exactly this one hour, not a
+        // wider parsing failure.
+        XCTAssertEqual(
+            ImportDateParsing.parse("2026-03-08T01:59:00", fallbackTz: nyTz)?.timeIntervalSince1970, 1_772_953_140
+        )
+        XCTAssertEqual(
+            ImportDateParsing.parse("2026-03-08T03:00:00", fallbackTz: nyTz)?.timeIntervalSince1970, 1_772_953_200
+        )
+    }
+
+    /// 2026-11-01 is America/New_York's fall-back day: clocks drop 2:00am
+    /// back to 1:00am, so every local wall-clock time from 01:00:00 through
+    /// 01:59:59 happens TWICE (once in EDT, once an hour later in EST).
+    /// Verified empirically that `DateFormatter` resolves the ambiguous
+    /// hour to its SECOND, standard-time (EST, UTC-5) occurrence rather
+    /// than its first, daylight-time (EDT, UTC-4) one — pinned as the
+    /// actual chosen semantics, not asserted as the objectively "right"
+    /// choice between the two valid readings.
+    func testFloatingFallBackAmbiguousLocalTimeResolvesToSecondStandardTimeOccurrence() {
+        let nyTz = TimeZone(identifier: "America/New_York")!
+        guard let date = ImportDateParsing.parse("2026-11-01T01:30", fallbackTz: nyTz) else {
+            return XCTFail("the ambiguous hour must still parse (unlike the nonexistent spring-forward hour above), just to one specific instant")
+        }
+        XCTAssertEqual(date.timeIntervalSince1970, 1_793_514_600) // 2026-11-01T06:30:00Z
+        XCTAssertEqual(
+            nyTz.secondsFromGMT(for: date), -18_000,
+            "resolved using EST (UTC-5, standard time / the SECOND occurrence), not EDT (UTC-4, the first)"
+        )
+    }
+
+    /// Control case: an ordinary day with no DST transition in play round-
+    /// trips a floating time to the exact intended wall-clock instant,
+    /// contrasting the two edge cases above. Same fixture string
+    /// `testFloatingTimestampReadAsWallClockInFallbackZone` already checks
+    /// via decomposed wall-clock components; pinned here as the raw epoch
+    /// instead (America/New_York is on daylight time, EDT/UTC-4, in July).
+    func testFloatingNormalDayTimeRoundTripsToIntendedWallClockInstant() {
+        let nyTz = TimeZone(identifier: "America/New_York")!
+        XCTAssertEqual(
+            ImportDateParsing.parse("2026-07-14T09:00", fallbackTz: nyTz)?.timeIntervalSince1970,
+            1_784_034_000 // 2026-07-14T13:00:00Z == 09:00 EDT
+        )
     }
 
     // MARK: - Fixture
