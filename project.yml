@@ -15,7 +15,7 @@ settings:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1" # iPhone first (BUILD_PLAN.md §3.1, §9.2) — iPad/Mac are fast-follows, not v1.
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     # Xcode's "recommended settings" nudge, pinned here (not via the Xcode UI —
     # the .xcodeproj is generated & gitignored, so UI edits get wiped on the
     # next `xcodegen generate`). Sandboxes run-script build phases; a no-op
@@ -56,6 +56,12 @@ targets:
       # project.yml is the single source of truth, not this file.
       path: Tripto/Generated/Info.plist
       properties:
+        # Drive the version keys from build settings — xcodegen otherwise
+        # hardcodes CFBundleVersion "1", so bumping CURRENT_PROJECT_VERSION was
+        # a silent no-op (upload 409'd on a duplicate build number). Bump the
+        # build by editing CURRENT_PROJECT_VERSION in settings.base above.
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UIAppFonts:
           - Fraunces-Variable.ttf
           - SofiaSans-Variable.ttf
@@ -167,6 +173,9 @@ targets:
     info:
       path: TriptoWidgets/Generated/Info.plist
       properties:
+        # Match the app's version keys (same xcodegen-hardcode fix as above).
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # App Store validation (error 90360) requires the extension's
         # Info.plist to carry a CFBundleDisplayName.
         CFBundleDisplayName: Tripto
