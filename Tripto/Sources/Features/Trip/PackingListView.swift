@@ -148,9 +148,25 @@ struct PackingListView: View {
     private var visibleItems: [PackingItem] { hidePacked ? packingItems.filter { !$0.isDone } : packingItems }
     private var groups: [(key: PackingGroupKey, items: [PackingItem])] { PackingGrouping.groups(for: visibleItems) }
 
+    /// W1-D evidence-capture only — forces the settled-empty branch so
+    /// `EmptyStateArt(scene: .packing)` can be screenshotted for real.
+    /// `DemoSeeder`'s only seeded trip always has 12 packing items, and this
+    /// environment has no touch-injection tool to build a fresh trip by
+    /// hand — same `-uitestX` launch-argument convention as
+    /// `HomeView`/`TripView`'s existing autopilot (chain: `-uitestAutoSignIn
+    /// -uitestSeedIfEmpty -uitestOpenFirstTrip -uitestOpenPacking
+    /// -uitestForceEmptyPacking`). Always `false` in Release.
+    private var isForcedEmptyForScreenshot: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-uitestForceEmptyPacking")
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         Group {
-            if packingItems.isEmpty {
+            if packingItems.isEmpty || isForcedEmptyForScreenshot {
                 emptyState
                     // See `ItineraryTabView`'s matching `.onAppear` for why
                     // an empty tab must explicitly reset its offset rather
@@ -170,7 +186,12 @@ struct PackingListView: View {
         // hides the nav bar for its gradient hero — so the add affordance is an
         // in-content FAB matching the itinerary tab, not a nav-bar button.
         .overlay(alignment: .bottomTrailing) {
-            if canManage && !packingItems.isEmpty {
+            // `isForcedEmptyForScreenshot` excluded too — otherwise the
+            // screenshot drill would show this floating FAB doubled up
+            // alongside `emptyState`'s own CTA, which never happens in a
+            // real empty state (there `packingItems.isEmpty` already gates
+            // both).
+            if canManage && !packingItems.isEmpty && !isForcedEmptyForScreenshot {
                 Fab(action: { isPresentingAdd = true }, accessibilityLabel: "Add a packing item")
                     .padding(.trailing, Spacing.xl)
                     .padding(.bottom, Spacing.xxl)
@@ -434,13 +455,10 @@ struct PackingListView: View {
                 // correct either way).
                 unavailableState
             } else {
-                // Decorative empty-state art, deliberately fixed size (no
-                // adjacent inline text to track, nothing clips) — the
-                // headline right below already carries the message.
-                Image(systemName: "bag.badge.plus")
-                    .font(.system(size: 36))
-                    .foregroundStyle(Palette.slate)
-                    .accessibilityHidden(true)
+                // W1-D: EmptyStateArt replaces the old bare glyph here —
+                // decorative, fixed size, accessibilityHidden internally;
+                // the headline right below already carries the message.
+                EmptyStateArt(scene: .packing)
                 VStack(spacing: Spacing.xs) {
                     Text("Start the family packing list")
                         .font(Typo.display(Typo.Size.title))
