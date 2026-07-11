@@ -32,7 +32,19 @@ enum TZShiftChip {
         else { return nil }
 
         let time = ItineraryTimeZone.timeString(endsAt, in: arrivalTz)
-        let city = ItineraryTimeZone.citySegment(of: arrivalTz.identifier)
+        // The arrival PLACE is the flight's destination airport, not the
+        // arrival timezone's namesake city: Okinawa (OKA) is on Asia/Tokyo
+        // but is not Tokyo, Boston (BOS) is on America/New_York but is not
+        // New York. Resolve the airport to its real city; an airport outside
+        // the hub list falls back to its own IATA code (matches the flight
+        // card's "HKG → OKA"); only a flight carrying no destination code at
+        // all falls back to the arrival zone's city segment.
+        let city: String
+        if let code = flight.details.toIATA?.trimmingCharacters(in: .whitespaces), !code.isEmpty {
+            city = AirportTimeZones.cityName(for: code) ?? code
+        } else {
+            city = ItineraryTimeZone.citySegment(of: arrivalTz.identifier)
+        }
         let diff = offsetDifferenceInHours(from: flight.primaryTz, to: arrivalTz, at: endsAt)
         let direction = diff >= 0 ? "jump ahead" : "go back"
         return "Lands \(time) in \(city) — clocks \(direction) \(formatHours(abs(diff)))h"
