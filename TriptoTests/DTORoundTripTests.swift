@@ -67,6 +67,7 @@ final class DTORoundTripTests: XCTestCase {
           "notes": null,
           "details": {"airline": "TAP", "flight_no": "TP1234"},
           "status": "confirmed",
+          "source": "manual",
           "created_by": "\(createdBy.uuidString)",
           "created_at": "2026-07-08T12:34:56.789+00:00",
           "updated_at": "2026-07-08T12:34:56.789+00:00",
@@ -123,6 +124,7 @@ final class DTORoundTripTests: XCTestCase {
           "notes": null,
           "details": {},
           "status": "confirmed",
+          "source": "manual",
           "created_by": null,
           "created_at": "2026-07-08T12:34:56.789+00:00",
           "updated_at": "2026-07-08T12:34:56.789+00:00",
@@ -145,5 +147,54 @@ final class DTORoundTripTests: XCTestCase {
         )
         // The organizer's "edit anything" path is unaffected by the nil creator.
         XCTAssertTrue(ItemPermissions.canEdit(item: model, role: .organizer, userId: someCompanion))
+    }
+
+    /// P2 (on-device paste-import): the two tests above only ever exercise
+    /// `source: "manual"` — the same value `sourceRaw`/`source` default to
+    /// — so a wiring bug that silently dropped the field on either side of
+    /// `init(dto:)`/`apply(_:)`/`toDTO()` (e.g. forgetting to pass
+    /// `sourceRaw: dto.source`) would go undetected by them. This pins the
+    /// non-default value the on-device path actually writes, round-tripped
+    /// through DTO -> model -> DTO, the same wire mechanism `PasteImportSheet
+    /// .insertValidatedItineraryItems` pushes through the sync outbox.
+    func testItineraryItemDTORoundTripsNonDefaultSource() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "category": "flight",
+          "title": "TAP TP1234",
+          "starts_at": "2026-05-14T12:20:00.000+00:00",
+          "ends_at": null,
+          "tz": "America/New_York",
+          "location_name": "",
+          "location_lat": null,
+          "location_lng": null,
+          "confirmation": null,
+          "notes": null,
+          "details": {},
+          "status": "suggested",
+          "source": "text_import",
+          "created_by": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_by": null
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ItineraryItemDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.source, "text_import")
+
+        let model = ItineraryItem(dto: dto)
+        XCTAssertEqual(model.source, .textImport)
+        XCTAssertEqual(model.sourceRaw, "text_import")
+
+        XCTAssertEqual(model.toDTO(), dto)
+
+        let reencoded = try JSONCoding.encoder.encode(dto)
+        let redecoded = try JSONCoding.decoder.decode(ItineraryItemDTO.self, from: reencoded)
+        XCTAssertEqual(redecoded.source, "text_import")
     }
 }

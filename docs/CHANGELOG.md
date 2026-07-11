@@ -4,6 +4,15 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### On-device import processing (2026-07-12)
+
+#### Added
+- **Paste-import extraction runs on-device** on iOS 26+ with Apple Intelligence enabled (using Apple's built-in language model), keeping pasted text on the device and eliminating the privacy consent dialog for that path.
+- **Rate limit messaging:** remote import path now enforces a 20/hr/user limit with a friendly, recoverable message ("try again in an hour").
+
+#### Changed
+- **AI consent dialog** appears only when remote import path is used (on-device path requires no consent).
+
 ### Signature interactions & platform features (2026-07-11)
 
 #### Added

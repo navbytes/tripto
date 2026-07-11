@@ -39,20 +39,29 @@ form.)
 
 ### Does your app use third-party services or sub-processors for any of the data above?
 
-**YES, for the import feature only.** When a user chooses to import trip details
-via paste or email:
+**YES, for the remote import path only.** When a user chooses to import trip
+details via paste:
 
-- Booking text (including confirmation codes and personal names) is sent to a
-  **third-party LLM provider (currently OpenAI)** through **Cloudflare AI
-  Gateway** to extract structured booking information. The provider is set by
-  the `LLM_MODEL` env var — if you switch providers, update this disclosure.
+**On supported iPhones (iOS 26+ with Apple Intelligence enabled):** import
+extraction runs entirely on the device using Apple's built-in language model.
+Pasted text never leaves the iPhone, is not sent to any third party, and is
+not stored anywhere after extraction.
+
+**On other devices or if on-device processing is unavailable:** booking text
+(including confirmation codes and personal names) is sent to a **third-party
+LLM provider (currently OpenAI)** through **Cloudflare AI Gateway** to extract
+structured booking information. The provider is set by the `LLM_MODEL` env var
+— if you switch providers, update this disclosure.
+
+**Both paths:**
 - **Not automatic:** user must explicitly tap "Import."
 - **Not for training:** OpenAI API data is not used to train or improve models
-  (per OpenAI's data-usage terms). Reconfirm if the provider changes.
+  (per OpenAI's data-usage terms). Reconfirm if the provider changes. On-device
+  processing uses Apple's first-party model and is not used for training.
 - **No raw storage:** extracted booking details are stored; raw import text is
   not.
 - **Request logging disabled:** Cloudflare gateway logs are disabled for this
-  endpoint.
+  endpoint (remote path only).
 
 ### Does your app engage in tracking across other apps or websites?
 
@@ -88,12 +97,16 @@ When completing App Store Connect's form:
 
 ## In-App Disclosure
 
-The import feature displays a one-line notice at the paste point:
+The import feature displays context-dependent notices at the paste point:
 
+**On supported iPhones with Apple Intelligence enabled:**
+> _"Processed on this iPhone — text never leaves your device."_
+
+**On other devices or if on-device processing is unavailable:**
 > _"Pasted text is sent to an AI service to find your bookings — codes and notes aren't retained beyond that."_
 
-(An expanded version in settings or a help screen can point to the full privacy
-policy.)
+(An expanded version in settings, shown to all users, covers both paths and
+can point to the full privacy policy.)
 
 ---
 

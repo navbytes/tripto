@@ -499,7 +499,13 @@ struct TripView: View {
                         )
                     }
                     toast = "\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list"
-                }
+                },
+                // On-device route (PLAN.md): the sheet inserts suggested
+                // itinerary rows itself, through the same SwiftData +
+                // outbox path `AddItemSheet` uses above — same
+                // signed-out-local-creator fallback as `onPackingConfirmed`
+                // just above needs for the exact same reason.
+                tripCreatedBy: trip.createdBy
             )
         }
         .sheet(isPresented: $isPresentingImportReview) {

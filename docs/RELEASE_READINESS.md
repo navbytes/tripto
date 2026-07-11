@@ -45,6 +45,12 @@ Review rejects (ITMS-90111) — reasoning + recipe in
   token revoke fires (the `.p8` secret is set). _(verified on real device, 2026-07-11)_
 - [ ] **Airplane-mode round-trip** (recommended, not a blocker) — edit offline,
   reconnect, confirm it reconciles and shows "edited by X".
+- [ ] **TestFlight upgrade from Build 4** — install the next build directly
+  over Build 4 on a real device (not a fresh install) and confirm existing
+  trips/items survive the SwiftData lightweight migration (new `sourceRaw`
+  attribute on `ItineraryItem`, added for on-device import). Recovery if
+  ever needed: delete + reinstall — the local store is just a mirror, the
+  backend re-syncs it.
 
 ## 4. App Store Connect — SUBMITTED (Waiting for Review)
 
