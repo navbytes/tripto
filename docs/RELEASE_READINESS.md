@@ -4,7 +4,7 @@ Living checklist to take Tripto from "feature-complete" to "submitted." Status
 keys: ✅ done · 🔄 in progress · ⏳ queued (I can do it) · 🔑 **owner-only**
 (needs your Apple account / credentials — I cannot do these autonomously).
 
-Last updated: 2026-07-08.
+Last updated: 2026-07-11 (award signature layer shipped).
 
 ---
 
@@ -25,16 +25,35 @@ that 500 can't hit us; a real device sign-in confirms it.
 
 ---
 
-## 0.5 Where we are (2026-07-08 evening) — and your exact next steps
+## 0.4 New surfaces added (2026-07-11)
+
+The app now ships three new capabilities requiring App Store Connect setup:
+
+1. **Widget extension** (next-trip + today-plan widgets, Live Activity): requires **App Group entitlement** registered on your Apple Developer account + provisioning profile rebuild. The app target now includes the `io.navbytes.tripto.widgets` bundle; see §0.7 for the provisioning details.
+2. **Live Activity** (travel-day countdown on lock screen / Dynamic Island): requires `NSSupportsLiveActivities = true` in the app's Info.plist (already set).
+3. **App Intents** (Siri "next trip" shortcut): pre-launch discoverable from compiled metadata; no registration step needed.
+
+**App Group security model:** `snapshot.json` in the shared container carries sanitized trip/item data only (no confirmation codes, notes, emails, or coordinates). The SwiftData store remains app-sandbox-only. On sign-out, `SnapshotWriter.clear()` deletes the snapshot, reloads widget timelines, wipes the Spotlight index, and ends any running Live Activity — so no surface retains the previous account's trip. (The security audit's one low-severity finding, that Live Activities weren't ended at sign-out, was fixed before merge.)
+
+---
+
+## 0.5 Where we are (2026-07-11 evening) — and your exact next steps
 
 **Done autonomously — nothing needed from you:**
-- Whole app **M0–M5**, committed, **187 tests**. Release-hardened: app icon,
-  branded launch screen, version 1.0.0, anon-auth compiled out of Release,
-  **Release build verified clean**.
-- **Post-audit hardening (2026-07-09):** a pre-submission completeness audit
-  surfaced two fixes — permanently-failed syncs are now shown to the user (a
-  rose "couldn't save" banner with retry/dismiss; they were silently dropped
-  before) and flights now validate arrival-after-departure. Both TDD, reviewed.
+- Whole app **M0–M6**, committed, **411 unit + 6 UI tests** (0 failures).
+  Release-hardened: app icon
+  (light + dark variant, script-generated), branded launch screen, version 1.0.0,
+  anon-auth compiled out of Release, **Release build verified clean**.
+- **M6 wave 1 + wave 2** (award signature layer): hero flight, physical boarding
+  pass (tilt + tear-off), timeline now-line, motion + haptics vocabulary, empty-state
+  art, WidgetKit (2 widgets), Live Activity + Dynamic Island (zero-push countdown),
+  App Intents (Siri shortcut), Core Spotlight indexing, programmatic app icon,
+  **bookings definition fix** (unified `isBooking` predicate). All surfaces pass AX
+  bar (Reduce Motion, Dynamic Type, VoiceOver, AA contrast). **Security audit clean**
+  (data minimization verified field-by-field; its one low-severity finding — Live
+  Activities not ended at sign-out — fixed before merge).
+- **Post-audit hardening (2026-07-09):** permanently-failed syncs shown to user,
+  flights validate arrival-after-departure.
 - Backend live: schema + RLS + RPCs; **Sign in with Apple provider enabled +
   verified**; the fix I flagged is present (GoTrue v2.192.0).
 - Web (all live): share page, **privacy policy**, **root landing page**
@@ -75,20 +94,21 @@ that 500 can't hit us; a real device sign-in confirms it.
 | M3a no-app share web page (live at tripto.navbytes.io) | ✅ deployed |
 | M3b in-app collaboration, invites, roles, account deletion | ✅ committed |
 | M4 family layer (profiles, "Just mine", packing) | ⏳ |
-| M5 offline hardening + a11y + perf pass | ✅ committed (main loop; see §9) |
+| M5 offline hardening + a11y + perf pass | ✅ committed |
+| **M6 signature interactions + platform layer (widgets/Live Activity/Intents/Spotlight)** | ✅ **shipped 2026-07-11** |
 
 ## 2. Submission apparatus
 
 | Item | Status | Notes |
 |---|---|---|
-| App icon (1024, no alpha) | ✅ | wired (`ASSETCATALOG_COMPILER_APPICON_NAME`); compiles into Release build |
+| App icon (1024, no alpha) | ✅ | **script-generated + dark variant** (gen_appicon.swift); both wired in Contents.json; compiles into Release build. Human designer pass recommended pre-submission. |
 | Launch screen (branded) | ✅ | `LaunchBackground` colorset (paper/ink), no white flash — Apple-idiomatic (no splash imagery) |
-| Privacy manifest `PrivacyInfo.xcprivacy` | ✅ | UserDefaults CA92.1; tracking=false; collected types declared. §4 |
+| Privacy manifest `PrivacyInfo.xcprivacy` | ✅ | UserDefaults CA92.1; tracking=false; collected types declared. §4 — **snapshot data minimization verified** (no codes/notes/emails/coordinates in platform surfaces). |
 | Hosted privacy policy | ✅ | **live at https://tripto.navbytes.io/privacy** (Worker /privacy route) |
 | App Privacy "nutrition labels" | ⏳ draft | §4 — fillable copy ready for App Store Connect |
 | Release-build hygiene (DEBUG gating) | ✅ | all test surfaces `#if DEBUG`; anon-auth compiled out of Release; **Release config builds clean** (verified). One pre-submission flip left: disable backend anon sign-ins once testing's done. §3 |
 | Encryption compliance | ✅ | `ITSAppUsesNonExemptEncryption = false` (standard TLS only) |
-| Permission usage strings | ◑ | Calendar ✅ (`NSCalendarsUsageDescription`); no location/photos/contacts prompts (MKLocalSearchCompleter needs none) |
+| Permission usage strings | ✅ | Calendar ✅ (`NSCalendarsUsageDescription`); no location/photos/contacts prompts (MKLocalSearchCompleter needs none) |
 | Account deletion (5.1.1(v)) | ✅ | `delete-account` edge fn (revoke-then-delete) deployed + **verified end-to-end**; app wired. Apple `/auth/revoke` awaits device + `.p8` |
 | Sign in with Apple entitlement + provider | ✅ app / 🔑 device | entitlement in project.yml; Supabase provider enabled + verified (GoTrue v2.192.0). Remaining: device sign-in test |
 | Screenshots (6.9") | ✅ | 1320×2868 set captured (timeline, boarding pass, share) in /tmp/appstore-*.png + milestone captures; owner may reframe/caption |
@@ -194,24 +214,32 @@ provider — deferred until then so it doesn't collide with in-flight work.
 
 1. ✅ ~~Enroll in the Apple Developer Program~~ — done (textnav@outlook.com).
 2. **App ID**: create/confirm `io.navbytes.tripto` with the **Sign in with
-   Apple** capability enabled.
-3. **Sign in with Apple key**: create a Key (.p8) with SiwA enabled; note the
+   Apple** capability enabled + **App Groups** capability for `group.io.navbytes.tripto`.
+3. **Provisioning profile**: regenerate the automatic provisioning profile for
+   the app ID after enabling App Groups (Xcode or Developer console). Both the
+   main app and the `io.navbytes.tripto.widgets` extension target must have the
+   App Group entitlement.
+4. **Sign in with Apple key**: create a Key (.p8) with SiwA enabled; note the
    **Key ID** and your **Team ID**. Send me the Key ID + Team ID (NOT the .p8
    contents in plaintext here — you'll add the .p8 as a Supabase secret / GitHub
    secret yourself). Needed for token revocation (§5) and the Supabase provider.
-4. **Supabase Apple provider**: in the backend repo I'll set
+5. **Supabase Apple provider**: in the backend repo I'll set
    `[auth.external.apple] enabled = true, client_id = "io.navbytes.tripto"` and
    push it; you confirm it in the dashboard. (I can do the config push; you
    verify.)
-5. **Associated domain** (optional, for universal links): add the Team ID to the
+6. **Associated domain** (optional, for universal links): add the Team ID to the
    Worker's `APPLE_TEAM_ID` var (I redeploy) and I'll add the
    `applinks:tripto.navbytes.io` entitlement + pin the signing team in
    project.yml. Custom-scheme `tripto://` invites work without this.
-6. **App Store Connect record**: create the app (name "Tripto", bundle id,
+7. **App Store Connect record**: create the app (name "Tripto", bundle id,
    primary language), fill metadata (§7 — I draft it), upload screenshots
-   (I generate), answer App Privacy (§4), set price = Free.
-7. **Archive & upload**: with the signing team pinned, Product → Archive in
-   Xcode (or `xcodebuild archive` + Transporter) → upload → submit for review.
+   (I generate), answer App Privacy (§4), set price = Free. In the TestFlight
+   section, ensure the **TestFlight builds include the embedded extension** —
+   confirm `TriptoWidgets` is listed under "Included Bundles" when uploading
+   the archive.
+8. **Archive & upload**: with the signing team + App Group provisioning finalized,
+   Product → Archive in Xcode (or `xcodebuild archive` + Transporter) → upload →
+   submit for review.
 
 Also budget the **free-tier pause** decision (RESEARCH_FINDINGS #6): a paused
 Supabase project makes the app + share links go dark between trips. Before real

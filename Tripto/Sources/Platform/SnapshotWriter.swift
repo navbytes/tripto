@@ -1,3 +1,4 @@
+import ActivityKit
 import Foundation
 import WidgetKit
 
@@ -59,13 +60,18 @@ actor SnapshotWriter {
     }
 
     /// Sign-out: cancel any in-flight debounced write, delete the file,
-    /// and tell widgets/Spotlight there's nothing to show — privacy
-    /// (§D6): a widget must never keep displaying the previous account's
-    /// trip after sign-out.
-    func clear() {
+    /// end any running Live Activity, and tell widgets/Spotlight there's
+    /// nothing to show — privacy (§D6): no surface may keep displaying the
+    /// previous account's trip after sign-out. (Security audit wave-2: the
+    /// LA end was the one surface this originally missed — a signed-out
+    /// user's flight stayed on the lock screen until departure+45m.)
+    func clear() async {
         writeTask?.cancel()
         writeTask = nil
         TripSnapshot.clear()
+        for activity in Activity<TravelDayAttributes>.activities {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
         WidgetCenter.shared.reloadAllTimelines()
         onWrite?(nil)
     }

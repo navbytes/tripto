@@ -179,6 +179,36 @@ final class TripSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.focusTripItems.first?.tripId, inProgressId)
     }
 
+    /// Wave-2 review should-fix: `suggested` (unreviewed import) items must
+    /// never reach the snapshot — its consumers (Today widget, Siri next-up,
+    /// lock-screen Live Activity) are more public than the in-app tabs,
+    /// which already filter to confirmed at the query (TripView).
+    func testBuildSnapshotExcludesSuggestedItems() async throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let store = SyncStore(modelContainer: container)
+        let now = Date()
+        let calendar = Calendar.current
+
+        let tripId = UUID()
+        try await store.applyTrips([
+            TestFixtures.makeTripDTO(
+                id: tripId,
+                startDate: dayDate(offsetDays: -1, from: now, calendar),
+                endDate: dayDate(offsetDays: 3, from: now, calendar)
+            ),
+        ])
+
+        let confirmedId = UUID()
+        try await store.applyItineraryItems([
+            makeFlightDTO(id: confirmedId, tripId: tripId, startsAt: now),
+            makeFlightDTO(id: UUID(), tripId: tripId, startsAt: now.addingTimeInterval(3_600), status: .suggested),
+        ], tripId: tripId)
+
+        let snapshot = try await store.buildSnapshot(now: now)
+
+        XCTAssertEqual(snapshot.focusTripItems.map(\.id), [confirmedId])
+    }
+
     func testBuildSnapshotFocusesSoonestUpcomingWhenNoneInProgress() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let store = SyncStore(modelContainer: container)
@@ -235,7 +265,9 @@ final class TripSnapshotTests: XCTestCase {
     /// `confirmation`/`notes` are set on the DTO (a booking code, a private
     /// note) but `SnapshotItem` has no field either could land in —
     /// sanitization by construction, not by filtering (BUILD_PLAN §7.5).
-    private func makeFlightDTO(id: UUID, tripId: UUID, startsAt: Date) -> ItineraryItemDTO {
+    private func makeFlightDTO(
+        id: UUID, tripId: UUID, startsAt: Date, status: ItemStatus = .confirmed
+    ) -> ItineraryItemDTO {
         var details = ItemDetails.empty
         details.fromIATA = "JFK"
         details.toIATA = "LIS"
@@ -244,7 +276,7 @@ final class TripSnapshotTests: XCTestCase {
             id: id, tripId: tripId, category: ItemCategory.flight.rawValue, title: "TAP TP1234",
             startsAt: startsAt, endsAt: nil, tz: "America/New_York", locationName: "JFK",
             locationLat: nil, locationLng: nil, confirmation: "QK7P2M", notes: "aisle seat requested",
-            details: details.json, status: ItemStatus.confirmed.rawValue,
+            details: details.json, status: status.rawValue,
             createdBy: UUID(), createdAt: .now, updatedAt: .now, updatedBy: nil
         )
     }

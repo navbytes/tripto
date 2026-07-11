@@ -25,9 +25,16 @@ extension SyncStore {
         var focusItems: [SnapshotItem] = []
         if let focusTrip {
             let tripId = focusTrip.id
+            // Confirmed only — the app-wide invariant is that `suggested`
+            // (unreviewed, possibly mis-extracted imports) never render
+            // until reviewed, and the snapshot's consumers are MORE public
+            // than the in-app tabs: the Today widget, Siri's next-up
+            // answer, and the lock-screen Live Activity (wave-2 review
+            // should-fix). Mirrors TripView's trusted-surface query.
+            let confirmedRaw = ItemStatus.confirmed.rawValue
             let items = try modelContext.fetch(
                 FetchDescriptor<ItineraryItem>(
-                    predicate: #Predicate { $0.tripId == tripId },
+                    predicate: #Predicate { $0.tripId == tripId && $0.statusRaw == confirmedRaw },
                     sortBy: [SortDescriptor(\.startsAt)]
                 )
             )
