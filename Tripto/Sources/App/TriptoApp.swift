@@ -1,3 +1,4 @@
+import CoreSpotlight
 import SwiftData
 import SwiftUI
 
@@ -21,6 +22,15 @@ struct TriptoApp: App {
         syncEngine = engine
         authManager = AuthManager(syncEngine: engine)
         appRouter = AppRouter()
+
+        // PLAN-signature-layer.md §D7: Spotlight indexing attaches to the
+        // frozen `onWrite` hook — same moment, same debounce as every other
+        // glanceable surface (§D6 "one pipeline"). Fire-and-forget from
+        // `init` (the same pattern `AuthManager` itself uses to kick off
+        // `syncEngine.start()`) since `setOnWrite` is an actor method and
+        // `init` can't `await`; the 800ms write debounce means this wins the
+        // race against any real write in practice.
+        Task { await engine.snapshotWriter.setOnWrite(SpotlightIndexer.handle) }
     }
 
     var body: some Scene {
@@ -37,6 +47,19 @@ struct TriptoApp: App {
                     // §D6 — widget taps) — the verify drill's `xcrun simctl
                     // openurl` exercises this exact same callback, nothing
                     // simulated.
+                    appRouter.handleIncoming(url: url, isSignedIn: authManager.isSignedIn)
+                }
+                .onContinueUserActivity(CSSearchableItemActionType) { activity in
+                    // §D7: a Spotlight trip result tap arrives as this
+                    // activity, identifier at `CSSearchableItemActivityIdentifier`
+                    // (research §4). Rebuilt as the same `tripto://trip/<uuid>`
+                    // shape a widget tap uses and handed to the identical
+                    // `handleIncoming` entry point above — one route-in path,
+                    // literally, not just in spirit.
+                    guard
+                        let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
+                        let url = URL(string: "tripto://trip/\(identifier)")
+                    else { return }
                     appRouter.handleIncoming(url: url, isSignedIn: authManager.isSignedIn)
                 }
         }
