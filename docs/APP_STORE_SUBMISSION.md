@@ -183,13 +183,99 @@ xcodebuild -showBuildSettings -scheme <Scheme> -destination 'generic/platform=iO
 ## 6. Seeding a NEW app — what's app-specific vs. reusable
 
 Reusable as-is: §0 (beta-macOS CLI path), §1 (key types), §2 (runbook), §3–5
-(the gotchas). Change per app: bundle IDs, scheme name, App Group, the ASC app
+(build gotchas), §7 (the console field-by-field + answer keys), §8 (automation
+technique). Change per app: bundle IDs, scheme name, App Group, the ASC app
 record + metadata, screenshots. Same Team ID / ASC API key if it's the same
 Apple account. Re-run §2a first — a fresh app is most likely to have a
 Release-only compile issue.
 
+## 7. Filling the App Store Connect listing (metadata, Age Rating, App Privacy, Pricing)
+
+Once the build is uploaded (§2) and the app record exists (§5), the rest is
+web-console. Working order: version metadata → App Information → Age Rating →
+Pricing → attach build → App Privacy → **Publish** privacy → **Submit for
+Review**. The last two are the owner's clicks (legal/binding).
+
+**Version page** (`…/version/inflight`)
+- Promotional Text (170) · Description (4000) · **Keywords (100 chars _incl.
+  commas_ — no space after commas; don't repeat words already in the app
+  name/subtitle, they're indexed separately)** · Support/Marketing URL ·
+  Copyright (`© <year> <entity>`).
+- **App Review Information:** for a **Sign in with Apple-only** app, **uncheck
+  "Sign-in required"** (there's no username/password to hand over) and say so in
+  Notes — reviewers use their own Apple ID. Contact needs a real name + **phone
+  with `+` and country code** (required — the #1 thing that blocks Save) + email.
+- **Version Release:** pick **Manually release** when a backend cutover must
+  precede go-live (e.g. disabling anonymous sign-in); otherwise Automatically.
+- **Screenshots:** the well may demand **6.5" (1242×2688)**, not 6.9". Resize:
+  `sips -z 2688 1242 shot.png`. One set covers all sizes. Drag-drop only — the
+  browser tools can't upload local files, so this stays an owner action.
+
+**App Information:** Subtitle (30) · Primary/Secondary **Category** · **Content
+Rights → No** (app shows only the user's own data, not third-party content).
+
+**Age Rating** (7-step): for an organizer/utility with no objectionable content,
+**every answer is None/No → 4+**. The Step-1 capability questions that need
+thought:
+- **User-Generated Content → No** for *private, invite-only* sharing. The
+  definition is "**broad distribution**"; a private group / read-only share link
+  isn't that. Marking Yes obligates in-app moderation/report/block.
+- Unrestricted Web Access → No (opening links in Safari ≠ an in-app browser).
+- Messaging & Chat / Social Media / Gambling / Advertising → No.
+
+**Pricing & Availability:** Add Pricing → base US → **$0.00** → confirm (Free in
+all countries) · App Availability → **All countries**.
+
+**Build:** version page → Build → **Add Build** → pick the processed build.
+No export-compliance prompt if `ITSAppUsesNonExemptEncryption=false` is baked in.
+
+**App Privacy** (`…/privacy`): set the **Privacy Policy URL**, then **Get Started
+→ Yes, we collect data →** pick data types → for each set Purpose / Linked /
+Tracking. For a Sign-in-with-Apple account app that stores user content and runs
+no analytics/ads:
+
+| Data type | Purpose | Linked to user? | Tracking? |
+|---|---|---|---|
+| Contact Info → **Name**, **Email Address** | App Functionality | Yes | No |
+| User Content → **Other User Content** | App Functionality | Yes | No |
+| Identifiers → **User ID** | App Functionality | Yes | No |
+
+- **Declare "User ID"** whenever you assign account IDs (most account apps do),
+  even though name/email already identify the user.
+- A third-party sub-processor (e.g. an LLM used for paste/email import) adds **no
+  separate toggle** — it's covered by declaring the data *collected* (the intro
+  reads "you _or your third-party partners_ collect").
+- Everything else (Location, Health, Financial, Contacts, Browsing/Search,
+  Usage, Diagnostics) → leave unchecked. Then **Publish** (owner).
+
+Tripto's exact paste-ready values: [RELEASE_READINESS.md](RELEASE_READINESS.md)
+§5–6 and [PRIVACY_DISCLOSURE.md](PRIVACY_DISCLOSURE.md).
+
+## 8. Driving App Store Connect by browser automation (agent notes)
+
+When an agent fills the console via the **claude-in-chrome** MCP:
+- It drives **real Google Chrome**, not the Claude app's built-in browser — ASC
+  must already be **signed in in Chrome**. The agent must not do the Apple ID
+  login (credentials are off-limits).
+- **Text fields:** `form_input` usually works, but React-controlled inputs
+  sometimes silently revert to empty — fall back to `computer left_click` the
+  field, then `type`.
+- **Radios & checkboxes:** clicking by pixel coordinate frequently misses the
+  small target. Reliable path: `find` the option, or `read_page {ref_id:
+  <dialogRef>}` to get **all** of a step's radio refs at once, then `computer
+  left_click {ref: …}`.
+- **Selects:** `form_input` with the option value works for native `<select>`
+  (category); the price picker is a custom button-dropdown — click to open, then
+  click the value.
+- ASC is a heavy React SPA — pages render **blank/slow** right after a
+  navigation; wait 3–6 s or reload before concluding a page is broken.
+- Once a repeated multi-screen flow's coordinates are confirmed (e.g. the
+  App-Privacy per-data-type purpose→linked→tracking), **batch** the clicks.
+- Never click **Publish** (App Privacy) or **Submit for Review** — hand those to
+  the owner.
+
 ---
 
-_Last updated 2026-07-11 (Tripto 1.0 first submission). Companion:
-[RELEASE_READINESS.md](RELEASE_READINESS.md) for the Tripto-specific checklist +
-paste-ready metadata._
+_Last updated 2026-07-11 (Tripto 1.0 first submission — CLI archive + full
+console fill). Companion: [RELEASE_READINESS.md](RELEASE_READINESS.md) for the
+Tripto-specific checklist + paste-ready metadata._
