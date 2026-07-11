@@ -75,6 +75,13 @@ struct PasteImportSheet: View {
     /// the first time (see `AIImportConsent`), never again once consent is
     /// on record.
     @State private var isPresentingAIConsent = false
+    /// Review fix (D1): true while the "couldn't process on this iPhone,
+    /// send to the remote AI instead?" reconfirm dialog is up — shown only
+    /// when `submitOnDevice()` falls back to remote AND the user already
+    /// granted AI-import consent in a past session. A never-consented user
+    /// falling back sees `isPresentingAIConsent` instead (see
+    /// `runRemoteFallbackAfterOnDeviceFailure()`) — never both at once.
+    @State private var isPresentingOnDeviceFallbackConfirm = false
     @State private var errorMessage: String?
     /// Non-nil once a 200 response came back with nothing found at all
     /// (`created: 0` and no packing items) — not an error (this
@@ -208,6 +215,29 @@ struct PasteImportSheet: View {
                 "To find your bookings, this text is sent to a third-party AI service (via Cloudflare) "
                     + "and used only to extract booking details \u{2014} it isn\u{2019}t stored afterward. "
                     + "You can add trips manually instead if you\u{2019}d rather not."
+            )
+        }
+        // Review fix (D1): `submitOnDevice()`'s on-device attempt hard-
+        // failed after the footer already promised "text never leaves your
+        // device" for this paste — reusing a past `AIImportConsent.grant()`
+        // silently here would contradict that promise, so even an
+        // already-consented user gets one explicit reconfirm before this
+        // specific text goes to the third-party service. A never-consented
+        // user never sees this dialog — they get the normal consent prompt
+        // above instead (see `runRemoteFallbackAfterOnDeviceFailure()`).
+        .confirmationDialog(
+            "Couldn\u{2019}t process on this iPhone",
+            isPresented: $isPresentingOnDeviceFallbackConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Continue") {
+                Task { await submit() }
+            }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text(
+                "Send the pasted text to a third-party AI service instead? (This is the standard "
+                    + "import path on devices without Apple Intelligence.)"
             )
         }
     }
@@ -437,20 +467,39 @@ struct PasteImportSheet: View {
         }
     }
 
+    /// Review fix (D1): `submitOnDevice()`'s equivalent of
+    /// `runRemoteImportFlow()` for its own "falling back to remote" exits —
+    /// deliberately NOT the same gate. The footer told the user this paste
+    /// would be processed on-device; a fallback is the one moment that
+    /// promise breaks, so a past `AIImportConsent.grant()` (from some
+    /// earlier, unrelated remote import) may no longer speak for THIS text.
+    /// A never-consented user still sees only the one normal consent
+    /// dialog — granting it there both records consent and sends this
+    /// text, so stacking a second "are you sure" on top of it would just be
+    /// two dialogs for one decision.
+    private func runRemoteFallbackAfterOnDeviceFailure() async {
+        if AIImportConsent.isGranted() {
+            isPresentingOnDeviceFallbackConfirm = true
+        } else {
+            isPresentingAIConsent = true
+        }
+    }
+
     /// On-device paste-import (PLAN.md). Reachable only when `currentRoute
     /// == .onDevice` at tap time — availability and the context-window
     /// pre-estimate were already checked there, but both guards below are
     /// repeated anyway: `#available`/`canImport` are per-call-site in
     /// Swift, not something an earlier check elsewhere satisfies.
     ///
-    /// No consent dialog on this path, ever — pasted text stays on the
-    /// device end to end. `OnDeviceExtractor.extractAll` already enforces
-    /// PLAN.md's all-or-nothing rule (either sub-extraction hard-failing
-    /// discards both), so `.fallback` here means "run the remote flow from
-    /// scratch," identical to what a `.remote`-routed tap would have done —
-    /// including its own consent gate, since a fallback is the one moment
-    /// pasted text is about to leave the device on what the user believed
-    /// was an on-device-only attempt.
+    /// No consent dialog for the on-device attempt itself, ever — pasted
+    /// text stays on the device end to end while this method is trying.
+    /// Every exit below that instead falls back to remote (an unresolved
+    /// creator, `.fallback` from `OnDeviceExtractor.extractAll`, or the
+    /// impossible not-actually-available branch) goes through
+    /// `runRemoteFallbackAfterOnDeviceFailure()`, NOT `runRemoteImportFlow()`
+    /// directly — see that method's doc comment for why (review fix D1: an
+    /// already-consented user still gets one explicit reconfirm here,
+    /// since the footer just promised this text would stay on-device).
     private func submitOnDevice() async {
         guard canSubmit else { return }
         isSubmitting = true
@@ -465,7 +514,7 @@ struct PasteImportSheet: View {
         // happens to exist.
         guard let creatorId = authManager.userId ?? tripCreatedBy else {
             isSubmitting = false
-            await runRemoteImportFlow()
+            await runRemoteFallbackAfterOnDeviceFailure()
             return
         }
 
@@ -485,7 +534,7 @@ struct PasteImportSheet: View {
                 handleImportOutcome(created: created, packingCandidates: candidates, itineraryFailed: false, packingFailed: false)
             case .fallback:
                 isSubmitting = false
-                await runRemoteImportFlow()
+                await runRemoteFallbackAfterOnDeviceFailure()
             }
             return
         }
@@ -496,20 +545,24 @@ struct PasteImportSheet: View {
         // since "just try the remote path" is a correct response even to
         // an impossible state.
         isSubmitting = false
-        await runRemoteImportFlow()
+        await runRemoteFallbackAfterOnDeviceFailure()
     }
 
     /// Local-insert half of the on-device path — mirrors
-    /// `AddItemSheet.save()`'s create branch exactly (this milestone's
-    /// brief: "reuse the exact path"): SwiftData insert on the main
-    /// context, `try? modelContext.save()`, then `SyncEngine.enqueueUpsert`
-    /// for the offline-first outbox — the same "insert then `try?` save,
-    /// one row at a time" shape `PackingItem.insert` already uses for a
-    /// batch import. `status = .suggested`/`source = .textImport` (not
-    /// `.confirmed`/`.manual`) is the one difference from a manual add:
-    /// these land in the exact review pipeline (`ImportReviewBanner`/
-    /// `SuggestedItemsSheet`) email-import and remote paste-import
-    /// suggestions already use. Returns the count actually inserted, for
+    /// `AddItemSheet.save()`'s create branch (this milestone's brief:
+    /// "reuse the exact path"): SwiftData insert on the main context,
+    /// `modelContext.save()`, then `SyncEngine.enqueueUpsert` for the
+    /// offline-first outbox, one row at a time. Review fix (D3): a failed
+    /// save is now a do/catch'd skip, matching `AddItemSheet.save()`'s own
+    /// do/catch (Finding 2) instead of `PackingItem.insert`'s `try?` — the
+    /// old `try?` let a failed row still get counted in the returned
+    /// `created` total and enqueued to the sync outbox as a phantom upsert
+    /// for a row that was never actually persisted. `status =
+    /// .suggested`/`source = .textImport` (not `.confirmed`/`.manual`) is
+    /// the one difference from a manual add: these land in the exact
+    /// review pipeline (`ImportReviewBanner`/`SuggestedItemsSheet`)
+    /// email-import and remote paste-import suggestions already use.
+    /// Returns the count of rows actually persisted, for
     /// `handleImportOutcome`'s `created`.
     private func insertValidatedItineraryItems(
         _ rows: [ImportExtraction.ValidatedItineraryRow], creatorId: UUID
@@ -527,7 +580,18 @@ struct PasteImportSheet: View {
             )
             item.details = row.details
             modelContext.insert(item)
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+            } catch {
+                // Skip this row rather than counting/enqueuing it — a
+                // failed save must not inflate `created` or hand the sync
+                // outbox a phantom upsert for a row that isn't actually on
+                // disk. One bad row still doesn't sink the rest of the
+                // batch (same "log and continue" rule
+                // `ImportExtraction.mapItemToRow` already applies at the
+                // validation stage).
+                continue
+            }
             let dto = item.toDTO()
             let rowId = item.id
             let capturedTripId = tripId
@@ -628,15 +692,19 @@ struct PasteImportSheet: View {
 /// without touching the real `UserDefaults.standard`).
 ///
 /// `PasteImportSheet.submit()` — the only call site that actually reaches
-/// the network — is reachable from exactly two places: `runRemoteImportFlow()`'s
-/// `.sendImmediately` branch (itself reached only from the Import button's
-/// `.remote`-route tap, or from `submitOnDevice()` falling back), and the
-/// consent dialog's "Continue" button, which calls `grant()` immediately
-/// before it. A not-yet-granted tap can therefore never reach the server
-/// without the user first seeing and accepting the prompt — see
-/// `AIImportConsentTests` for the pure (network-free) proof of that gate,
-/// and `ImportExtractionTests` for the proof that an `.onDevice` route never
-/// even reaches this decision.
+/// the network — is reachable from exactly three places: `runRemoteImportFlow()`'s
+/// `.sendImmediately` branch (reached only from the Import button's
+/// `.remote`-route tap — `submitOnDevice()` falling back never dispatches
+/// through here, see `runRemoteFallbackAfterOnDeviceFailure()`), the
+/// consent dialog's "Continue" button (calls `grant()` immediately before
+/// it), and the on-device-fallback reconfirm dialog's "Continue" button
+/// (consent is already on record from a past session; that dialog exists
+/// only to reconfirm THIS send after the on-device promise didn't hold).
+/// A not-yet-granted tap can therefore never reach the server without the
+/// user first seeing and accepting a prompt — see `AIImportConsentTests`
+/// for the pure (network-free) proof of that gate, and
+/// `ImportExtractionTests` for the proof that an `.onDevice` route never
+/// even reaches this decision on its own attempt.
 enum AIImportConsent {
     private static let key = "aiImportConsentGranted"
 
