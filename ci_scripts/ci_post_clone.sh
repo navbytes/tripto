@@ -16,4 +16,13 @@ echo "▸ Generating Tripto.xcodeproj from project.yml…"
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 xcodegen generate
 
-echo "▸ Done: $(ls -d Tripto.xcodeproj)"
+# Xcode Cloud disables automatic SPM resolution and requires a committed
+# Package.resolved. Ours normally lives inside the gitignored .xcodeproj, so a
+# pinned copy is committed at ci_scripts/Package.resolved — drop it into the
+# freshly generated project so the "Resolve package dependencies" step finds it.
+echo "▸ Placing pinned Package.resolved…"
+SWIFTPM_DIR="Tripto.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+mkdir -p "$SWIFTPM_DIR"
+cp ci_scripts/Package.resolved "$SWIFTPM_DIR/Package.resolved"
+
+echo "▸ Done: $(ls -d Tripto.xcodeproj) + Package.resolved in place"
