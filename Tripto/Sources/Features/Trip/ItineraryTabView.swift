@@ -667,14 +667,11 @@ struct ItineraryTabView: View {
     /// guidance sentence.
     private func filteredEmptyState(personName: String) -> some View {
         VStack(spacing: Spacing.xs) {
-            // Decorative empty-state art, deliberately fixed size (already
-            // hidden from VoiceOver below) — the guidance sentence right
-            // under it carries the message.
-            Image(systemName: "sparkles")
-                .font(.system(size: 28))
-                .foregroundStyle(Palette.amber)
+            // W1-D nit: same EmptyStateArt swap as the settled-empty block
+            // above (§D5) — art is already accessibilityHidden internally,
+            // the guidance sentence right under it carries the message.
+            EmptyStateArt(scene: .itinerary)
                 .padding(.bottom, Spacing.sm)
-                .accessibilityHidden(true)
             Text(filteredEmptyGuidance(personName: personName))
                 .font(Typo.body())
                 .foregroundStyle(Palette.slate)

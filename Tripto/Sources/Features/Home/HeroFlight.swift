@@ -10,17 +10,27 @@ enum HeroFlight {
     /// `withAnimation(...completionCriteria: .logicallyComplete)`'s own
     /// completion handler below, not this constant.
     static let duration: TimeInterval = 0.45
-    /// How long the clone shows the card-only garnish (pills/avatars/meta)
-    /// before it fades -- neither the flight nor the hero has anywhere for
-    /// it to land (§D1 mechanism point 4).
-    static let garnishFadeDuration: TimeInterval = 0.1
     /// Defensive cap on how long the overlay waits for `TripHeroView` to
     /// report `destFrame` before giving up and releasing the touch-block
-    /// unanimated. Ponytail: the handshake should land within one layout
-    /// pass per the plan's mechanism (the push is animation-disabled), but
-    /// a permanently stuck full-screen touch-blocker is a worse failure
-    /// than one unfinished flight, so this is the upgrade-free ceiling.
-    static let destFrameTimeout: TimeInterval = 2
+    /// unanimated -- covers only the pre-flight handshake, i.e. before
+    /// `beginFlight` has run at all. Ponytail: the handshake should land
+    /// within one layout pass per the plan's mechanism (the push is
+    /// animation-disabled), so a miss here means something's actually
+    /// wrong; snappy on purpose rather than a generous grace period.
+    static let destFrameTimeout: TimeInterval = 0.8
+    /// Unconditional ceiling on the clone's *entire* mounted lifetime,
+    /// independent of `hasStartedFlight` -- review finding: once
+    /// `beginFlight` starts, its `withAnimation(...).completion` closure is
+    /// the *sole* remaining exit (`destFrameTimeout`'s guard above is
+    /// `if !hasStartedFlight`, so it stops applying the moment the flight
+    /// begins). If that completion is ever skipped -- backgrounding
+    /// mid-flight is the known case -- the full-screen touch-block would
+    /// stay up forever. This fires regardless of state and forces `.idle`;
+    /// harmless on the happy path since normal completion lands well under
+    /// this and removes the clone (cancelling this task with it) first.
+    /// Comfortably above `duration`'s ~450ms settle time -- see
+    /// `HeroFlightGateTests` for the pinned ordering.
+    static let totalLifetimeWatchdog: TimeInterval = 1.5
 }
 
 /// Per-trip-card `.global` frames, read only at tap time to seed a flight's
@@ -217,6 +227,17 @@ private struct HeroFlightClone: View {
                 model.destFrame = nil
             }
         }
+        // Total-lifetime watchdog (review should-fix) -- a second,
+        // independent `.task`, not a continuation of the one above: it must
+        // keep running (and be able to fire) even after `hasStartedFlight`
+        // flips true and the first task's own guard stops applying. Both
+        // are cancelled together when this view leaves the hierarchy, i.e.
+        // the instant a normal flight actually completes.
+        .task {
+            try? await Task.sleep(for: .seconds(HeroFlight.totalLifetimeWatchdog))
+            model.state = .idle
+            model.destFrame = nil
+        }
         .onChange(of: model.destFrame) { _, newValue in
             guard let newValue else { return }
             beginFlight(to: newValue)
@@ -225,7 +246,7 @@ private struct HeroFlightClone: View {
     }
 
     private func beginGarnishFade() {
-        withAnimation(.easeOut(duration: HeroFlight.garnishFadeDuration)) {
+        withAnimation(Motion.fade) {
             garnishOpacity = 0
         }
         // Handles the (rare) case the hero's first layout pass -- and thus

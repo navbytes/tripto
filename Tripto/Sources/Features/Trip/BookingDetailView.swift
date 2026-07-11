@@ -151,9 +151,15 @@ struct BookingDetailView: View {
                 #endif
                 // Discovery: one small nudge + tick the first time this
                 // view appears on a travel day, before the stub is torn.
-                // Skipped under RM (an unprompted animation+buzz, not a
-                // user-driven one) and while an evidence override is
-                // deterministically posing the stub already.
+                // `hasShownDiscoveryNudge` is plain view-local `@State`, not
+                // persisted, so this re-arms on every fresh open of this
+                // screen -- not a true once-per-calendar-day thing. What
+                // actually stops it for good is the stub getting torn
+                // (`isTornStub`, which IS persisted per day via
+                // `PassEffects`). Skipped under RM (an unprompted
+                // animation+buzz, not a user-driven one) and while an
+                // evidence override is deterministically posing the stub
+                // already.
                 if isTravelDay(item), !isTornStub, !reduceMotion, !hasShownDiscoveryNudge, !suppressDiscoveryNudge {
                     hasShownDiscoveryNudge = true
                     try? await Task.sleep(nanoseconds: 500_000_000)
