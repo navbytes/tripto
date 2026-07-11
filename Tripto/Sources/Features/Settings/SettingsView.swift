@@ -141,7 +141,13 @@ struct SettingsView: View {
 
             Section("About") {
                 LabeledContent("Version", value: appVersionString)
-                Link("Privacy policy", destination: privacyURL)
+                // Pushes `PrivacySummaryView` (plain-language "at a glance"
+                // summary + a link to the full published policy) — replaces
+                // the old direct-to-browser "Privacy policy" link so there's
+                // one primary privacy entry, not two differently-shaped ones.
+                NavigationLink("Privacy") {
+                    PrivacySummaryView()
+                }
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Fonts")
                         .font(Typo.body(weight: .semibold))
@@ -285,12 +291,6 @@ struct SettingsView: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "\u{2014}"
         let build = info?["CFBundleVersion"] as? String ?? "\u{2014}"
         return "\(version) (\(build))"
-    }
-
-    private var privacyURL: URL {
-        // Served live by the share Worker (web/share-worker/src/index.ts:
-        // GET /privacy -> renderPrivacyPage, HTTP 200).
-        URL(string: "https://tripto.navbytes.io/privacy")!
     }
 
     /// UX audit finding 9: widened from the original `saveDisplayName()` to
