@@ -28,3 +28,7 @@ __pycache__/
 # Claude Code agent worktrees — internal scratch, not project content.
 .claude/worktrees/
 .claude/company/
+# wrangler local secrets (any worker under web/)
+web/**/.dev.vars
+web/**/.env
+web/**/.env.*

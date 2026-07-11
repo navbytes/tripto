@@ -60,6 +60,11 @@ export async function postIngest(env: Env, payload: IngestPayload): Promise<Post
         "X-Ingest-Secret": env.EMAIL_INGEST_SHARED_SECRET,
       },
       body: JSON.stringify(payload),
+      // ingest-email runs the LLM inline before answering; if it hangs, cap
+      // the wait ourselves so the handler ends in the deliberate drop path
+      // below instead of being killed at the platform limit (which can
+      // surface as a bounce). Abort rejects the fetch -> caught -> drop.
+      signal: AbortSignal.timeout(20_000),
     });
   } catch {
     return { ok: false, reason: "network_error" };
