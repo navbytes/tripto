@@ -17,29 +17,40 @@ Tripto's real values are inline; swap the ones marked _(app-specific)_ for a new
 
 ---
 
-## 0. If the build Mac is on a BETA macOS — read this first
+## 0. If the build Mac is on a BETA macOS — the SDK trap
 
-This was the single biggest trap.
+The single biggest, most expensive trap. **On a beta macOS you likely cannot
+produce an App-Store-accepted build locally at all** — plan for **Xcode Cloud
+(§9)** or waiting for the RC. Budget for this before you promise a ship date.
 
-- **Symptom:** the **release** Xcode won't launch — *"This version of Xcode isn't
-  supported in this version of macOS."* Only the **beta** Xcode GUI opens.
-- **The trap:** App Store Connect **rejects any binary built with a beta Xcode.**
-  So the beta GUI is a dead end, and the release GUI won't run. Looks stuck.
-- **The escape:** the release Xcode's **command-line tools run fine on beta
-  macOS.** `xcodebuild` doesn't do the GUI's OS-version check, and the binary
-  carries the **release SDK** (accepted). So you archive from the CLI (§2). No
-  downgrade, no waiting for the public release, no second Mac.
-- **Watch out:** `xcode-select -p` (which Xcode the CLI uses) is **independent**
-  of which Xcode a `.xcodeproj` opens in. Verify both:
+Why:
+- Only the **matching beta Xcode** launches its GUI; the release Xcode GUI errors
+  *"This version of Xcode isn't supported in this version of macOS."*
+- **Every Xcode on the machine carries a PRE-RELEASE SDK.** The beta Xcode has
+  the next beta SDK; and even the *"release"* Xcode, on a beta OS, ships a **seed**
+  SDK — Tripto's Xcode 26.6 GM (`17F113`) carried a *seed* iOS 26.5 SDK
+  (`23F81a`), not the shipping `23F84`. Check with:
   ```sh
-  xcode-select -p                                   # CLI toolchain (want the RELEASE one)
-  ps aux | grep -i "Xcode.*/MacOS/Xcode" | grep -v grep   # which GUI is actually running
+  /usr/libexec/PlistBuddy -c "Print :DTSDKName" -c "Print :DTPlatformBuild" \
+      "<archive>/Products/Applications/App.app/Info.plist"   # a lettered build like 23F81a = seed
   ```
-  `open Foo.xcodeproj` may hand the project to the beta. If you must use the GUI,
-  quit the beta first (they share a bundle ID, can't run both at once).
+- App Store **submission** requires the **shipping / RC** SDK. A binary built
+  against a beta *or seed* SDK is rejected — `ITMS-90111` / `90534` "Unsupported
+  SDK or Xcode version" (see §8). Both local Xcodes are therefore dead ends.
 
-If the Mac is on **release** macOS, just use the Xcode GUI (Product → Archive →
-Distribute) and skip to §3 for the validation gotchas.
+> ⚠️ **This doc used to claim the release-Xcode CLI works on beta macOS and
+> produces an accepted binary. That was WRONG.** The CLI *runs*, but it archives
+> against the seed SDK, and Apple rejects the result. Uploading succeeds; the
+> *submission* is rejected minutes later by email.
+
+**Realistic options on a beta-macOS Mac with no second Mac:**
+1. **Xcode Cloud (§9)** — builds in Apple's cloud on a real *release* Xcode/SDK,
+   sidestepping your local SDK entirely. **This is the path that worked.**
+2. **Wait for the RC** of the Xcode matching your OS (your beta Mac already runs
+   that Xcode); rebuild the moment the RC ships.
+
+If the Mac is on **release** macOS none of this applies — use the Xcode GUI
+(Product → Archive → Distribute) or the CLI (§2), and skip to §3.
 
 ---
 
@@ -143,6 +154,7 @@ simulator. They only surface when altool validates. Fix, re-archive, re-upload.
 | **90360** | *Missing CFBundleDisplayName in …​.appex* | Add `CFBundleDisplayName` to **every app-extension's** Info.plist (widgets included). |
 | 90704 | *Missing marketing icon* | 1024×1024 icon in the asset catalog (light **and** dark if you ship a dark icon). |
 | 90056 / ITMS-90717 | image contains alpha / rounded corners | App icons must be opaque, square, no alpha. |
+| **409** (upload, not a code) | *bundle version … must be higher than … previously used* | A **duplicate build number**, not a validation failure. Bump `CURRENT_PROJECT_VERSION`. **XcodeGen gotcha:** it hardcodes `CFBundleVersion "1"` in the generated Info.plist, so a build-setting bump is a silent no-op — drive the plist key off the setting: `CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"` in `project.yml` info.properties (the app **and** every extension). |
 
 ## 4. The XcodeGen device-family trap (why "iPhone-only" wasn't)
 
@@ -182,12 +194,16 @@ xcodebuild -showBuildSettings -scheme <Scheme> -destination 'generic/platform=iO
 
 ## 6. Seeding a NEW app — what's app-specific vs. reusable
 
-Reusable as-is: §0 (beta-macOS CLI path), §1 (key types), §2 (runbook), §3–5
+Reusable as-is: §0 (beta-macOS SDK trap), §1 (key types), §2 (runbook), §3–5
 (build gotchas), §7 (the console field-by-field + answer keys), §8 (automation
-technique). Change per app: bundle IDs, scheme name, App Group, the ASC app
-record + metadata, screenshots. Same Team ID / ASC API key if it's the same
-Apple account. Re-run §2a first — a fresh app is most likely to have a
-Release-only compile issue.
+technique), §9 (SDK-version rejections), §10 (Xcode Cloud). Change per app:
+bundle IDs, scheme name, App Group, the ASC app record + metadata, screenshots.
+Same Team ID / ASC API key if it's the same Apple account. Re-run §2a first — a
+fresh app is most likely to have a Release-only compile issue.
+
+**On a beta macOS, skip §2 entirely and go straight to §10 (Xcode Cloud)** — a
+local archive can't carry a shippable SDK (§0), so it'll only earn you the §9
+rejection.
 
 ## 7. Filling the App Store Connect listing (metadata, Age Rating, App Privacy, Pricing)
 
@@ -274,8 +290,95 @@ When an agent fills the console via the **claude-in-chrome** MCP:
 - Never click **Publish** (App Privacy) or **Submit for Review** — hand those to
   the owner.
 
+## 9. "Invalid Binary" / ITMS-90111 / 90534 — the SDK-version rejection
+
+Different class from §3: these **pass upload** (the binary lands in ASC,
+processes, attaches to the version) and are rejected **minutes later, by email**,
+*after* you submit for review. The ASC Resolution Center may only say "Invalid
+Binary" with no detail — **the actual ITMS code arrives in Apple's email to the
+account holder.** Read that email; don't guess from the ASC status.
+
+- **ITMS-90111** *"…unsupported SDK / built with a beta version of …"* and
+  **ITMS-90534** *"…built with a beta/seed SDK"* both mean **the binary's SDK is
+  not a shipping/RC SDK.** Apple only accepts builds made against the current
+  *released* (or late-RC) iOS SDK.
+- **Diagnose from the binary itself** — no re-upload needed:
+  ```sh
+  /usr/libexec/PlistBuddy -c "Print :DTSDKName"   -c "Print :DTPlatformBuild" \
+                          -c "Print :DTXcodeBuild" -c "Print :DTSDKBuild" \
+      "<archive>.xcarchive/Products/Applications/App.app/Info.plist"
+  ```
+  A **lettered** platform build (`23F81a`, `23F5079e`) is a **seed/beta**; the
+  shipping build has no trailing letter (`23F84`). `DTSDKName` (`iphoneos26.5`)
+  names the SDK — cross-check it against the *currently shipping* iOS on Apple's
+  release pages.
+- **On a beta macOS, every local SDK is pre-release (§0)** so this rejection is
+  unavoidable locally until an RC ships. The fix is **Xcode Cloud (§10)**, which
+  builds on Apple's *released* Xcode/SDK.
+
+**Reading any rejection, generally:** the version shows "Rejected" with a
+Resolution Center thread, but Apple's **email** to the account holder is the
+fuller record (exact ITMS code, or the guideline number for a *content*
+rejection). If Resolution Center is terse, check email. For a *binary* rejection
+nothing in your metadata is wrong — **don't touch the listing**, fix the build
+and re-attach.
+
+## 10. Xcode Cloud — the escape hatch when you can't build a shippable SDK locally
+
+When the build Mac can't produce an accepted binary (beta macOS §0, or no release
+Xcode at all), Xcode Cloud builds in Apple's cloud on a **real released
+Xcode/SDK** and delivers straight to ASC. Free tier covers one app. The gotchas
+that cost a night, in order:
+
+**Creating the first workflow needs the Xcode GUI once.** Only Xcode can create
+it (Product → Xcode Cloud → Create Workflow) — on a beta macOS that's the *beta*
+Xcode, and that's fine: Xcode Cloud ignores your local SDK; the **cloud** Xcode
+version is what matters. Once it exists, the **ASC web** (`…/app/<id>/ci` →
+Manage Workflows) can *edit* it — but can't create the first one.
+
+**Set the cloud Xcode to a released one.** Workflow → Environment → **Xcode
+Version** → a *release* (e.g. "Latest Release" = Xcode 26.5 / `17F42`), never a
+beta. This is the entire point — it sidesteps your local seed SDK.
+
+**The workflow must actually deliver — a default "Build" action only compiles.**
+For a submittable build:
+- Actions → **Archive** → Platform **iOS** → **Distribution Preparation = App
+  Store Connect**. Delete the redundant Build action.
+- Each run then uploads a build to ASC automatically — no altool step.
+
+**If the project is generated (XcodeGen/Tuist), regenerate it in CI.** The repo
+commits `project.yml` but gitignores `*.xcodeproj`, so Xcode Cloud clones a repo
+with no project to build. Xcode Cloud auto-runs `ci_scripts/ci_post_clone.sh`
+after the clone — regenerate there:
+```sh
+#!/bin/sh
+set -e
+brew install xcodegen
+cd "$CI_PRIMARY_REPOSITORY_PATH"
+xcodegen generate
+```
+
+**SPM needs a committed `Package.resolved`.** Xcode Cloud disables automatic
+package resolution and fails with *"a resolved file is required"* if none is
+committed. For a *generated* project the resolved file normally lives *inside*
+the gitignored `.xcodeproj`, so commit a pinned copy (`ci_scripts/Package.resolved`)
+and have the post-clone hook drop it into the freshly generated project:
+```sh
+# …same ci_post_clone.sh, after xcodegen generate:
+SWIFTPM_DIR="Tripto.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+mkdir -p "$SWIFTPM_DIR"
+cp ci_scripts/Package.resolved "$SWIFTPM_DIR/Package.resolved"
+```
+Regenerate that pinned file whenever dependencies change — copy it back out of a
+local `xcodegen generate`d project.
+
+**Trigger & watch:** ASC → app → **Xcode Cloud** tab → **Start Build** → pick the
+workflow → branch → Start. ~15–25 min. A green run with the Archive action lands
+the build under the version's **Build** picker (§7) automatically — then submit.
+
 ---
 
-_Last updated 2026-07-11 (Tripto 1.0 first submission — CLI archive + full
-console fill). Companion: [RELEASE_READINESS.md](RELEASE_READINESS.md) for the
+_Last updated 2026-07-12 (Tripto 1.0 — first submission, ITMS-90111 SDK
+rejection on a beta-macOS local archive, then re-built via Xcode Cloud on a
+released SDK). Companion: [RELEASE_READINESS.md](RELEASE_READINESS.md) for the
 Tripto-specific checklist + paste-ready metadata._
