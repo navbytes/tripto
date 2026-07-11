@@ -178,6 +178,12 @@ struct TripHeroView: View {
     let dynamicTypeSize: DynamicTypeSize
     let canEditTrip: Bool
     @Binding var isEditingTrip: Bool
+    /// E1 (docs/BACKLOG.md §E1): the overflow menu's one action, owned by
+    /// `TripView` (it needs `items`/`toast`, neither of which this small
+    /// hero subtree holds) — same "hand this view just the action closure
+    /// it needs to trigger" shape as `isEditingTrip` above, just imperative
+    /// instead of sheet-presenting.
+    let onAddToCalendar: () -> Void
     let model: HeroScrollModel
 
     @Environment(\.dismiss) private var dismiss
@@ -237,6 +243,25 @@ struct TripHeroView: View {
                     GlassCircleGlyph(systemImage: "square.and.arrow.up")
                 }
                 .accessibilityLabel("Share trip")
+
+                // E1 (docs/BACKLOG.md §E1): the trip's one overflow menu —
+                // ungated (unlike the pencil above), matching the per-item
+                // "Add to calendar" action row in `BookingDetailView`, which
+                // is likewise available to any trip member, not just an
+                // editor. Same glass-circle visual language as its sibling
+                // buttons in this row; a `Menu` (not a bare button) so a
+                // later second action has somewhere to land without another
+                // entry-point redesign.
+                Menu {
+                    Button {
+                        onAddToCalendar()
+                    } label: {
+                        Label("Add Trip to Calendar", systemImage: "calendar.badge.plus")
+                    }
+                } label: {
+                    GlassCircleGlyph(systemImage: "ellipsis")
+                }
+                .accessibilityLabel("Trip actions")
             }
 
             Spacer(minLength: Spacing.sm)

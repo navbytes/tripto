@@ -1047,15 +1047,19 @@ struct BookingDetailView: View {
 
     /// EventKit is the one place this screen leaves pure SwiftUI — the
     /// draft itself comes from `CalendarEventDraft`/`CalendarEventBuilder`
-    /// (Foundation-only, unit tested with no EventKit involved).
+    /// (Foundation-only, unit tested with no EventKit involved). Permission
+    /// request goes through `CalendarAccess.request(.writeOnly...)` (E1,
+    /// docs/BACKLOG.md §E1) — a seam shared with `TripView
+    /// .addTripToCalendar`'s whole-trip batch export, which needs `.full`
+    /// access instead (see `CalendarAccess`'s own doc comment for why).
     private func addToCalendar(_ item: ItineraryItem) {
         let draft = CalendarEventBuilder.draft(for: item)
         let store = EKEventStore()
         Task {
             do {
-                let granted = try await store.requestWriteOnlyAccessToEvents()
+                let granted = try await CalendarAccess.request(.writeOnly, store: store)
                 guard granted else {
-                    toast = "Calendar access is off. Turn it on in Settings > Tripto to add events."
+                    toast = CalendarAccess.deniedMessage
                     return
                 }
                 let event = EKEvent(eventStore: store)

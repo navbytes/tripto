@@ -66,6 +66,15 @@ targets:
           - Fraunces-Variable.ttf
           - SofiaSans-Variable.ttf
         NSCalendarsUsageDescription: "Tripto adds your bookings to your calendar when you ask it to."
+        # iOS 17 split calendar access into two granular permissions with
+        # their own usage-description keys (Support/CalendarAccess.swift) —
+        # the legacy key above alone no longer covers either once an app
+        # links the iOS 17 SDK, which this one does (deploymentTarget
+        # 17.0). Write-only backs the per-item "Add to calendar"
+        # (BookingDetailView); full backs the whole-trip export's
+        # duplicate search (E1, docs/BACKLOG.md §E1 — TripView).
+        NSCalendarsWriteOnlyAccessUsageDescription: "Tripto adds bookings to your calendar when you ask it to."
+        NSCalendarsFullAccessUsageDescription: "Tripto adds your trip's bookings to your calendar and checks for ones it already added so it doesn't create duplicates."
         ITSAppUsesNonExemptEncryption: false
         # PLAN-signature-layer.md §D6: required for the app to start a Live
         # Activity (`Platform/LiveActivityCoordinator.swift`, W2-B) — the
