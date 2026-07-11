@@ -1,6 +1,6 @@
 # Tripto — Privacy Policy
 
-_Last updated: 8 July 2026_
+_Last updated: 11 July 2026_
 
 This is the source of truth for Tripto's privacy policy. It is served (rendered
 to HTML) at **https://tripto.navbytes.io/privacy** by the share Worker, and its
