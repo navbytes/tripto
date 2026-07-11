@@ -59,7 +59,18 @@ struct ShareTripView: View {
     /// shared state — each screen fetches independently), so the
     /// forwarding-address card stays reachable here even once the itinerary
     /// has items and its own teaser has stopped rendering.
-    @State private var importLoadState: ImportAddressCard.LoadState = .loading
+    ///
+    /// A5 (`docs/BACKLOG.md`): starts `.needsConsent` (not `.loading`) when
+    /// email-import consent isn't on record yet — see `ItineraryTabView`'s
+    /// matching property doc comment for why this is resolved synchronously
+    /// here rather than inside `fetchImportAddressIfNeeded()`. "Each screen
+    /// fetches independently" above now also means each screen re-reads
+    /// `EmailImportConsent.isGranted()` independently at its own first
+    /// appearance — granting on one screen updates the OTHER screen's card
+    /// only the next time that screen's own view identity is freshly
+    /// created, same class of staleness this pair already accepted for the
+    /// fetch result itself.
+    @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
     @State private var hasFetchedImportAddress = false
     /// TI-2: "Or paste text instead" — the fallback path below
     /// `importCard`'s email-address card, presenting `PasteImportSheet`
@@ -631,6 +642,8 @@ struct ShareTripView: View {
                     toast = ClipboardFeedback.copy(address, label: "Import address")
                 } onRetry: {
                     retryImportAddressFetch()
+                } onConsentGranted: {
+                    grantEmailImportConsentAndFetch()
                 }
                 pasteImportSecondaryAction
             }
@@ -668,8 +681,14 @@ struct ShareTripView: View {
     /// has actually been attempted (never inside this guard's early
     /// return), so a gate that starts `false` and later flips `true` still
     /// gets its one real attempt.
+    /// A5 (`docs/BACKLOG.md`): the new second guard clause is the actual
+    /// fetch gate — see `ItineraryTabView.fetchImportAddressIfNeeded()`'s
+    /// matching doc comment (identical reasoning, including why
+    /// `hasFetchedImportAddress` is deliberately NOT set on the
+    /// not-yet-consented path).
     private func fetchImportAddressIfNeeded() async {
         guard ItemPermissions.canAdd(role: myRole), !hasFetchedImportAddress else { return }
+        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
         hasFetchedImportAddress = true
         await fetchImportAddress()
     }
@@ -690,6 +709,15 @@ struct ShareTripView: View {
     private func retryImportAddressFetch() {
         importLoadState = .loading
         Task { await fetchImportAddress() }
+    }
+
+    /// A5 (`docs/BACKLOG.md`): `importCard`'s `.needsConsent` card ->
+    /// `onConsentGranted` — see `ItineraryTabView.grantEmailImportConsentAndFetch()`'s
+    /// matching doc comment (identical shape).
+    private func grantEmailImportConsentAndFetch() {
+        EmailImportConsent.grant()
+        hasFetchedImportAddress = true
+        retryImportAddressFetch()
     }
 
     // MARK: - People list
