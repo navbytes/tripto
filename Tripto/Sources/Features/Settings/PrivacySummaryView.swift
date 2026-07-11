@@ -128,8 +128,9 @@ struct PrivacySummaryView: View {
 
     /// Served live by the share Worker (web/share-worker/src/index.ts:
     /// GET /privacy -> renderPrivacyPage, HTTP 200) — same URL the old
-    /// About-section link opened.
-    static let privacyURL = URL(string: "https://tripto.navbytes.io/privacy")!
+    /// About-section link opened. Host comes from DeepLink so the domain
+    /// lives in exactly one place.
+    static let privacyURL = URL(string: "https://\(DeepLink.host)/privacy")!
 }
 
 #Preview {
