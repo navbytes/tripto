@@ -15,6 +15,21 @@ struct TripFormView: View {
         case edit(Trip)
     }
 
+    /// E2 (docs/BACKLOG.md §E2 "Duplicate trip"): create-mode field values to
+    /// seed this sheet with instead of the ordinary blank defaults — `mode`
+    /// stays `.create` (a genuinely new trip row gets created), this only
+    /// changes what the form opens pre-filled with. `nil` (the default)
+    /// leaves `.create`'s existing blank-form behavior untouched.
+    struct Prefill {
+        var title: String
+        var destination: String
+        var countryCode: String
+        var startDate: Date
+        var endDate: Date
+        var tripType: TripType
+        var coverGradientKey: String
+    }
+
     let mode: Mode
 
     /// UX audit finding 5: an edit save while signed out still writes
@@ -144,24 +159,32 @@ struct TripFormView: View {
     }
     private let initialValues: InitialValues
 
-    init(mode: Mode, onSaved: ((Trip, SaveOutcome) -> Void)? = nil, onDeleted: (() -> Void)? = nil) {
+    init(
+        mode: Mode, prefill: Prefill? = nil,
+        onSaved: ((Trip, SaveOutcome) -> Void)? = nil, onDeleted: (() -> Void)? = nil
+    ) {
         self.mode = mode
         self.onSaved = onSaved
         self.onDeleted = onDeleted
         switch mode {
         case .create:
-            let start = Calendar.current.startOfDay(for: .now)
-            let end = Calendar.current.date(byAdding: .day, value: 6, to: .now) ?? .now
-            _title = State(initialValue: "")
-            _destination = State(initialValue: "")
-            _countryCode = State(initialValue: "")
-            _startDate = State(initialValue: start)
-            _endDate = State(initialValue: end)
-            _tripType = State(initialValue: .family)
-            _coverGradientKey = State(initialValue: "dusk")
-            initialValues = InitialValues(
+            let seed = prefill ?? Prefill(
                 title: "", destination: "", countryCode: "",
-                startDate: start, endDate: end, tripType: .family, coverGradientKey: "dusk"
+                startDate: Calendar.current.startOfDay(for: .now),
+                endDate: Calendar.current.date(byAdding: .day, value: 6, to: .now) ?? .now,
+                tripType: .family, coverGradientKey: "dusk"
+            )
+            _title = State(initialValue: seed.title)
+            _destination = State(initialValue: seed.destination)
+            _countryCode = State(initialValue: seed.countryCode)
+            _startDate = State(initialValue: seed.startDate)
+            _endDate = State(initialValue: seed.endDate)
+            _tripType = State(initialValue: seed.tripType)
+            _coverGradientKey = State(initialValue: seed.coverGradientKey)
+            initialValues = InitialValues(
+                title: seed.title, destination: seed.destination, countryCode: seed.countryCode,
+                startDate: seed.startDate, endDate: seed.endDate,
+                tripType: seed.tripType, coverGradientKey: seed.coverGradientKey
             )
         case .edit(let trip):
             _title = State(initialValue: trip.title)
