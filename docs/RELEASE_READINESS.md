@@ -39,16 +39,18 @@ Last updated: 2026-07-11.
 
 ## 3. Device checks (need a real device)
 
-- [ ] **Sign in with Apple** on a real device → lands on the trip list.
-- [ ] **Delete a throwaway account** from Settings → signs out cleanly (the Apple
-  token revoke fires once the `.p8` secret is set).
-- [ ] **Airplane-mode round-trip** (recommended) — edit offline, reconnect,
-  confirm it reconciles and shows "edited by X".
+- [x] **Sign in with Apple** on a real device → lands on the trip list.
+  _(verified on real device, 2026-07-11)_
+- [x] **Delete a throwaway account** from Settings → signs out cleanly; the Apple
+  token revoke fires (the `.p8` secret is set). _(verified on real device, 2026-07-11)_
+- [ ] **Airplane-mode round-trip** (recommended, not a blocker) — edit offline,
+  reconnect, confirm it reconciles and shows "edited by X".
 
 ## 4. App Store Connect
 
-- [ ] Create the app: name **Tripto**, bundle `io.navbytes.tripto`, primary
-  language, **price Free**.
+- [x] Create the app: listing name **Tripto — Trip Organizer** (bare "Tripto"
+  was taken; on-device name stays "Tripto"), bundle `io.navbytes.tripto`,
+  primary language, **price Free**. _(created 2026-07-11)_
 - [ ] Paste the metadata (§6); upload the six 6.9" screenshots
   (1320×2868 — home, itinerary/now-line, boarding pass, share, packing,
   privacy) in [`docs/screenshots/`](screenshots/). Reframe/caption as you
@@ -76,7 +78,8 @@ Full detail in [`PRIVACY_DISCLOSURE.md`](PRIVACY_DISCLOSURE.md). Summary:
 
 ## 6. App Store Connect metadata (paste-ready)
 
-- **Name:** Tripto
+- **Name (App Store listing):** Tripto — Trip Organizer  _(bare "Tripto" is
+  taken; on-device name stays "Tripto")_
 - **Subtitle (30 char):** Trips your whole group sees
 - **Category:** Travel (primary); Productivity (secondary)
 - **Age rating:** 4+
