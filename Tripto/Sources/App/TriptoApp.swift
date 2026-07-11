@@ -32,16 +32,28 @@ struct TriptoApp: App {
                 .environment(appRouter)
                 .onOpenURL { url in
                     // Real entry point for `tripto://join/<token>` and
-                    // `https://tripto.navbytes.io/join/<token>` (M3 brief) —
-                    // the verify drill's `xcrun simctl openurl` exercises
-                    // this exact same callback, nothing simulated.
+                    // `https://tripto.navbytes.io/join/<token>` (M3 brief),
+                    // plus `tripto://trip/<uuid>` (PLAN-signature-layer.md
+                    // §D6 — widget taps) — the verify drill's `xcrun simctl
+                    // openurl` exercises this exact same callback, nothing
+                    // simulated.
                     appRouter.handleIncoming(url: url, isSignedIn: authManager.isSignedIn)
                 }
         }
         .modelContainer(modelContainer)
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            Task { await syncEngine.appDidBecomeActive() }
+            switch newPhase {
+            case .active:
+                Task { await syncEngine.appDidBecomeActive() }
+            case .background:
+                // PLAN-signature-layer.md §D6: catch-all + freshness before
+                // the user leaves — debounced like every other hook
+                // (`SnapshotWriter.notifyDataChanged()`), not a forced
+                // synchronous write.
+                Task { await syncEngine.snapshotWriter.notifyDataChanged() }
+            default:
+                break
+            }
         }
     }
 }

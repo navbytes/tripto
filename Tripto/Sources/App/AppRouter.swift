@@ -61,10 +61,21 @@ final class AppRouter {
     /// failure ends — no new choreography needed.
     private(set) var isJoiningTrip = false
 
-    /// Entry point for `.onOpenURL`. Not an invite link (including the
-    /// `/t/` share path) → no-op. Signed in → claim immediately. Signed out
-    /// → stash for `claimPendingInviteIfNeeded()` to pick up post-sign-in.
+    /// Entry point for `.onOpenURL`. Recognizes two link shapes: a trip
+    /// open link (`tripto://trip/<uuid>` — widget taps land here, W2-A)
+    /// and an invite link (including the `/t/` share path, which is
+    /// deliberately never treated as one). Anything else → no-op.
     func handleIncoming(url: URL, isSignedIn: Bool) {
+        // A trip link only ever comes from something this account already
+        // has access to (a widget tile, a Spotlight result, a Siri
+        // follow-up) — all of which are wiped on sign-out (`SnapshotWriter.
+        // clear()`), so there's nothing real to stash for a signed-out
+        // tap; unlike the invite-token path below, no pending-token dance
+        // is needed here.
+        if let tripId = DeepLink.tripId(from: url), isSignedIn {
+            openTrip(id: tripId)
+            return
+        }
         guard let token = DeepLink.inviteToken(from: url) else { return }
         if isSignedIn {
             Task { await claim(token: token) }
@@ -72,6 +83,16 @@ final class AppRouter {
             pendingInviteToken = token
             Task { await fetchInvitePreview(token: token) }
         }
+    }
+
+    /// PLAN-signature-layer.md §D6/§D7 frozen contract: the single
+    /// route-in for every non-in-app-navigation way a trip can be opened —
+    /// a widget tap, a Spotlight result (W2-C), a Siri follow-up (W2-C).
+    /// Reuses the exact `tripToOpen` plumbing invite claims already drive
+    /// (`HomeView`'s `.onChange(of: appRouter.tripToOpen)`: pull, push
+    /// `TripRoute`, clear) — one path, no new observer needed.
+    func openTrip(id: UUID) {
+        tripToOpen = id
     }
 
     /// Sanitized preview fetch for the WelcomeView. Drives `invitePreviewState`

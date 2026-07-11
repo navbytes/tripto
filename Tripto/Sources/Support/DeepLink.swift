@@ -66,4 +66,18 @@ enum DeepLink {
         guard segments.count == 1, let token = segments.first, !token.isEmpty else { return nil }
         return token
     }
+
+    /// `tripto://trip/<uuid>` — PLAN-signature-layer.md §D6/§D7's widget/
+    /// Spotlight/Siri open link, resolved through `AppRouter.openTrip(id:)`.
+    /// Custom-scheme only — `TriptoWidgets` never links this file (its
+    /// sources list is deliberately narrow, D6), so it builds the literal
+    /// `tripto://trip/<uuid>` string itself via `.widgetURL(_:)`; no
+    /// universal-link/web form exists for this shape, unlike `/join/<token>`
+    /// and `/t/<token>` above.
+    static func tripId(from url: URL) -> UUID? {
+        guard url.scheme?.lowercased() == scheme, url.host?.lowercased() == "trip" else { return nil }
+        let segments = url.pathComponents.filter { $0 != "/" }
+        guard segments.count == 1, let id = UUID(uuidString: segments[0]) else { return nil }
+        return id
+    }
 }
