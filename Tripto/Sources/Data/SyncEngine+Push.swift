@@ -126,14 +126,28 @@ extension SyncEngine {
 
             for op in ops {
                 guard !isEffectivelyOffline else { break }
-                await push(op)
+                // FIFO dependency assumption: a transient head failure must halt the pass so children
+                // never race their parent (e.g. `duplicateContent`'s trip-then-items enqueue — if the
+                // trip insert 5xxs but its items are pushed anyway, they hit a trip that doesn't exist
+                // server-side and classify PERMANENT, dropped for good even though the trip itself
+                // later succeeds on retry). The next flush pass re-drains FIFO in order once the head
+                // clears. A permanent failure does NOT halt: its dependents are doomed regardless of
+                // push order and will classify permanent themselves on this same pass (or a later
+                // one) — there's nothing left to protect by blocking on it, and blocking would only
+                // head-of-line-block every unrelated op behind a row nobody can fix by waiting.
+                if case .transient = await push(op) {
+                    break
+                }
             }
         } while pushRequestedWhileBusy && !isEffectivelyOffline
 
         await refreshStatusCounts()
     }
 
-    private func push(_ op: OutboxOpSnapshot) async {
+    /// `nil` on success; otherwise the classified failure, so `flushPush()`'s
+    /// loop can tell a transient head failure (must halt the pass) apart
+    /// from a permanent one (must not) — see that loop's own comment.
+    private func push(_ op: OutboxOpSnapshot) async -> PushOutcome? {
         do {
             switch op.op {
             case .upsert:
@@ -142,8 +156,9 @@ extension SyncEngine {
                 try await pushDelete(op)
             }
             try await store.markPushed(opId: op.id)
+            return nil
         } catch {
-            await handlePushFailure(op: op, error: error)
+            return await handlePushFailure(op: op, error: error)
         }
     }
 
@@ -238,7 +253,7 @@ extension SyncEngine {
             .execute()
     }
 
-    private func handlePushFailure(op: OutboxOpSnapshot, error: Error) async {
+    private func handlePushFailure(op: OutboxOpSnapshot, error: Error) async -> PushOutcome {
         let outcome = PushErrorClassifier.classify(
             error, attemptsSoFar: op.attempts, maxAttempts: Self.maxPushAttempts
         )
@@ -254,6 +269,7 @@ extension SyncEngine {
             scheduleRetry(afterAttempts: op.attempts + 1)
         }
         await refreshStatusCounts()
+        return outcome
     }
 
     /// Exponential backoff with jitter, capped at 60s (`SyncBackoff`, also

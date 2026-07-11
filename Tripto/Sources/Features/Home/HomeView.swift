@@ -31,6 +31,12 @@ struct HomeView: View {
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
     @State private var tripPendingDeletion: Trip?
+    /// E2 (docs/BACKLOG.md §E2 "Duplicate trip"): the source trip while its
+    /// "Duplicate Trip" create-mode sheet is up — distinct from `editingTrip`
+    /// (that sheet opens `.edit` mode against the SAME trip; this one opens
+    /// `.create` mode prefilled FROM this trip, producing an entirely new
+    /// one — see `TripCardMenu`/`duplicateContent(from:into:)` below).
+    @State private var tripToDuplicate: Trip?
     /// M3: surfaces `AppRouter.errorToast` (an expired/revoked invite link)
     /// as a persistent `.alert` rather than a toast (finding 6) — a
     /// two-second auto-dismissing toast can be missed entirely, and this is
@@ -206,6 +212,19 @@ struct HomeView: View {
                     // trip" too (previously only reachable via swipe/context
                     // menu) — same confirmation feedback as those.
                     toast = "Trip deleted"
+                }
+            }
+            // E2 (docs/BACKLOG.md §E2): reuses the exact same create sheet —
+            // `mode` is genuinely `.create`, just seeded away from the usual
+            // blank defaults (`TripDuplication.prefill`). Landing back on
+            // this list with a toast (not auto-navigating into the new trip)
+            // matches the existing "Plan a new trip" convention above rather
+            // than inventing a second one.
+            .sheet(item: $tripToDuplicate) { sourceTrip in
+                TripFormView(mode: .create, prefill: TripDuplication.prefill(for: sourceTrip)) { newTrip, _ in
+                    duplicateContent(from: sourceTrip, into: newTrip)
+                    selectedTab = newTrip.bucket().isPastTab ? "Past" : "Upcoming"
+                    toast = "Trip duplicated"
                 }
             }
             .confirmationDialog(
@@ -535,10 +554,11 @@ struct HomeView: View {
                         }
                     }
                 }
-                .modifier(OrganizerTripMenu(
+                .modifier(TripCardMenu(
                     isOrganizer: isOrganizer(of: trip),
                     onEdit: { editingTrip = trip },
-                    onDelete: { tripPendingDeletion = trip }
+                    onDelete: { tripPendingDeletion = trip },
+                    onDuplicate: { tripToDuplicate = trip }
                 ))
             }
 
@@ -948,29 +968,94 @@ struct HomeView: View {
         try? modelContext.save()
         Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
     }
+
+    /// E2 (docs/BACKLOG.md §E2): runs right after `tripToDuplicate`'s create
+    /// sheet saves the new trip row — clones `sourceTrip`'s confirmed items
+    /// and packing list into it. Fetched directly (not via a Home-wide
+    /// `@Query`, which would load every trip's items/packing rows just for
+    /// this rare action) — the same one-off `FetchDescriptor` idiom this
+    /// file already uses in the `appRouter.tripToOpen` handler above.
+    ///
+    /// Insert-then-save mirrors `DemoSeeder.seed`'s bulk pattern (the
+    /// closest existing "insert many rows into a new trip" precedent): one
+    /// batched `modelContext.save()`, not one per row. The outbox enqueue
+    /// loop is async and awaited sequentially inside one `Task` — off the
+    /// synchronous main-thread path, and ordered the same FIFO way the
+    /// outbox's own push already expects.
+    /// ponytail: a genuinely enormous trip could still make the synchronous
+    /// insert loop hitch; `DemoSeeder`'s ~70-item fixture is the existing
+    /// ceiling this app already accepts for this shape of write. Move the
+    /// insert loop to a background `ModelActor` (like `SyncStore`) if that
+    /// ever proves real.
+    private func duplicateContent(from sourceTrip: Trip, into newTrip: Trip) {
+        guard let userId = authManager.userId else { return }
+        let sourceTripId = sourceTrip.id
+        let itemDescriptor = FetchDescriptor<ItineraryItem>(
+            predicate: #Predicate<ItineraryItem> { $0.tripId == sourceTripId }
+        )
+        let packingDescriptor = FetchDescriptor<PackingItem>(
+            predicate: #Predicate<PackingItem> { $0.tripId == sourceTripId }
+        )
+        let sourceItems = (try? modelContext.fetch(itemDescriptor)) ?? []
+        let sourcePacking = (try? modelContext.fetch(packingDescriptor)) ?? []
+        guard !sourceItems.isEmpty || !sourcePacking.isEmpty else { return }
+
+        let now = Date()
+        let dayDelta = TripDuplication.dayDelta(from: sourceTrip.startDate, to: newTrip.startDate)
+        let clonedItems = TripDuplication.clonedItems(
+            from: sourceItems, newTripId: newTrip.id, dayDelta: dayDelta, createdBy: userId, now: now
+        )
+        let clonedPacking = TripDuplication.clonedPackingItems(
+            from: sourcePacking, newTripId: newTrip.id, createdBy: userId, now: now
+        )
+
+        for item in clonedItems { modelContext.insert(item) }
+        for packingItem in clonedPacking { modelContext.insert(packingItem) }
+        try? modelContext.save()
+
+        let newTripId = newTrip.id
+        Task {
+            for item in clonedItems {
+                await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: newTripId, payload: item.toDTO())
+            }
+            for packingItem in clonedPacking {
+                await syncEngine?.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: newTripId, payload: packingItem.toDTO())
+            }
+        }
+    }
 }
 
-/// Conditionally attaches a trip card's edit/delete context menu (UX audit
-/// finding 1). `.contextMenu { if isOrganizer { ... } }` always attaches the
-/// modifier and just leaves the menu's *contents* empty for non-organizers —
-/// that still gives a companion/viewer the long-press lift/haptic affordance
-/// for a menu that opens to nothing. Gating the modifier itself (rather than
-/// its contents) is the fix; the deprecated `contextMenu(ContextMenu?)`
-/// overload is the only bool-gated variant of this API, so an `if`-based
-/// `ViewModifier` is the supported shape instead.
-private struct OrganizerTripMenu: ViewModifier {
+/// Trip card's long-press context menu (UX audit finding 1 for Edit/Delete;
+/// E2, docs/BACKLOG.md §E2, adds Duplicate). Edit/Delete stay organizer-gated
+/// — they mutate the shared trip. Duplicate is ungated: it only reads a trip
+/// every member already has view access to (BUILD_PLAN §5.1 — even a viewer
+/// "can view, not edit"; reading is never the restricted part) and creates a
+/// brand-new trip the duplicator alone owns, the same "read access is
+/// enough" call `TripHeroView`'s E1 overflow menu already made for "Add Trip
+/// to Calendar." Duplicate being unconditionally present also means this
+/// modifier can attach `.contextMenu` unconditionally now — the old
+/// empty-menu-for-non-organizers problem the previous `if isOrganizer { ... }
+/// else { content }` guarded against (a long-press lift/haptic that opened
+/// to nothing) can't recur, since there's always at least one real action.
+private struct TripCardMenu: ViewModifier {
     let isOrganizer: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
+    let onDuplicate: () -> Void
 
     func body(content: Content) -> some View {
-        if isOrganizer {
-            content.contextMenu {
+        content.contextMenu {
+            if isOrganizer {
                 Button("Edit trip", action: onEdit)
+            }
+            Button {
+                onDuplicate()
+            } label: {
+                Label("Duplicate Trip", systemImage: "plus.square.on.square")
+            }
+            if isOrganizer {
                 Button("Delete trip", role: .destructive, action: onDelete)
             }
-        } else {
-            content
         }
     }
 }

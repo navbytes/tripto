@@ -27,6 +27,28 @@ enum TestFixtures {
         )
     }
 
+    /// E2's duplicate-trip tests build a `Trip` directly (not through DTO
+    /// decode), same reasoning as `makeItineraryItem` below — pure model
+    /// logic (`TripDuplication`), no network/SwiftData round trip involved.
+    static func makeTrip(
+        id: UUID = UUID(),
+        title: String = "Lisbon",
+        destination: String = "Lisbon, Portugal",
+        countryCode: String = "PT",
+        startDate: Date,
+        endDate: Date,
+        coverGradient: String = "dusk",
+        tripType: TripType = .family,
+        createdBy: UUID = UUID()
+    ) -> Trip {
+        Trip(
+            id: id, title: title, destination: destination, countryCode: countryCode,
+            startDate: startDate, endDate: endDate, coverGradient: coverGradient,
+            tripTypeRaw: tripType.rawValue, createdBy: createdBy,
+            createdAt: .now, updatedAt: .now, updatedBy: nil
+        )
+    }
+
     /// M2's timeline/tz-math tests build `ItineraryItem`s directly (not
     /// through DTO decode) since they exercise pure model logic
     /// (`ItineraryDayBucketing`, `ItineraryTimeZone`, `TZShiftChip`,
