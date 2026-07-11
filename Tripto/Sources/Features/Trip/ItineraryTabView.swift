@@ -81,7 +81,15 @@ struct ItineraryTabView: View {
     /// failure used to leave `.loading`'s spinner up forever (never surfaced
     /// as `.failed`) — `importTeaser` now renders a tap-to-retry row instead,
     /// wired to `retryImportAddressFetch()`.
-    @State private var importLoadState: ImportAddressCard.LoadState = .loading
+    ///
+    /// A5 (`docs/BACKLOG.md`): starts `.needsConsent` instead of `.loading`
+    /// when email-import consent (`EmailImportConsent`, `TripImportAddress
+    /// .swift`) isn't on record yet — resolved synchronously here (a plain
+    /// `UserDefaults` read) so a not-yet-consented user never sees a
+    /// "Loading…" flash before the pre-consent card. `fetchImportAddressIfNeeded()`
+    /// never overrides this back to `.loading` on its own; only granting
+    /// consent (`grantEmailImportConsentAndFetch()`) does.
+    @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
     @State private var hasFetchedImportAddress = false
     /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
     /// as `typeSize`, both so `TimelineLayout.gutterWidth` can step the
@@ -301,8 +309,15 @@ struct ItineraryTabView: View {
     /// `@Query`-derived `myRole` — see that view's matching doc comment), so
     /// the one-shot `.task` this backs doesn't need to re-run on a later gate
     /// flip the way `ShareTripView`'s does.
+    /// A5 (`docs/BACKLOG.md`): the new second guard clause is the actual
+    /// fetch gate — not-yet-consented leaves `importLoadState` exactly as
+    /// its `.needsConsent` initial value already is (see that property's
+    /// doc comment) and, critically, does NOT set `hasFetchedImportAddress`,
+    /// so a later `grantEmailImportConsentAndFetch()` call still gets its
+    /// one real fetch attempt.
     private func fetchImportAddressIfNeeded() async {
         guard canEdit, !hasFetchedImportAddress else { return }
+        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
         hasFetchedImportAddress = true
         await fetchImportAddress()
     }
@@ -323,6 +338,21 @@ struct ItineraryTabView: View {
     private func retryImportAddressFetch() {
         importLoadState = .loading
         Task { await fetchImportAddress() }
+    }
+
+    /// A5 (`docs/BACKLOG.md`): `importTeaser`'s `.needsConsent` card ->
+    /// `onConsentGranted` — the consent dialog's "Continue" button. Records
+    /// consent, then reuses `retryImportAddressFetch()`'s exact `.loading` +
+    /// fetch shape (this IS a first fetch attempt, not a retry after
+    /// failure, but the mechanics are identical). `hasFetchedImportAddress`
+    /// is set directly here rather than through `fetchImportAddressIfNeeded()`
+    /// — that guard already ran once (and bailed on consent) for this view's
+    /// one-shot `.task`; this is the deferred completion of that same single
+    /// attempt, not a second one.
+    private func grantEmailImportConsentAndFetch() {
+        EmailImportConsent.grant()
+        hasFetchedImportAddress = true
+        retryImportAddressFetch()
     }
 
     @ViewBuilder
@@ -790,6 +820,8 @@ struct ItineraryTabView: View {
                 toast = ClipboardFeedback.copy(address, label: "Import address")
             } onRetry: {
                 retryImportAddressFetch()
+            } onConsentGranted: {
+                grantEmailImportConsentAndFetch()
             }
         }
         .padding(.horizontal, Spacing.xl)
