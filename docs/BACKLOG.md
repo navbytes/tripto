@@ -29,6 +29,13 @@ not switched on). These belong together and should ship as a unit:
   must land with A1/A2.
 - **A4 — Privacy-audit the EI-3 worker once built** (what headers/metadata
   reach `ingest-email`; the shared-secret is the only auth today).
+- **A5 — Explicit AI-processing consent for email import** (Apple Guideline
+  5.1.2(i)). Paste-import now gates its AI send behind an explicit one-time
+  consent dialog; email import uses the same LLM gateway but is triggered by a
+  forwarded email, so there's no in-app send moment to gate. When email import
+  ships, obtain explicit permission at the point the user enables their import
+  email address (and disclose the AI processing there), or the forwarded
+  content is shared with the third-party AI without consent.
 
 ## B. Cost / abuse hardening
 
