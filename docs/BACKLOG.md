@@ -5,7 +5,8 @@ current server-side privacy phase**. Owner-gated launch steps live in
 [RELEASE_READINESS.md](RELEASE_READINESS.md) — this file is the working
 backlog of things we chose to defer, not re-list.
 
-Last updated: 2026-07-11 (after the server-side data-handling privacy audit).
+Last updated: 2026-07-11 (added §E trip import/export evaluation; after the
+server-side data-handling privacy audit).
 
 ---
 
@@ -72,6 +73,43 @@ Not started, intentionally out of v1 — listed so they aren't lost:
 - Real-time flight status (one aggregator API).
 - Suggest-without-editing tray for companions.
 - Expense tracking/splitting, document vault, maps tab, discovery.
+
+## E. Trip import / export (evaluated 2026-07-11 — decided NOT to build generically)
+
+"Import/export 1 or many trips" was raised as one feature; it's really four,
+with very different value. Verdict: no generic import/export for v1 (launch
+prep, no observed demand — YAGNI). Captured here, ranked, to pick by demand.
+The tz-correct, confirmation-code-stripped `EKEvent` building already exists
+per-item (`Models/CalendarEventDraft.swift` + `Features/Trip/BookingDetailView.swift`),
+which is what makes E1 cheap.
+
+- **E1 — Whole-trip Calendar export (near-term quick win).** Add the entire
+  itinerary to Calendar / emit one `.ics`, vs. today's per-booking "Add to
+  calendar". Mostly wiring already-tested code: loop items → `CalendarEventBuilder.draft(for:)`
+  → batch `EKEvent` add, or generate a single `.ics` to share. Client-only, no
+  backend, no opex. Highest value-per-effort of the four; the thing travelers
+  actually mean by "export". Reuse the notes-without-confirmation-code trust
+  boundary already in the draft builder.
+- **E2 — "Duplicate trip" (retention hook).** Clone an existing trip as a
+  template (re-run an annual trip): copy items with dates rebased, drop
+  confirmation codes/bookings, keep the owner as sole member. This is the
+  genuinely useful half of "import" and sidesteps the whole file-format
+  problem. Cheap; local SwiftData copy + one new trip row.
+- **E3 — "Download my data" export (privacy / compliance).** Dump the user's
+  trips + items to JSON on request. Low functional value (already synced to
+  Supabase = the real backup), but a GDPR/App-Store **data-portability trust**
+  signal. Belongs with the privacy posture; do if/when a store or user asks.
+  Sanitize nothing here — it's the owner's own data — but scope strictly to
+  rows the requester owns (RLS already enforces this server-side).
+- **E4 — PDF / printable itinerary (low priority, likely redundant).** The
+  public share link (§5.2) already gives a no-app, read-only view for
+  grandparents; a PDF adds offline-print but little else. Skip unless users ask.
+- **Declined — generic file-based trip *import*.** Loading a whole trip from an
+  exported file means owning a versioned trip-file format, malformed-input
+  handling, schema migration, and RLS-safe insertion with conflict-merge — high
+  cost for a feature no one has requested. The real jobs are already covered:
+  bookings *in* via paste/email import, others *see it* via share links +
+  invites. Revisit only if E1/E2 land and users explicitly want file round-trip.
 
 ---
 
