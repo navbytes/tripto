@@ -23,6 +23,17 @@ enum DemoSeeder {
     @MainActor
     static func seed(modelContext: ModelContext, syncEngine: SyncEngine?, authManager: AuthManager) async -> UUID? {
         guard let userId = authManager.userId else { return nil }
+        // Idempotence guard, checked against the STORE (not callers' @Query
+        // state, which can be un-hydrated at launch — the W1-B evidence run
+        // caught a double-seed race exactly that way: two "Lisbon" rows from
+        // two launches). If the demo trip already exists, return its id so
+        // autopilot navigation still works. DEBUG-only code; a real user trip
+        // titled "Lisbon" being mistaken for the fixture is acceptable here.
+        let demoTitle = "Lisbon"
+        let existing = FetchDescriptor<Trip>(predicate: #Predicate { $0.title == demoTitle })
+        if let hit = try? modelContext.fetch(existing).first {
+            return hit.id
+        }
         let now = Date()
 
         let nyTz = TimeZone(identifier: "America/New_York")!
