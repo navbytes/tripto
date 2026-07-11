@@ -29,6 +29,25 @@ struct ShareRoute: Hashable {
 struct SettingsRoute: Hashable {}
 
 
+/// PLAN-signature-layer.md §D1 point 8: shared cascade for `TripView`'s
+/// arrival garnish (tab bar -> banners -> tab content, in that order at the
+/// three call sites below) -- one `@State` bool (`contentRevealed`) flips
+/// once on appear; each call site's own `delay` is what turns that single
+/// flip into a stagger, same "one flag, several `.animation(...delay:)`
+/// modifiers" recipe as everywhere else in SwiftUI a cascade is built off
+/// one state change rather than several. `Motion.m` already collapses to
+/// an instant, un-delayed apply under Reduce Motion, so there's no separate
+/// RM branch to spell out here.
+private extension View {
+    func revealStagger(_ delay: Double, revealed: Bool, reduceMotion: Bool) -> some View {
+        opacity(revealed ? 1 : 0)
+            .offset(y: revealed ? 0 : 8)
+            .allowsHitTesting(revealed)
+            .accessibilityHidden(!revealed)
+            .animation(Motion.m(Motion.gentle, reduceMotion: reduceMotion)?.delay(delay), value: revealed)
+    }
+}
+
 /// The trip screen (BUILD_PLAN.md §4.2 — THE core screen): cover-gradient
 /// hero, Itinerary · Bookings · Packing sub-tabs (Map/$ Split hidden per
 /// §9.4), and the day-grouped timeline. Renders entirely from the local SwiftData
@@ -99,6 +118,10 @@ struct TripView: View {
     /// `@Observable` instead of a plain `@State` dictionary on `TripView`:
     /// per-scroll-frame writes to it must not invalidate `TripView.body`.
     @State private var heroScrollModel = HeroScrollModel()
+    /// PLAN-signature-layer.md §D1 point 8: one-shot flip on appear driving
+    /// the staggered tab-bar -> banners -> tab-content reveal below (shared
+    /// by both the flight and plain-push arrivals -- see `reveal(delay:)`).
+    @State private var contentRevealed = false
 
     // M2 verify-drill autopilot only (see `WelcomeView`/`HomeView`'s
     // matching hooks) — a DEBUG-only alternate presentation path for
@@ -235,6 +258,7 @@ struct TripView: View {
                 await syncEngine?.observeTrip(id)
                 await syncEngine?.schedulePullTrip(id)
             }
+            contentRevealed = true
         }
         .onDisappear {
             let id = tripId
@@ -327,37 +351,45 @@ struct TripView: View {
             }
 
             tabBar()
+                .revealStagger(0.06, revealed: contentRevealed, reduceMotion: reduceMotion)
 
             // TI-3: same trigger, same spot, on every tab — see
             // `pasteImportPill`'s doc comment for what this replaced.
-            if canAddItems {
-                HStack {
-                    Spacer()
-                    pasteImportPill
+            VStack(spacing: 0) {
+                if canAddItems {
+                    HStack {
+                        Spacer()
+                        pasteImportPill
+                    }
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.top, Spacing.xs)
                 }
-                .padding(.horizontal, Spacing.xl)
-                .padding(.top, Spacing.xs)
-            }
 
-            // EI-2: shown on the Itinerary tab only (`docs/EMAIL_IMPORT_PLAN.md`
-            // "a review banner ... on the Itinerary tab") — Bookings/Packing
-            // stay uncluttered since a suggestion isn't a booking until
-            // confirmed.
-            if selectedTab == .itinerary, !suggestedItems.isEmpty {
-                ImportReviewBanner(count: suggestedItems.count) {
-                    isPresentingImportReview = true
+                // EI-2: shown on the Itinerary tab only (`docs/EMAIL_IMPORT_PLAN.md`
+                // "a review banner ... on the Itinerary tab") — Bookings/Packing
+                // stay uncluttered since a suggestion isn't a booking until
+                // confirmed.
+                if selectedTab == .itinerary, !suggestedItems.isEmpty {
+                    ImportReviewBanner(count: suggestedItems.count) {
+                        isPresentingImportReview = true
+                    }
                 }
-            }
 
-            if selectedTab == .itinerary, !tripProfiles.isEmpty {
-                PersonFilterBar(chips: personFilterChips, selection: $selectedProfileFilter)
-                if let selectedProfileFilter, let selectedProfileFirstName {
-                    PersonFilterBanner(
-                        personFirstName: selectedProfileFirstName,
-                        summary: PersonFilter.summary(items, assignees: itemAssignees, selectedProfileId: selectedProfileFilter)
-                    )
+                if selectedTab == .itinerary, !tripProfiles.isEmpty {
+                    PersonFilterBar(chips: personFilterChips, selection: $selectedProfileFilter)
+                    if let selectedProfileFilter, let selectedProfileFirstName {
+                        PersonFilterBanner(
+                            personFirstName: selectedProfileFirstName,
+                            summary: PersonFilter.summary(items, assignees: itemAssignees, selectedProfileId: selectedProfileFilter)
+                        )
+                    }
                 }
             }
+            // PLAN-signature-layer.md §D1 point 8: one wrapper so this
+            // whole "banners" group cascades in together as stage 2, not
+            // three separately-timed reveals -- an empty `VStack` (no
+            // conditional content applies) costs nothing extra.
+            .revealStagger(0.10, revealed: contentRevealed, reduceMotion: reduceMotion)
 
             ZStack(alignment: .bottomTrailing) {
                 // Finding 5: all three tab views stay alive underneath —
@@ -433,6 +465,7 @@ struct TripView: View {
                         .padding(.bottom, Spacing.xxl)
                 }
             }
+            .revealStagger(0.14, revealed: contentRevealed, reduceMotion: reduceMotion)
         }
         .sheet(isPresented: $isPresentingAdd) {
             AddItemSheet(
@@ -608,11 +641,11 @@ struct TripView: View {
     private var tabButtons: some View {
         ForEach(Tab.allCases, id: \.self) { tab in
             Button {
-                if reduceMotion {
-                    selectedTab = tab
-                } else {
-                    withAnimation(.easeInOut(duration: 0.18)) { selectedTab = tab }
-                }
+                // D2 §policy: named-token migration, same 0.18 easeInOut
+                // timing as before (`MotionTests` pins `Motion.fade` to it) --
+                // `Motion.m` already encodes the reduce-motion instant-apply
+                // this used to spell out as an explicit if/else.
+                withAnimation(Motion.m(Motion.fade, reduceMotion: reduceMotion)) { selectedTab = tab }
             } label: {
                 // Finding 1a: `minHeight: 44` (not the HStack's old
                 // `.padding(.top, Spacing.md)`) so the full 44pt column
