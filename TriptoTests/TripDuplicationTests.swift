@@ -65,6 +65,32 @@ final class TripDuplicationTests: XCTestCase {
         XCTAssertNotEqual(after, naiveShift)
     }
 
+    /// The reverse crossing of the test above — "fall back" (DST end)
+    /// rather than "spring forward" (DST start). Europe/Lisbon's DST end
+    /// (last Sunday of October) always falls inside this window, so the two
+    /// offsets are guaranteed to differ, same guarantee the spring-forward
+    /// test relies on.
+    func testRebasePreservesWallClockTimeAcrossAFallBackDSTBoundary() {
+        let lisbon = TimeZone(identifier: "Europe/Lisbon")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = lisbon
+
+        let before = calendar.date(from: DateComponents(year: 2026, month: 10, day: 1, hour: 14, minute: 30))!
+        let after = TripDuplication.rebase(before, byDays: 40, in: lisbon)
+
+        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: after)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 11)
+        XCTAssertEqual(components.day, 10)
+        XCTAssertEqual(components.hour, 14)
+        XCTAssertEqual(components.minute, 30)
+
+        // Same DST-aware proof as the spring-forward test: the WEST -> WET
+        // offset change partway through means this isn't a naive add.
+        let naiveShift = before.addingTimeInterval(40 * 86_400)
+        XCTAssertNotEqual(after, naiveShift)
+    }
+
     // MARK: - Prefill (title/destination/country/type/cover copied, duration preserved)
 
     func testPrefillTitleIsSuffixedCopyAndCarriesDestinationCountryTypeCover() {
@@ -177,6 +203,26 @@ final class TripDuplicationTests: XCTestCase {
         XCTAssertEqual(components.minute, 20)
     }
 
+    /// "Duplicate to an earlier date" is a supported case, not just
+    /// re-running a past trip forward in time — `dayDelta` can be negative
+    /// (`testDayDeltaIsNegativeWhenNewStartIsEarlier`), and `cloneItem` must
+    /// shift backward, not just forward, when it is.
+    func testCloneItemRebasesStartsAtBackwardWhenDayDeltaIsNegative() {
+        let source = TestFixtures.makeItineraryItem(
+            startsAt: utc.date(from: DateComponents(year: 2026, month: 5, day: 14, hour: 9, minute: 0))!,
+            tz: "UTC"
+        )
+
+        let clone = TripDuplication.cloneItem(source, tripId: UUID(), dayDelta: -4, createdBy: UUID(), now: .now)
+
+        let components = utc.dateComponents([.year, .month, .day, .hour, .minute], from: clone.startsAt)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 5)
+        XCTAssertEqual(components.day, 10)
+        XCTAssertEqual(components.hour, 9)
+        XCTAssertEqual(components.minute, 0)
+    }
+
     /// A flight's `endsAt` rebases in its ARRIVAL zone (`details.arrivalTz`),
     /// not its departure `tz` — mirrors `ItineraryItem.endLocalDay`'s own
     /// rule, so a rebased red-eye keeps the correct landing-day wall clock
@@ -209,6 +255,30 @@ final class TripDuplicationTests: XCTestCase {
         let source = TestFixtures.makeItineraryItem(startsAt: .now, endsAt: nil, tz: "UTC")
         let clone = TripDuplication.cloneItem(source, tripId: UUID(), dayDelta: 1, createdBy: UUID(), now: .now)
         XCTAssertNil(clone.endsAt)
+    }
+
+    /// An "orphan" item — one whose `startsAt` falls before the source
+    /// trip's own `startDate` (a red-eye departing the night before, say).
+    /// `TripDuplication` has no notion of the trip's own date range; it only
+    /// ever rebases by `dayDelta`, so this must land exactly as far before
+    /// the NEW trip's start as the source item was before the OLD trip's
+    /// start — proving there's no hidden clamp to [startDate, endDate] that
+    /// would silently mis-rebase (or drop) it.
+    func testCloneItemRebasesAnOrphanItemThatStartsBeforeTheSourceTripsOwnStartDate() {
+        let tripStart = utc.date(from: DateComponents(year: 2026, month: 5, day: 14))!
+        let newTripStart = utc.date(from: DateComponents(year: 2026, month: 6, day: 20))!
+        let orphanItemStart = utc.date(from: DateComponents(year: 2026, month: 5, day: 13, hour: 23, minute: 45))!
+        let dayDelta = TripDuplication.dayDelta(from: tripStart, to: newTripStart, calendar: utc)
+
+        let source = TestFixtures.makeItineraryItem(startsAt: orphanItemStart, tz: "UTC")
+        let clone = TripDuplication.cloneItem(source, tripId: UUID(), dayDelta: dayDelta, createdBy: UUID(), now: .now)
+
+        let components = utc.dateComponents([.year, .month, .day, .hour, .minute], from: clone.startsAt)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 6)
+        XCTAssertEqual(components.day, 19, "one day before the new trip's start, same as the source was before the old trip's start")
+        XCTAssertEqual(components.hour, 23)
+        XCTAssertEqual(components.minute, 45)
     }
 
     // MARK: - Suggested-items exclusion
