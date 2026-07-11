@@ -190,9 +190,15 @@ item; a passive notice may not suffice.
 **Required-reason APIs (`PrivacyInfo.xcprivacy`):**
 - `NSPrivacyAccessedAPICategoryUserDefaults` → reason **CA92.1** (access to
   the app's own stored values: waitlist tap count, last-used time zones).
-- `NSPrivacyTracking` = false; `NSPrivacyTrackingDomains` = []. Verify
-  supabase-swift ships its own manifest (recent versions do); if not, cover its
-  required-reason usage here too.
+- `NSPrivacyTracking` = false; `NSPrivacyTrackingDomains` = [].
+- **SDK manifests VERIFIED (2026-07-11):** of the shipping SPM deps only
+  swift-crypto ships its own `PrivacyInfo.xcprivacy`. supabase-swift,
+  swift-asn1, swift-http-types, swift-concurrency-extras, swift-clocks do
+  not — but a source scan found **none of them use any required-reason API**
+  (no file-timestamp, system-boot-time, disk-space, or active-keyboard
+  usage), so the app manifest needs no additions beyond UserDefaults, and
+  none of these SDKs is on Apple's designated-SDK list (no signed-manifest
+  mandate). Re-scan if the Supabase SDK is upgraded.
 
 ## 5. Account deletion & Sign in with Apple (compliance detail)
 
