@@ -55,6 +55,15 @@ not switched on). These belong together and should ship as a unit:
 - **C3 — Confirm the production LLM model actually works via Cloudflare AI
   Gateway** (`openai/gpt-4.1-mini`); `anthropic/*` is known-broken there. A
   live smoke test, not yet run.
+- **C4 — Make the UI tests hermetic (durable fix for the anon-sign-in
+  coupling).** Today `TriptoUITests` call the real `signInAnonymously()` via
+  `-uitestAutoSignIn`, so they only pass while backend anonymous sign-in is
+  enabled (see `docs/TESTING.md`), and they occasionally flake on a
+  seed/auth race. Inject a fake authenticated session in the `#if DEBUG`
+  `-uitestAutoSignIn` path instead; then production can keep anonymous
+  sign-in off permanently and the tests stop hitting the network. Decided
+  against for now (2026-07-11) — toggling the backend setting around test
+  sessions is cheap enough at solo/pre-launch scale.
 
 ## D. Larger deferred product work (from BUILD_PLAN v1.5/v2)
 

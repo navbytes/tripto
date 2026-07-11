@@ -33,7 +33,8 @@ Last updated: 2026-07-11.
 - [ ] **Disable anonymous sign-ins.** `enable_anonymous_sign_ins = true` is on
   only for DEBUG testing — turn it off (backend `config.toml` →
   `supabase config push`) before launch. Leaving it on now keeps the test flows
-  working; flip it when you stop testing.
+  working; flip it when you stop testing. The UI tests need it **on** —
+  toggle procedure and why in [`TESTING.md`](TESTING.md).
 - [ ] **Purge the anonymous test trips** accumulated in the DB.
 
 ## 3. Device checks (need a real device)
