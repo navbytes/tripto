@@ -7,6 +7,7 @@ import SwiftUI
 /// visible sign-in-screen flicker for an already-signed-in user.
 struct RootView: View {
     @Environment(AuthManager.self) private var authManager
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -23,6 +24,16 @@ struct RootView: View {
             #if DEBUG
             FontCheck()
             #endif
+        }
+        // PLAN-signature-layer.md §D6: a Live Activity can only ever be
+        // started in the foreground (research §1 — `Activity.request`
+        // throws from the background), so foreground is the one moment
+        // that matters. Needs no `isSignedIn` guard of its own: signed out
+        // means `TripSnapshot.load()` returns nil (wiped on sign-out), so
+        // `evaluate()` naturally has nothing to start.
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            Task { await LiveActivityCoordinator.evaluate() }
         }
     }
 }
