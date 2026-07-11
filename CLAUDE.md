@@ -57,3 +57,45 @@ Publishable:  sb_publishable_4x21OrhJWtnB1tDrhD9ueA_79p98yN-
   fail — follow the acceptance cases.
 - Design tokens (§6.1–6.2) live once as data compiling to Swift constants;
   don't scatter raw hex through views.
+
+## Working in this repo (build, test, gotchas)
+
+- **Build system is XcodeGen.** `project.yml` is the source of truth;
+  `Tripto.xcodeproj` is generated and gitignored. After adding/removing files
+  or changing targets, run `scripts/bootstrap.sh` (`xcodegen generate`) — never
+  hand-edit the `.xcodeproj`.
+- **Test from the CLI** (or ⌘U in Xcode):
+  ```
+  xcodebuild test -project Tripto.xcodeproj -scheme Tripto \
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -only-testing:TriptoTests -derivedDataPath /tmp/dd-<name>
+  ```
+  `TriptoTests` are hermetic (in-memory, no network). `TriptoUITests` drive the
+  real app.
+- **Gotchas (each has cost real time):**
+  - **Always pass your own `-derivedDataPath`** for CLI builds — Xcode locks the
+    shared DerivedData and concurrent builds corrupt each other.
+  - **Auth-write verification needs a SIGNED build.** supabase-swift keeps the
+    session in the Keychain (absent when unsigned) → writes fall back to the
+    anon key → `42501`. Looks like an RLS bug; isn't.
+  - **`TriptoUITests` need backend anonymous sign-in enabled**
+    (`-uitestAutoSignIn` → real `signInAnonymously()`); off at launch. See
+    [docs/TESTING.md](docs/TESTING.md).
+- **Quality bar — non-negotiable on new UI:** full Dynamic Type incl.
+  accessibility sizes, VoiceOver labels, Reduce Motion, AA contrast, 44pt
+  targets. One motion + haptic vocabulary in `Design/Motion.swift` — new
+  animation uses it, no ad-hoc springs. Tokens in the generated
+  `Design/Tokens.swift` + hand-written `PaletteExtras.swift`; no raw hex.
+
+## Docs map
+
+- [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) — **source of truth** (scope,
+  architecture, data model, design system).
+- [docs/RELEASE_READINESS.md](docs/RELEASE_READINESS.md) — App Store submission
+  checklist (remaining actions are owner-only).
+- [docs/TESTING.md](docs/TESTING.md) — running the suites + the anon-sign-in
+  prerequisite.
+- [docs/BACKLOG.md](docs/BACKLOG.md) — deferred work (email-import lifecycle,
+  hardening).
+- [docs/PRIVACY_DISCLOSURE.md](docs/PRIVACY_DISCLOSURE.md),
+  [docs/CHANGELOG.md](docs/CHANGELOG.md).
