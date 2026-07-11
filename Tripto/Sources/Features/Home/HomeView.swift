@@ -152,19 +152,24 @@ struct HomeView: View {
             }
             .toolbar {
                 #if DEBUG
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        Button("Seed demo trip") {
-                            Task { await DemoSeeder.seed(modelContext: modelContext, syncEngine: syncEngine, authManager: authManager) }
+                // `-screenshotMode` hides this debug menu so App Store captures
+                // are clean — it's still a Debug build, so DemoSeeder and the
+                // `-uitest*` hooks keep working while the ladybug stays hidden.
+                if !ProcessInfo.processInfo.arguments.contains("-screenshotMode") {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Button("Seed demo trip") {
+                                Task { await DemoSeeder.seed(modelContext: modelContext, syncEngine: syncEngine, authManager: authManager) }
+                            }
+                            Button("Reset local cache (re-pull)") {
+                                Task { await syncEngine?.resetLocalStore() }
+                            }
+                            Button("Sign out", role: .destructive) {
+                                Task { await authManager.signOut() }
+                            }
+                        } label: {
+                            Image(systemName: "ladybug")
                         }
-                        Button("Reset local cache (re-pull)") {
-                            Task { await syncEngine?.resetLocalStore() }
-                        }
-                        Button("Sign out", role: .destructive) {
-                            Task { await authManager.signOut() }
-                        }
-                    } label: {
-                        Image(systemName: "ladybug")
                     }
                 }
                 #endif
