@@ -85,6 +85,30 @@ final class ItineraryItem {
         get { ItemStatus(rawValue: statusRaw) ?? .confirmed }
         set { statusRaw = newValue.rawValue }
     }
+
+    /// DBG-bookings: the single definition of "is this a booking," replacing
+    /// the two definitions that never met — the import pipeline's `status`
+    /// lifecycle and `BookingsTabView`'s old bare `confirmation != ""` check.
+    /// A flight/hotel/transport item is always a booking (BUILD_PLAN §4.4's
+    /// boarding-pass intent); any other category counts only if it carries a
+    /// real reservation marker, so a plain sightseeing stop doesn't. Checks
+    /// `details.ticketRef`/`details.reservationName` (`ItineraryItem+Details
+    /// .swift`) as well as the top-level `confirmation` column, since a
+    /// paste-imported activity/food item can carry its marker there instead.
+    ///
+    /// Deliberately status-agnostic — `suggested` items are excluded upstream
+    /// by `TripView`'s own `@Query` predicate before either trusted tab ever
+    /// sees `items`, so filtering status here too would double-filter.
+    var isBooking: Bool {
+        switch category {
+        case .flight, .hotel, .transport:
+            return true
+        case .activity, .food:
+            return !(confirmation ?? "").isEmpty
+                || !(details.ticketRef ?? "").isEmpty
+                || !(details.reservationName ?? "").isEmpty
+        }
+    }
 }
 
 struct ItineraryItemDTO: Codable, Sendable, Equatable {

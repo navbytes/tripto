@@ -365,11 +365,14 @@ struct TripView: View {
                     .padding(.top, Spacing.xs)
                 }
 
-                // EI-2: shown on the Itinerary tab only (`docs/EMAIL_IMPORT_PLAN.md`
-                // "a review banner ... on the Itinerary tab") — Bookings/Packing
-                // stay uncluttered since a suggestion isn't a booking until
-                // confirmed.
-                if selectedTab == .itinerary, !suggestedItems.isEmpty {
+                // DBG-bookings Defect 1: shown on Itinerary AND Bookings, not
+                // Itinerary alone — EI-2's original `docs/EMAIL_IMPORT_PLAN.md`
+                // wording only named the Itinerary tab, but a user who pasted
+                // a flight/hotel/car reasonably checks Bookings first, found
+                // no banner and no path to review, and read that as "it
+                // didn't import." Packing stays excluded; a suggestion is
+                // never packing-relevant.
+                if selectedTab == .itinerary || selectedTab == .bookings, !suggestedItems.isEmpty {
                     ImportReviewBanner(count: suggestedItems.count) {
                         isPresentingImportReview = true
                     }
