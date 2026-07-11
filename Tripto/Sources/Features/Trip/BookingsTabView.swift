@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// The "Bookings" sub-tab (BUILD_PLAN.md §4.2 tabs) — every item that has a
-/// confirmation code, flattened and grouped by category, so a traveler can
-/// find "the flight confirmation" without scrolling the full day-by-day
-/// timeline. Tapping a row opens the same `BookingDetailView` the timeline
-/// tab's cards do, via the shared `ItemRoute` navigation destination.
+/// The "Bookings" sub-tab (BUILD_PLAN.md §4.2 tabs) — every `isBooking` item
+/// (`ItineraryItem.isBooking`: a flight/hotel/transport, or any item with a
+/// reservation marker — DBG-bookings), flattened and grouped by category, so
+/// a traveler can find "the flight confirmation" without scrolling the full
+/// day-by-day timeline. Tapping a row opens the same `BookingDetailView` the
+/// timeline tab's cards do, via the shared `ItemRoute` navigation destination.
 struct BookingsTabView: View {
     let items: [ItineraryItem]
     /// Backs the hero's scroll-driven collapse — this tab writes its own
@@ -50,6 +51,12 @@ struct BookingsTabView: View {
     /// separate, awaited closure rather than reusing `onRetryLoad`.
     var onRefresh: (() async -> Void)? = nil
 
+    /// DBG-bookings: membership is `ItineraryItem.isBooking`, not a bare
+    /// `confirmation != ""` check — a confirmed hotel/flight/transport item
+    /// is a booking even with no code (the paste-import pipeline often
+    /// extracts none). `items` is already confirmed-only (`TripView`'s own
+    /// query), so this never needs its own status filter.
+    ///
     /// UX audit finding 5: relevance-aware ordering within each category —
     /// each category's items are split into current/upcoming (sorted
     /// ascending) followed by past (also sorted ascending), instead of one
@@ -62,8 +69,8 @@ struct BookingsTabView: View {
     /// -lookup purpose, kept deliberately minimal (no new sort UI).
     private var groups: [(category: ItemCategory, items: [ItineraryItem])] {
         let now = Date.now
-        let withConfirmation = items.filter { !($0.confirmation ?? "").isEmpty }
-        let grouped = Dictionary(grouping: withConfirmation, by: \.category)
+        let bookings = items.filter(\.isBooking)
+        let grouped = Dictionary(grouping: bookings, by: \.category)
         return ItemCategory.allCases.compactMap { category in
             guard let group = grouped[category], !group.isEmpty else { return nil }
             let current = group.filter { ($0.endsAt ?? $0.startsAt) >= now }.sorted { $0.startsAt < $1.startsAt }
@@ -98,39 +105,59 @@ struct BookingsTabView: View {
                     // than leave a stale one from before it became empty.
                     .onAppear { heroScrollModel.offsets[.bookings] = 0 }
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Spacing.lg) {
-                        ForEach(groups, id: \.category) { group in
-                            VStack(alignment: .leading, spacing: Spacing.sm) {
-                                Text(group.category.displayName.uppercased())
-                                    .font(Typo.body(11, weight: .bold))
-                                    .foregroundStyle(Palette.slate)
-                                    .tracking(0.5)
-                                    .padding(.horizontal, Spacing.lg)
-                                    // Finding 6: lets the VoiceOver headings
-                                    // rotor jump category-to-category on a
-                                    // Bookings tab with many groups, matching
-                                    // `ItineraryTabView.dayHeader`.
-                                    .accessibilityAddTraits(.isHeader)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: Spacing.lg) {
+                            ForEach(groups, id: \.category) { group in
+                                VStack(alignment: .leading, spacing: Spacing.sm) {
+                                    Text(group.category.displayName.uppercased())
+                                        .font(Typo.body(11, weight: .bold))
+                                        .foregroundStyle(Palette.slate)
+                                        .tracking(0.5)
+                                        .padding(.horizontal, Spacing.lg)
+                                        // Finding 6: lets the VoiceOver headings
+                                        // rotor jump category-to-category on a
+                                        // Bookings tab with many groups, matching
+                                        // `ItineraryTabView.dayHeader`.
+                                        .accessibilityAddTraits(.isHeader)
 
-                                VStack(spacing: Spacing.sm) {
-                                    ForEach(group.items) { item in
-                                        BookingRow(item: item, isPending: pendingRowIds.contains(item.id))
+                                    VStack(spacing: Spacing.sm) {
+                                        ForEach(group.items) { item in
+                                            BookingRow(item: item, isPending: pendingRowIds.contains(item.id))
+                                        }
                                     }
+                                    .padding(.horizontal, Spacing.lg)
                                 }
-                                .padding(.horizontal, Spacing.lg)
                             }
                         }
+                        .heroScrollTracking(tab: .bookings, model: heroScrollModel)
+                        .padding(.vertical, Spacing.lg)
+                        .padding(.bottom, Fab.scrollClearance)
                     }
-                    .heroScrollTracking(tab: .bookings, model: heroScrollModel)
-                    .padding(.vertical, Spacing.lg)
-                    .padding(.bottom, Fab.scrollClearance)
+                    .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .bookings)))
+                    // UX audit finding 2: manual pull-to-refresh, matching Home
+                    // — previously the only way to recover from a failed-while
+                    // -online pull here was closing and reopening the trip.
+                    .refreshable { await onRefresh?() }
+                    .task {
+                        // DBG-bookings verify-drill only: scrolls to the first
+                        // booking with no confirmation code, so the fix (
+                        // `isBooking` dropping the old `confirmation != ""`
+                        // membership filter) is screenshot-able — same "no
+                        // scroll-gesture automation available in this
+                        // environment" reasoning as `ItineraryTabView`'s
+                        // `-uitestScrollTimeline`/`-uitestScrollToTag`.
+                        #if DEBUG
+                        if ProcessInfo.processInfo.arguments.contains("-uitestScrollToCodelessBooking") {
+                            let target = groups.flatMap(\.items).first { ($0.confirmation ?? "").isEmpty }
+                            if let target {
+                                try? await Task.sleep(nanoseconds: 300_000_000)
+                                withAnimation { proxy.scrollTo(target.id, anchor: .center) }
+                            }
+                        }
+                        #endif
+                    }
                 }
-                .coordinateSpace(.named(HeroCollapse.scrollSpace(for: .bookings)))
-                // UX audit finding 2: manual pull-to-refresh, matching Home
-                // — previously the only way to recover from a failed-while
-                // -online pull here was closing and reopening the trip.
-                .refreshable { await onRefresh?() }
             }
         }
         .background(Palette.paper)
@@ -314,6 +341,16 @@ private struct BookingRow: View {
         }
     }
 
+    /// DBG-bookings: `isBooking` admits code-less bookings now (a confirmed
+    /// flight/hotel/transport item, or an activity/food item with a
+    /// ticket/reservation marker instead of a top-level code) — nil/empty
+    /// falls back to the same "—" `BookingDetailView`'s grid cells already
+    /// use for an absent value, not a blank cell that reads as a glitch.
+    private var confirmationText: String {
+        let code = item.confirmation ?? ""
+        return code.isEmpty ? "—" : code
+    }
+
     private var card: some View {
         HStack(spacing: Spacing.md) {
             CategoryIconTile(category: item.category, side: 34)
@@ -329,7 +366,7 @@ private struct BookingRow: View {
             // tap away in `BookingDetailView`. Finding 2: `.layoutPriority(1)`
             // so the code shares space with the (also layoutPriority(1))
             // title instead of being starved to a sliver first.
-            Text(item.confirmation ?? "")
+            Text(confirmationText)
                 .font(Typo.mono(Typo.Size.caption))
                 .foregroundStyle(Palette.ink)
                 .lineLimit(1)
@@ -349,7 +386,7 @@ private struct BookingRow: View {
             CategoryIconTile(category: item.category, side: 34)
             VStack(alignment: .leading, spacing: 2) {
                 titleAndDate
-                Text(item.confirmation ?? "")
+                Text(confirmationText)
                     .font(Typo.mono(Typo.Size.caption))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(2)
@@ -367,8 +404,13 @@ private struct BookingRow: View {
             item.category.displayName,
             item.title,
             TimelineBuilder.dayTitleText(item.startLocalDay),
-            "confirmation \(item.confirmation ?? "")",
         ]
+        // DBG-bookings: a code-less booking must not read "confirmation" with
+        // nothing after it (or the visual "—", which VoiceOver would speak as
+        // "dash") — the phrase is omitted outright rather than filled in.
+        if let confirmation = item.confirmation, !confirmation.isEmpty {
+            parts.append("confirmation \(confirmation)")
+        }
         if isPending { parts.append("waiting to sync") }
         return parts.joined(separator: ", ")
     }
