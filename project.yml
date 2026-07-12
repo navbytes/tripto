@@ -270,6 +270,18 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
+  # CI-only scheme: unit tests, nothing else. Xcode Cloud's Test action can't
+  # scope to targets (it runs the whole scheme), and TriptoUITests need the
+  # backend anon-sign-in toggle that stays OFF in production.
+  Tripto-CI:
+    build:
+      targets:
+        Tripto: all
+        TriptoTests: [test]
+    test:
+      config: Debug
+      targets:
+        - TriptoTests
   Tripto:
     build:
       targets:

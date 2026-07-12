@@ -34,6 +34,10 @@ DerivedData and concurrent CLI builds corrupt each other.)
 phase only if `swiftlint` is installed. Run `swiftlint --strict` from the repo
 root before pushing to catch violations early. Same convention as SpotHK.
 
+**CI tests:** Xcode Cloud's Test action uses the `Tripto-CI` scheme — unit
+tests only, Required to Pass. (Cloud can't scope a Test action to targets, and
+the UI tests need the anon-sign-in toggle, so they stay out of the CI scheme.)
+
 ## The anonymous-sign-in prerequisite — read before UI testing
 
 **Decision (2026-07-11):** keep anonymous sign-in **enabled during
