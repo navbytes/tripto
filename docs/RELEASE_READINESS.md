@@ -1,9 +1,20 @@
 # Tripto — Release checklist
 
-**Status: SUBMITTED to App Review 2026-07-12 — Build 4 (1.0 (4)), Waiting for
-Review.** The app is built, tested, privacy-complete, and now in Apple's review
-queue. What remains is the **manual release** (after the §2 backend cutover) once
-review passes. Paste-ready metadata and privacy answers are at the end.
+**Status: SUBMITTED to App Review 2026-07-12 — Build 6 (1.0 (6)), Waiting for
+Review.** Build 6 (commit `5ff10d2`, tag `v1.0-build6`) REPLACED the original
+Build 4: build 4 shipped the calendar-permission crash (missing iOS 17 usage
+keys, fixed in PR #21) and carried none of the on-device-AI / provider-switch /
+export / duplicate-trip work. Build 4 was developer-rejected and build 6
+submitted in its place. What remains is the **manual release** (after the §2
+backend cutover — incl. deploying the share-worker `/privacy` page that now
+describes on-device processing) once review passes. Paste-ready metadata and
+privacy answers are at the end.
+
+Build-number note: Xcode Cloud auto-manages CFBundleVersion from its run
+counter, overriding project.yml's `CURRENT_PROJECT_VERSION` — so a plain
+`main` build increments correctly (build 6 > 4) with no version bump. Pushing a
+release tag also triggers a redundant CI build under a tag group; harmless,
+same commit.
 
 Last updated: 2026-07-12.
 
