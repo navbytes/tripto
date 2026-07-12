@@ -9,6 +9,9 @@ tests require anonymous sign-in to be enabled on the Supabase backend.**
   network, no auth. Always pass regardless of backend config. Run in Xcode
   (⌘U, TriptoTests) or:
   ```
+  ./scripts/bootstrap.sh   # regenerate the project first — the .xcodeproj is
+                           # gitignored (absent in a fresh clone), and a stale
+                           # one silently misses newly added files
   xcodebuild test -project Tripto.xcodeproj -scheme Tripto \
     -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
     -only-testing:TriptoTests

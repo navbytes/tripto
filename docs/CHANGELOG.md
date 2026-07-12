@@ -4,6 +4,14 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Tooling & release infrastructure (2026-07-12)
+
+#### Added
+- **SwiftLint** (shared canonical config with SpotHK): guarded local build phase; `swiftlint --strict` enforced in Xcode Cloud via `ci_post_clone.sh` with a version-pinned install (0.65.0).
+
+#### Fixed
+- **App Store version string now follows `MARKETING_VERSION`:** `CFBundleShortVersionString` was hardcoded to "1.0" in both app and widget plists, so version bumps would silently not ship. Both keys now bind to build settings; `MARKETING_VERSION` reconciled to the shipped "1.0".
+
 ### Email-import & calendar features (2026-07-12)
 
 #### Added
