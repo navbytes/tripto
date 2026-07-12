@@ -6,30 +6,53 @@ import XCTest
 /// "do not attempt to unit-test actual model calls; do NOT invent a mock of
 /// Apple's session" — nothing here does either).
 final class ImportExtractionTests: XCTestCase {
-    // MARK: - Routing matrix (availability × text-fits × consent-state)
+    // MARK: - Routing matrix (mode × availability × text-fits × consent-state)
 
-    /// Full 2x2x2 matrix: on-device requires BOTH availability and fit;
-    /// the consent dialog is required iff the route is `.remote` and
-    /// consent hasn't been granted — on-device NEVER requires it,
-    /// regardless of consent state (this is the pure proof `AIImportConsent`'s
-    /// doc comment on `PasteImportSheet.submit()` points at).
+    /// Full mode × 2x2x2 matrix. `.onDevice` mode is the original 2x2x2
+    /// (availability × fit × consent) reinterpreted with the reason each
+    /// `.remote` now carries; `.cloud` mode collapses all four
+    /// availability×fit combinations to the same `remote(.cloudPreferred)`
+    /// (PLAN.md Addendum: "Cloud mode → always remote(.cloudPreferred)").
+    /// The consent dialog is required iff the route is `.remote` (any
+    /// reason) and consent hasn't been granted — on-device NEVER requires
+    /// it, regardless of consent state (this is the pure proof
+    /// `AIImportConsent`'s doc comment on `PasteImportSheet.submit()`
+    /// points at).
     func testRoutingMatrix() {
-        struct Case { let available: Bool; let fits: Bool; let consentGranted: Bool; let route: ImportRoute; let dialog: Bool }
+        struct Case {
+            let mode: ImportProcessingMode
+            let available: Bool
+            let fits: Bool
+            let consentGranted: Bool
+            let route: ImportRoute
+            let dialog: Bool
+        }
         let cases: [Case] = [
-            Case(available: true, fits: true, consentGranted: true, route: .onDevice, dialog: false),
-            Case(available: true, fits: true, consentGranted: false, route: .onDevice, dialog: false),
-            Case(available: true, fits: false, consentGranted: true, route: .remote, dialog: false),
-            Case(available: true, fits: false, consentGranted: false, route: .remote, dialog: true),
-            Case(available: false, fits: true, consentGranted: true, route: .remote, dialog: false),
-            Case(available: false, fits: true, consentGranted: false, route: .remote, dialog: true),
-            Case(available: false, fits: false, consentGranted: true, route: .remote, dialog: false),
-            Case(available: false, fits: false, consentGranted: false, route: .remote, dialog: true),
+            // mode == .onDevice
+            Case(mode: .onDevice, available: true, fits: true, consentGranted: true, route: .onDevice, dialog: false),
+            Case(mode: .onDevice, available: true, fits: true, consentGranted: false, route: .onDevice, dialog: false),
+            Case(mode: .onDevice, available: true, fits: false, consentGranted: true, route: .remote(.tooLong), dialog: false),
+            Case(mode: .onDevice, available: true, fits: false, consentGranted: false, route: .remote(.tooLong), dialog: true),
+            Case(mode: .onDevice, available: false, fits: true, consentGranted: true, route: .remote(.unavailable), dialog: false),
+            Case(mode: .onDevice, available: false, fits: true, consentGranted: false, route: .remote(.unavailable), dialog: true),
+            Case(mode: .onDevice, available: false, fits: false, consentGranted: true, route: .remote(.unavailable), dialog: false),
+            Case(mode: .onDevice, available: false, fits: false, consentGranted: false, route: .remote(.unavailable), dialog: true),
+            // mode == .cloud: always cloudPreferred, regardless of
+            // availability/fit — same 4 availability×fits combinations, to
+            // prove none of them leak through as a different reason.
+            Case(mode: .cloud, available: true, fits: true, consentGranted: true, route: .remote(.cloudPreferred), dialog: false),
+            Case(mode: .cloud, available: true, fits: true, consentGranted: false, route: .remote(.cloudPreferred), dialog: true),
+            Case(mode: .cloud, available: true, fits: false, consentGranted: true, route: .remote(.cloudPreferred), dialog: false),
+            Case(mode: .cloud, available: false, fits: true, consentGranted: true, route: .remote(.cloudPreferred), dialog: false),
+            Case(mode: .cloud, available: false, fits: false, consentGranted: false, route: .remote(.cloudPreferred), dialog: true),
         ]
         for testCase in cases {
-            let route = ImportRouting.route(isOnDeviceAvailable: testCase.available, textFitsOnDevice: testCase.fits)
+            let route = ImportRouting.route(
+                mode: testCase.mode, isOnDeviceAvailable: testCase.available, textFitsOnDevice: testCase.fits
+            )
             XCTAssertEqual(
                 route, testCase.route,
-                "available=\(testCase.available) fits=\(testCase.fits) -> expected \(testCase.route)"
+                "mode=\(testCase.mode) available=\(testCase.available) fits=\(testCase.fits) -> expected \(testCase.route)"
             )
             let dialog = ImportRouting.requiresConsentDialog(route: route, consentGranted: testCase.consentGranted)
             XCTAssertEqual(
@@ -37,6 +60,51 @@ final class ImportExtractionTests: XCTestCase {
                 "route=\(route) consentGranted=\(testCase.consentGranted) -> expected dialog=\(testCase.dialog)"
             )
         }
+    }
+
+    /// PLAN.md Addendum: "cloud mode NEVER shows re-confirm." The reconfirm
+    /// dialog (`PasteImportSheet.runRemoteFallbackAfterOnDeviceFailure()`)
+    /// is only reachable from `submitOnDevice()`, which the Import button
+    /// only calls when `currentRoute == .onDevice` — this is the pure proof
+    /// that `route(mode: .cloud, ...)` can never produce that value, for
+    /// ANY availability/fit combination, so the reconfirm path is
+    /// unreachable in cloud mode by construction rather than by a runtime
+    /// check anywhere. (Already implied by the `.cloud` rows in
+    /// `testRoutingMatrix` above; kept as its own test so this specific,
+    /// named requirement has one traceable, independently-failing pin.)
+    func testCloudModeNeverRoutesOnDeviceRegardlessOfAvailabilityOrFit() {
+        for available in [true, false] {
+            for fits in [true, false] {
+                XCTAssertNotEqual(
+                    ImportRouting.route(mode: .cloud, isOnDeviceAvailable: available, textFitsOnDevice: fits), .onDevice,
+                    "available=\(available) fits=\(fits): cloud mode must never route on-device"
+                )
+            }
+        }
+    }
+
+    // MARK: - Footer variant selection (per route reason)
+
+    /// PLAN.md Addendum: `.onDevice` keeps the existing on-this-iPhone
+    /// promise line, unchanged.
+    func testFooterVariantForOnDeviceRouteIsThePromiseLine() {
+        XCTAssertEqual(ImportRouting.footerVariant(for: .onDevice), .onDevicePromise)
+    }
+
+    /// `.cloudPreferred` (explicit mode choice) and `.unavailable`
+    /// (incapable device) both truthfully describe "this paste is going to
+    /// the cloud," so they share the pre-existing remote-disclosure line
+    /// rather than each inventing their own.
+    func testFooterVariantForCloudPreferredAndUnavailableShareTheExistingRemoteDisclosure() {
+        XCTAssertEqual(ImportRouting.footerVariant(for: .remote(.cloudPreferred)), .remoteDisclosure)
+        XCTAssertEqual(ImportRouting.footerVariant(for: .remote(.unavailable)), .remoteDisclosure)
+    }
+
+    /// `.tooLong` is the one NEW copy state (PLAN.md Addendum): mode is
+    /// `.onDevice`, on-device IS available, but this one paste still can't
+    /// use it — the honest line, not the promise line.
+    func testFooterVariantForTooLongIsTheHonestyLine() {
+        XCTAssertEqual(ImportRouting.footerVariant(for: .remote(.tooLong)), .tooLongHonesty)
     }
 
     // MARK: - Context-window pre-estimate
@@ -73,8 +141,8 @@ final class ImportExtractionTests: XCTestCase {
         )
         XCTAssertFalse(ImportContextBudget.textFits(text))
         XCTAssertEqual(
-            ImportRouting.route(isOnDeviceAvailable: true, textFitsOnDevice: ImportContextBudget.textFits(text)),
-            .remote
+            ImportRouting.route(mode: .onDevice, isOnDeviceAvailable: true, textFitsOnDevice: ImportContextBudget.textFits(text)),
+            .remote(.tooLong)
         )
     }
 
