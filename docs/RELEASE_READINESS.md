@@ -5,10 +5,11 @@ Review.** Build 6 (commit `5ff10d2`, tag `v1.0-build6`) REPLACED the original
 Build 4: build 4 shipped the calendar-permission crash (missing iOS 17 usage
 keys, fixed in PR #21) and carried none of the on-device-AI / provider-switch /
 export / duplicate-trip work. Build 4 was developer-rejected and build 6
-submitted in its place. What remains is the **manual release** (after the §2
-backend cutover — incl. deploying the share-worker `/privacy` page that now
-describes on-device processing) once review passes. Paste-ready metadata and
-privacy answers are at the end.
+submitted in its place. The **§2 backend cutover is COMPLETE** (2026-07-12:
+share-worker `/privacy` deployed, anonymous sign-ins disabled + verified, anon
+test data purged). What remains is the **manual release** once review passes,
+plus the §3 real-device checks. Paste-ready metadata and privacy answers are at
+the end.
 
 Build-number note: Xcode Cloud auto-manages CFBundleVersion from its run
 counter, overriding project.yml's `CURRENT_PROJECT_VERSION` — so a plain
@@ -46,11 +47,15 @@ Review rejects (ITMS-90111) — reasoning + recipe in
   the on-device + user-selectable-cloud paths, matching Build 6 in review.
   Safe to do pre-approval on a first release: nothing is live to contradict,
   and it makes the served page consistent with the reviewable build.
-- [ ] **Disable anonymous sign-ins — OWNER, via the Dashboard.**
-  Authentication → Sign-In/Providers → **Anonymous → Off**. The Release binary
-  has NO anonymous path (`#if DEBUG` only, compiled out of the shipped app), so
-  this is invisible to App Review — flip it any time before real users exist.
-  ⚠️ **Do NOT `supabase config push`** for this. The committed `config.toml` is
+- [x] **Disable anonymous sign-ins** — DONE 2026-07-12 (owner, via Dashboard).
+  Verified on production: `POST /auth/v1/signup {}` now returns `422
+  anonymous_provider_disabled` ("Anonymous sign-ins are disabled") where it
+  previously issued a token. The Release binary has NO anonymous path
+  (`#if DEBUG` only, compiled out of the shipped app), so this was invisible to
+  App Review. NOTE for future: if you ever need to run `TriptoUITests`, this
+  must be toggled back **on** first (see [`TESTING.md`](TESTING.md)).
+  ⚠️ **Do NOT `supabase config push`** to change this. The committed
+  `config.toml` is
   still local-dev (`site_url = http://127.0.0.1:3000`, localhost redirects, no
   Apple provider block); a push would overwrite the production site URL /
   redirects and break Sign in with Apple for the in-review app and real users.
