@@ -18,30 +18,90 @@ import Foundation
 
 // MARK: - Route decision
 
-/// `PasteImportSheet.submit()`'s two possible paths for a given paste.
+/// `PasteImportSheet.submit()`'s possible paths for a given paste, now
+/// carrying WHY a `.remote` route was chosen (PLAN.md Addendum: the
+/// user-selectable processing mode) — the reason drives which footer line
+/// the user sees (`ImportRouting.footerVariant(for:)`) and, for `.tooLong`,
+/// is the one case that's honest about an on-device MODE choice not
+/// actually being honorable for this particular paste.
 enum ImportRoute: Equatable {
     case onDevice
-    case remote
+    case remote(RemoteReason)
+
+    enum RemoteReason: Equatable {
+        /// `ImportProcessingMode.cloud` (`PasteImportSheet.swift`) — the
+        /// user's own choice, independent of whether on-device extraction
+        /// would otherwise have been available for this paste.
+        case cloudPreferred
+        /// Mode is `.onDevice`, but on-device extraction isn't available on
+        /// this device/OS at all (no Apple Intelligence, or an OS below the
+        /// FoundationModels floor).
+        case unavailable
+        /// Mode is `.onDevice` and on-device extraction IS available here,
+        /// but this specific paste is estimated to overflow the shared
+        /// context window.
+        case tooLong
+    }
 }
 
 enum ImportRouting {
-    /// PLAN.md's routing rule: on-device only when the model is actually
-    /// available on this device/OS *and* the pasted text is estimated to
-    /// fit the shared context window — anything else (including a model
-    /// that's merely available-but-oversized text) goes remote, where the
-    /// existing consent-gated `ingest-text` path has no such limit.
-    static func route(isOnDeviceAvailable: Bool, textFitsOnDevice: Bool) -> ImportRoute {
-        (isOnDeviceAvailable && textFitsOnDevice) ? .onDevice : .remote
+    /// PLAN.md Addendum's routing rule: `.cloud` mode always goes remote —
+    /// it's an explicit user preference, not a fallback, so on-device
+    /// availability/fit are irrelevant to it. `.onDevice` mode keeps the
+    /// original rule (on-device only when the model is actually available
+    /// on this device/OS *and* the pasted text is estimated to fit the
+    /// shared context window), now labeling which of those two guards sent
+    /// it remote instead of collapsing both into one undifferentiated
+    /// `.remote`.
+    static func route(mode: ImportProcessingMode, isOnDeviceAvailable: Bool, textFitsOnDevice: Bool) -> ImportRoute {
+        switch mode {
+        case .cloud:
+            return .remote(.cloudPreferred)
+        case .onDevice:
+            guard isOnDeviceAvailable else { return .remote(.unavailable) }
+            guard textFitsOnDevice else { return .remote(.tooLong) }
+            return .onDevice
+        }
     }
 
     /// Guideline 5.1.2(i) applies only to the third-party remote path — the
     /// on-device route never shares pasted text with anyone, so it must
     /// never show the consent dialog, regardless of whether the user has
-    /// granted/declined it in the past. Remote still gates on
-    /// `AIImportConsent`'s existing recorded decision, unchanged.
+    /// granted/declined it in the past. Every `.remote` reason (including
+    /// `.cloudPreferred`, an explicit mode choice) still gates on
+    /// `AIImportConsent`'s existing recorded decision, unchanged — choosing
+    /// Cloud AI in the "Processing" row is a routing preference, not
+    /// consent; it grants nothing on its own.
     static func requiresConsentDialog(route: ImportRoute, consentGranted: Bool) -> Bool {
-        route == .remote && !consentGranted
+        switch route {
+        case .onDevice: return false
+        case .remote: return !consentGranted
+        }
     }
+
+    /// Which footer line `PasteImportSheet.pasteSection` shows for a given
+    /// route (PLAN.md Addendum: footer variants keyed off the route's
+    /// REASON, not just on-device-vs-not). `.cloudPreferred` and
+    /// `.unavailable` share the existing remote-disclosure line — both
+    /// truthfully describe "this paste is going to the cloud" — while
+    /// `.tooLong` gets its own honest line: the user picked on-device mode,
+    /// on-device IS available, and this one paste still can't use it.
+    static func footerVariant(for route: ImportRoute) -> ImportFooterVariant {
+        switch route {
+        case .onDevice: return .onDevicePromise
+        case .remote(.cloudPreferred), .remote(.unavailable): return .remoteDisclosure
+        case .remote(.tooLong): return .tooLongHonesty
+        }
+    }
+}
+
+/// The three footer copy states `ImportRouting.footerVariant(for:)` can
+/// produce — a pure enum so the SELECTION is unit-testable without
+/// rendering `PasteImportSheet`'s actual `Text` views.
+enum ImportFooterVariant: Equatable {
+    case onDevicePromise
+    case remoteDisclosure
+    case tooLongHonesty
 }
 
 // MARK: - Context-window pre-estimate
