@@ -476,7 +476,7 @@ struct LabeledDatePicker: View {
     var displayedComponents: DatePickerComponents = .date
     /// Lower bound for the picker (F8) — e.g. a trip's end date can't be
     /// dragged before its start date. `nil` keeps the picker unbounded.
-    var minDate: Date? = nil
+    var minDate: Date?
 
     @Environment(\.dynamicTypeSize) private var typeSize
 

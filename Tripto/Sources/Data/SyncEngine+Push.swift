@@ -37,7 +37,7 @@ enum PushErrorClassifier {
         "42501", // insufficient_privilege — RLS denied the write
         "23514", // check_violation
         "23505", // unique_violation
-        "23503", // foreign_key_violation
+        "23503" // foreign_key_violation
     ]
 
     static func classify(_ error: Error, attemptsSoFar: Int, maxAttempts: Int) -> PushOutcome {

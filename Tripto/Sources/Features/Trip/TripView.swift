@@ -29,7 +29,6 @@ struct ShareRoute: Hashable {
 /// per-trip.
 struct SettingsRoute: Hashable {}
 
-
 /// PLAN-signature-layer.md §D1 point 8: shared cascade for `TripView`'s
 /// arrival garnish (tab bar -> banners -> tab content, in that order at the
 /// three call sites below) -- one `@State` bool (`contentRevealed`) flips

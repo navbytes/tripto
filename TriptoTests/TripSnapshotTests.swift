@@ -159,7 +159,7 @@ final class TripSnapshotTests: XCTestCase {
                 id: upcomingId,
                 startDate: dayDate(offsetDays: 5, from: now, calendar),
                 endDate: dayDate(offsetDays: 8, from: now, calendar)
-            ),
+            )
         ])
 
         let inProgressItemId = UUID()
@@ -195,13 +195,13 @@ final class TripSnapshotTests: XCTestCase {
                 id: tripId,
                 startDate: dayDate(offsetDays: -1, from: now, calendar),
                 endDate: dayDate(offsetDays: 3, from: now, calendar)
-            ),
+            )
         ])
 
         let confirmedId = UUID()
         try await store.applyItineraryItems([
             makeFlightDTO(id: confirmedId, tripId: tripId, startsAt: now),
-            makeFlightDTO(id: UUID(), tripId: tripId, startsAt: now.addingTimeInterval(3_600), status: .suggested),
+            makeFlightDTO(id: UUID(), tripId: tripId, startsAt: now.addingTimeInterval(3_600), status: .suggested)
         ], tripId: tripId)
 
         let snapshot = try await store.buildSnapshot(now: now)
@@ -227,7 +227,7 @@ final class TripSnapshotTests: XCTestCase {
                 id: soonerId,
                 startDate: dayDate(offsetDays: 2, from: now, calendar),
                 endDate: dayDate(offsetDays: 4, from: now, calendar)
-            ),
+            )
         ])
 
         let snapshot = try await store.buildSnapshot(now: now)

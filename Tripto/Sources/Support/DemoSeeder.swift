@@ -241,7 +241,7 @@ enum DemoSeeder {
             Draft(label: "First-aid kit", group: .shared, assignee: nil, isDone: false),
             Draft(label: "Rain jackets", group: .clothing, assignee: nil, isDone: false),
             Draft(label: "Swimwear", group: .clothing, assignee: grandmaId, isDone: true),
-            Draft(label: "Portable phone charger", group: .custom, assignee: nil, isDone: false),
+            Draft(label: "Portable phone charger", group: .custom, assignee: nil, isDone: false)
         ]
         return drafts.map { draft in
             PackingItem(
@@ -384,7 +384,7 @@ enum DemoSeeder {
         ("Prado Museum", "Retiro, Madrid", .activity),
         ("Mercado de San Miguel", "Centro, Madrid", .food),
         ("Retiro Park", "Retiro, Madrid", .activity),
-        ("Botín — world's oldest restaurant", "Centro, Madrid", .food),
+        ("Botín — world's oldest restaurant", "Centro, Madrid", .food)
     ]
 
     private static func fillerItems(
@@ -403,7 +403,7 @@ enum DemoSeeder {
             (4, 3, [9, 13, 19]), (5, 3, [9, 13, 19]), (6, 3, [9, 13, 19]),
             (7, 2, [14, 20]),
             (9, 3, [9, 13, 19]), (10, 3, [9, 13, 19]), (11, 3, [9, 13, 19]), (12, 3, [9, 13, 19]),
-            (13, 1, [9]),
+            (13, 1, [9])
         ]
         var items: [ItineraryItem] = []
         var poolIndex = 0

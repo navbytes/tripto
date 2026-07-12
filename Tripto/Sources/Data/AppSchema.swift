@@ -16,7 +16,7 @@ enum AppSchema {
         TripShareLink.self,
         Invite.self,
         OutboxOp.self,
-        SyncIssue.self,
+        SyncIssue.self
     ]
 
     static var schema: Schema { Schema(models) }

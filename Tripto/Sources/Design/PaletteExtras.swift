@@ -103,7 +103,7 @@ public extension CoverGradient {
     static let textScrim = LinearGradient(
         stops: [
             .init(color: .clear, location: 0.35),
-            .init(color: .black.opacity(0.45), location: 1.0),
+            .init(color: .black.opacity(0.45), location: 1.0)
         ],
         startPoint: .top,
         endPoint: .bottom

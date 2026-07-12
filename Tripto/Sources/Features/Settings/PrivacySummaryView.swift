@@ -123,7 +123,7 @@ struct PrivacySummaryView: View {
             symbolName: "nosign",
             title: "No ads, no tracking, no analytics",
             body: "We don\u{2019}t run ads, track you, or use analytics \u{2014} ever."
-        ),
+        )
     ]
 
     /// Served live by the share Worker (web/share-worker/src/index.ts:

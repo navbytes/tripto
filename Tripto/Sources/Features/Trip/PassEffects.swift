@@ -112,12 +112,12 @@ enum PassEffects {
 
     // MARK: - Torn-stub persistence
 
-    /// One `UserDefaults` bool per item+day — self-expiring by
-    /// construction (a new travel day is simply a key that's never been
-    /// set), so there is nothing to reset when the day rolls over.
     // ponytail: stale keys from past travel days are never deleted — a
     // handful of bytes per flight ever torn, across this device only, not
     // worth a cleanup pass.
+    /// One `UserDefaults` bool per item+day — self-expiring by
+    /// construction (a new travel day is simply a key that's never been
+    /// set), so there is nothing to reset when the day rolls over.
     static func tornStubKey(itemId: UUID, day: DayDate) -> String {
         "tornStub.\(itemId.uuidString).\(day.stringValue)"
     }

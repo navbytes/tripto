@@ -46,7 +46,7 @@ final class PasteImportSheetInsertStampingTests: XCTestCase {
         let rows = [
             makeValidatedRow(category: .flight, title: "TAP TP1234"),
             makeValidatedRow(category: .hotel, title: "Memmo Alfama"),
-            makeValidatedRow(category: .activity, title: "Aquarium"),
+            makeValidatedRow(category: .activity, title: "Aquarium")
         ]
 
         for row in rows {

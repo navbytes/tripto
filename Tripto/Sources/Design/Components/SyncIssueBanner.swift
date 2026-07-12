@@ -156,7 +156,7 @@ struct SyncIssuesSheet: View {
             id: UUID(), rowId: UUID(), tableRaw: "trips",
             message: "new row violates row-level security policy (code 42501)", at: .now.addingTimeInterval(-3600),
             retriable: false
-        ),
+        )
     ])
     return VStack {
         SyncIssueBanner()

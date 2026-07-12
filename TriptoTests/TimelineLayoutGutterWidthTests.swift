@@ -23,7 +23,7 @@ final class TimelineLayoutGutterWidthTests: XCTestCase {
 
     func testEveryAccessibilitySizeUsesTheSameSeventySixPointCeiling() {
         for size: DynamicTypeSize in [
-            .accessibility1, .accessibility2, .accessibility3, .accessibility4, .accessibility5,
+            .accessibility1, .accessibility2, .accessibility3, .accessibility4, .accessibility5
         ] {
             XCTAssertEqual(TimelineLayout.gutterWidth(for: size), 76, "\(size) must not exceed the AX ceiling")
         }

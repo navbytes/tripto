@@ -379,7 +379,7 @@ struct ShareTripView: View {
     private static let shareLinkCardScrim = LinearGradient(
         stops: [
             .init(color: .black.opacity(0.45), location: 0.0),
-            .init(color: .clear, location: 0.6),
+            .init(color: .clear, location: 0.6)
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
@@ -1184,7 +1184,7 @@ struct ShareTripView: View {
             "tripId": tripId.uuidString,
             "tripTitle": trips.first?.title ?? "",
             "shareToken": shareToken ?? "",
-            "companionInviteToken": companionToken ?? "",
+            "companionInviteToken": companionToken ?? ""
         ])
     }
     #endif
@@ -1203,7 +1203,7 @@ private struct RolePickerSheet: View {
     /// row inside a `ScrollView`, not a `List`). Defaults to `nil` so a
     /// future non-removable presentation of this sheet doesn't have to
     /// thread a callback through just to omit the row.
-    var onRemove: (() -> Void)? = nil
+    var onRemove: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -1217,7 +1217,7 @@ private struct RolePickerSheet: View {
     private let options: [Option] = [
         Option(role: .organizer, icon: "crown.fill", color: Palette.amber, description: TripRole.organizer.capabilityDescription),
         Option(role: .companion, icon: "pencil", color: CategoryColor.activity.fg, description: TripRole.companion.capabilityDescription),
-        Option(role: .viewer, icon: "eye.fill", color: CategoryColor.flight.fg, description: TripRole.viewer.capabilityDescription),
+        Option(role: .viewer, icon: "eye.fill", color: CategoryColor.flight.fg, description: TripRole.viewer.capabilityDescription)
     ]
 
     var body: some View {

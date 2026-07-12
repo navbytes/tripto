@@ -64,7 +64,7 @@ final class LiveActivityCoordinatorTests: XCTestCase {
         let freshId = UUID()
         let departures: [UUID: Date] = [
             staleId: now.addingTimeInterval(-46 * 60), // departed 46m ago, past the 45m grace
-            freshId: now.addingTimeInterval(-10 * 60), // departed 10m ago, still within grace
+            freshId: now.addingTimeInterval(-10 * 60) // departed 10m ago, still within grace
         ]
         XCTAssertEqual(LiveActivityCoordinator.itemIdsToEnd(runningDepartures: departures, now: now), [staleId])
     }

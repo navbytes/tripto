@@ -49,11 +49,11 @@ struct PasteImportSheet: View {
     /// Called once with the created count as soon as the response comes
     /// back, if non-zero — independent of whether packing items also came
     /// back (the sheet may still be showing the packing checklist).
-    var onItineraryItemsImported: ((Int) -> Void)? = nil
+    var onItineraryItemsImported: ((Int) -> Void)?
     /// Called with the still-checked, possibly-edited rows once the user
     /// confirms the vetting checklist. This sheet never inserts anything
     /// itself — see the type's doc comment.
-    var onPackingConfirmed: (([(label: String, groupKey: PackingGroupKey)]) -> Void)? = nil
+    var onPackingConfirmed: (([(label: String, groupKey: PackingGroupKey)]) -> Void)?
     /// The signed-out local trip creator's own uid (mirrors
     /// `AddItemSheet.tripCreatedBy`'s doc comment exactly) — the on-device
     /// path inserts suggested rows itself, through the same SwiftData +
@@ -62,7 +62,7 @@ struct PasteImportSheet: View {
     /// only reachable in practice if a future call site forgets to pass
     /// this; `submitOnDevice()` falls back to remote rather than inserting
     /// with no creator at all in that case.
-    var tripCreatedBy: UUID? = nil
+    var tripCreatedBy: UUID?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext

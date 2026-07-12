@@ -30,7 +30,7 @@ struct AddItemSheet: View {
     /// satisfy RLS once they sign back in. `nil` for edit-mode call sites
     /// (`BookingDetailView`) that never need it — `save()`'s create branch
     /// is the only place this is read.
-    var tripCreatedBy: UUID? = nil
+    var tripCreatedBy: UUID?
 
     @Query var tripProfiles: [TripProfile]
     @Query private var members: [TripMember]
@@ -1033,7 +1033,7 @@ struct AddItemSheet: View {
         )
         let title = [
             airline.trimmingCharacters(in: .whitespacesAndNewlines),
-            flightNo.trimmingCharacters(in: .whitespacesAndNewlines),
+            flightNo.trimmingCharacters(in: .whitespacesAndNewlines)
         ].filter { !$0.isEmpty }.joined(separator: " ")
 
         var details = ItemDetails.empty

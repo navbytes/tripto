@@ -26,3 +26,14 @@ mkdir -p "$SWIFTPM_DIR"
 cp ci_scripts/Package.resolved "$SWIFTPM_DIR/Package.resolved"
 
 echo "▸ Done: $(ls -d Tripto.xcodeproj) + Package.resolved in place"
+
+# Style gate — Xcode Cloud is the enforcement point (the local build phase in
+# project.yml is guarded/non-blocking so devs without swiftlint installed
+# aren't broken). `--strict` treats warnings as failures, so any violation
+# fails the build here.
+echo "▸ Installing SwiftLint…"
+brew install swiftlint
+
+echo "▸ Running SwiftLint (--strict)…"
+cd "$CI_PRIMARY_REPOSITORY_PATH"
+swiftlint --strict

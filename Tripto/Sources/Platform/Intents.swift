@@ -31,7 +31,7 @@ struct TriptoShortcuts: AppShortcutsProvider {
             phrases: [
                 "When\u{2019}s my next flight in \(.applicationName)?",
                 "What\u{2019}s my next trip in \(.applicationName)?",
-                "Where am I going next in \(.applicationName)?",
+                "Where am I going next in \(.applicationName)?"
             ],
             shortTitle: "Next trip",
             systemImageName: "airplane.departure"

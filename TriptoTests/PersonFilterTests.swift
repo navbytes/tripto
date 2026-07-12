@@ -44,7 +44,7 @@ final class PersonFilterTests: XCTestCase {
         let grandma = UUID()
         let assignees = [
             ItemAssignee(itemId: item.id, profileId: grandma),
-            ItemAssignee(itemId: item.id, profileId: meera),
+            ItemAssignee(itemId: item.id, profileId: meera)
         ]
         let result = PersonFilter.filteredItems([item], assignees: assignees, selectedProfileId: meera)
         XCTAssertEqual(result.map(\.id), [item.id])
@@ -58,7 +58,7 @@ final class PersonFilterTests: XCTestCase {
         let organizer = UUID()
         let assignees = [
             ItemAssignee(itemId: napTime.id, profileId: meera),
-            ItemAssignee(itemId: carRental.id, profileId: organizer),
+            ItemAssignee(itemId: carRental.id, profileId: organizer)
         ]
         let result = PersonFilter.filteredItems(
             [flight, napTime, carRental], assignees: assignees, selectedProfileId: meera
@@ -76,7 +76,7 @@ final class PersonFilterTests: XCTestCase {
         let assignees = [
             ItemAssignee(itemId: itemInScope, profileId: profile1),
             ItemAssignee(itemId: itemInScope, profileId: profile2),
-            ItemAssignee(itemId: itemOutOfScope, profileId: profile1),
+            ItemAssignee(itemId: itemOutOfScope, profileId: profile1)
         ]
         let result = PersonFilter.assigneeProfileIds(assignees, itemIds: [itemInScope])
         XCTAssertEqual(Set(result[itemInScope] ?? []), [profile1, profile2])
@@ -108,7 +108,7 @@ final class PersonFilterTests: XCTestCase {
         let grandma = UUID()
         let assignees = [
             ItemAssignee(itemId: mine.id, profileId: meera),
-            ItemAssignee(itemId: theirs.id, profileId: grandma),
+            ItemAssignee(itemId: theirs.id, profileId: grandma)
         ]
         let summary = PersonFilter.summary([shared, mine, theirs], assignees: assignees, selectedProfileId: meera)
         XCTAssertEqual(summary, PersonFilter.FilterSummary(assignedToPerson: 1, shared: 1, hiddenForOthers: 1))
@@ -121,7 +121,7 @@ final class PersonFilterTests: XCTestCase {
         let grandma = UUID()
         let assignees = [
             ItemAssignee(itemId: item.id, profileId: meera),
-            ItemAssignee(itemId: item.id, profileId: grandma),
+            ItemAssignee(itemId: item.id, profileId: grandma)
         ]
         let summary = PersonFilter.summary([item], assignees: assignees, selectedProfileId: meera)
         XCTAssertEqual(summary.assignedToPerson, 1)
@@ -176,7 +176,7 @@ final class PersonFilterTests: XCTestCase {
             DayDate(year: 2026, month: 5, day: 14).stringValue: 1, // check-in
             DayDate(year: 2026, month: 5, day: 15).stringValue: 1, // staying
             DayDate(year: 2026, month: 5, day: 16).stringValue: 1, // staying
-            DayDate(year: 2026, month: 5, day: 17).stringValue: 1, // check-out
+            DayDate(year: 2026, month: 5, day: 17).stringValue: 1 // check-out
         ])
     }
 

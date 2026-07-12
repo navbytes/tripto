@@ -118,7 +118,7 @@ struct TodayPlanProvider: TimelineProvider {
                 id: UUID(), tripId: tripId, title: "Belém Tower", category: .activity,
                 startsAt: .now.addingTimeInterval(4 * 3600), endsAt: nil, tz: "Europe/Lisbon",
                 fromIATA: nil, toIATA: nil, flightNo: nil, locationName: "Belém, Lisbon"
-            ),
+            )
         ]
         return TripSnapshot(generatedAt: .now, trips: [trip], focusTripItems: items)
     }()

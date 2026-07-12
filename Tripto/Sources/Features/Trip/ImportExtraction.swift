@@ -1,20 +1,20 @@
 import Foundation
 
-/// Pure, OS-version-free half of on-device paste-import (PLAN.md — sibling
-/// to `Platform/OnDeviceExtractor.swift`, which owns everything that
-/// actually touches FoundationModels). Nothing here imports
-/// FoundationModels or SwiftData and nothing is `@available(iOS 26.0, *)`
-/// — nothing here needs a real device/model to test: route decisions,
-/// context-window pre-estimates, and validating/mapping an already-decoded
-/// extraction result into insertable values, all as plain functions over
-/// plain types.
-///
-/// `RawExtractedItem`/`RawExtractedPackingItem` mirror the *shape*
-/// `OnDeviceExtractor`'s `@Generable` types produce (flattened per-category
-/// `details` fields, per PLAN.md) without depending on those types
-/// directly — `OnDeviceExtractor` converts its `@Generable` output into
-/// these before ever calling into this file, so a hermetic test can build
-/// one by hand with no model, no macro, no availability gate.
+// Pure, OS-version-free half of on-device paste-import (PLAN.md — sibling
+// to `Platform/OnDeviceExtractor.swift`, which owns everything that
+// actually touches FoundationModels). Nothing here imports
+// FoundationModels or SwiftData and nothing is `@available(iOS 26.0, *)`
+// — nothing here needs a real device/model to test: route decisions,
+// context-window pre-estimates, and validating/mapping an already-decoded
+// extraction result into insertable values, all as plain functions over
+// plain types.
+//
+// `RawExtractedItem`/`RawExtractedPackingItem` mirror the *shape*
+// `OnDeviceExtractor`'s `@Generable` types produce (flattened per-category
+// `details` fields, per PLAN.md) without depending on those types
+// directly — `OnDeviceExtractor` converts its `@Generable` output into
+// these before ever calling into this file, so a hermetic test can build
+// one by hand with no model, no macro, no availability gate.
 
 // MARK: - Route decision
 
@@ -352,6 +352,6 @@ enum ImportDateParsing {
     private static let floatingFormats = [
         "yyyy-MM-dd'T'HH:mm:ss",
         "yyyy-MM-dd'T'HH:mm",
-        "yyyy-MM-dd",
+        "yyyy-MM-dd"
     ]
 }

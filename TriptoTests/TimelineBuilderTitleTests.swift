@@ -58,7 +58,7 @@ final class TimelineBuilderTitleTests: XCTestCase {
     func testIsTodayMatchesOnlyTheGivenDay() {
         let sections = [
             section(day: day(2026, 5, 15), dayNumber: 2),
-            section(day: day(2026, 5, 16), dayNumber: 3),
+            section(day: day(2026, 5, 16), dayNumber: 3)
         ]
         let models = TimelineBuilder.build(
             sections: sections, pendingRowIds: [], myUserId: nil, namesById: [:], today: day(2026, 5, 16)
@@ -117,7 +117,7 @@ final class TimelineBuilderNowLineTests: XCTestCase {
         let sections = [
             ItineraryDayBucketing.Section(
                 day: day(2026, 5, 15), dayNumber: 2, rows: [.staying(item: stay, night: 2, totalNights: 3)]
-            ),
+            )
         ]
         let models = TimelineBuilder.build(
             sections: sections, pendingRowIds: [], myUserId: nil, namesById: [:],
@@ -158,7 +158,7 @@ final class TimelineBuilderNowLineTests: XCTestCase {
             ItineraryDayBucketing.Section(
                 day: day(2026, 5, 15), dayNumber: 2,
                 rows: [.item(pastCard), .checkOut(item: pastCheckout), .item(futureCard)]
-            ),
+            )
         ]
 
         let models = TimelineBuilder.build(
@@ -168,7 +168,7 @@ final class TimelineBuilderNowLineTests: XCTestCase {
             models[0].rows.map(\.id),
             [
                 "card-\(pastCard.id.uuidString)", "checkout-\(pastCheckout.id.uuidString)",
-                "now-line", "card-\(futureCard.id.uuidString)",
+                "now-line", "card-\(futureCard.id.uuidString)"
             ]
         )
 
@@ -208,7 +208,7 @@ final class TimelineBuilderNowLineTests: XCTestCase {
         let now = instant(2026, 5, 15, 0, 0)
         let futureClockButPastDay = TestFixtures.makeItineraryItem(startsAt: instant(2026, 5, 15, 2, 0))
         let sections = [
-            ItineraryDayBucketing.Section(day: day(2026, 5, 14), dayNumber: 1, rows: [.item(futureClockButPastDay)]),
+            ItineraryDayBucketing.Section(day: day(2026, 5, 14), dayNumber: 1, rows: [.item(futureClockButPastDay)])
         ]
 
         let models = TimelineBuilder.build(
