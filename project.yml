@@ -14,7 +14,9 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1" # iPhone first (BUILD_PLAN.md §3.1, §9.2) — iPad/Mac are fast-follows, not v1.
-    MARKETING_VERSION: "1.0.0"
+    # "1.0" = the version actually shipped/in review on the App Store (was
+    # drifted at "1.0.0" while the plists hardcoded "1.0"). Bump releases here.
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "2"
     # Xcode's "recommended settings" nudge, pinned here (not via the Xcode UI —
     # the .xcodeproj is generated & gitignored, so UI edits get wiped on the
@@ -72,11 +74,13 @@ targets:
       # project.yml is the single source of truth, not this file.
       path: Tripto/Generated/Info.plist
       properties:
-        # Drive the version keys from build settings — xcodegen otherwise
-        # hardcodes CFBundleVersion "1", so bumping CURRENT_PROJECT_VERSION was
-        # a silent no-op (upload 409'd on a duplicate build number). Bump the
-        # build by editing CURRENT_PROJECT_VERSION in settings.base above.
-        CFBundleShortVersionString: "1.0"
+        # Drive BOTH version keys from build settings — xcodegen otherwise
+        # hardcodes them, so bumping the setting is a silent no-op (bit once
+        # for CFBundleVersion: upload 409'd on a duplicate build number; the
+        # hardcoded short-version string was the same bug caught later by QA).
+        # Bump releases via MARKETING_VERSION / CURRENT_PROJECT_VERSION in
+        # settings.base above.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UIAppFonts:
           - Fraunces-Variable.ttf
@@ -208,7 +212,7 @@ targets:
       path: TriptoWidgets/Generated/Info.plist
       properties:
         # Match the app's version keys (same xcodegen-hardcode fix as above).
-        CFBundleShortVersionString: "1.0"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # App Store validation (error 90360) requires the extension's
         # Info.plist to carry a CFBundleDisplayName.
