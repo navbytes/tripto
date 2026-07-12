@@ -51,7 +51,7 @@ final class PullApplyReconcileTests: XCTestCase {
         try await store.applyTrips([
             TestFixtures.makeTripDTO(id: keepId, title: "Keep"),
             TestFixtures.makeTripDTO(id: goneId, title: "Gone"),
-            TestFixtures.makeTripDTO(id: pendingId, title: "Pending edit"),
+            TestFixtures.makeTripDTO(id: pendingId, title: "Pending edit")
         ])
 
         // pendingId has an unpushed local edit sitting in the outbox.
@@ -133,7 +133,7 @@ final class PullApplyReconcileTests: XCTestCase {
         try await store.applyProfiles([
             ProfileDTO(id: staleId, displayName: "Cam", avatarColor: "coral", createdAt: .now, updatedAt: .now),
             ProfileDTO(id: keepA, displayName: "Ana (old)", avatarColor: "coral", createdAt: .now, updatedAt: .now),
-            ProfileDTO(id: keepB, displayName: "Bo", avatarColor: "coral", createdAt: .now, updatedAt: .now),
+            ProfileDTO(id: keepB, displayName: "Bo", avatarColor: "coral", createdAt: .now, updatedAt: .now)
         ])
 
         // Next pull: keepA/keepB decode fine (keepA renamed server-side);
@@ -169,7 +169,7 @@ final class PullApplyReconcileTests: XCTestCase {
         try await store.applyProfiles([
             ProfileDTO(id: goneId, displayName: "Cam", avatarColor: "coral", createdAt: .now, updatedAt: .now),
             ProfileDTO(id: keepA, displayName: "Ana", avatarColor: "coral", createdAt: .now, updatedAt: .now),
-            ProfileDTO(id: keepB, displayName: "Bo", avatarColor: "coral", createdAt: .now, updatedAt: .now),
+            ProfileDTO(id: keepB, displayName: "Bo", avatarColor: "coral", createdAt: .now, updatedAt: .now)
         ])
 
         // goneId is genuinely absent this pull — no malformed rows at all.

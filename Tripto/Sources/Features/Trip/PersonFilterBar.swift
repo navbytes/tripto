@@ -224,7 +224,7 @@ struct PersonFilterBanner: View {
     PersonFilterBar(
         chips: [
             .init(id: UUID(), firstName: "Priya", initial: "P", colorName: "moss"),
-            .init(id: UUID(), firstName: "Kiran", initial: "K", colorName: "plum"),
+            .init(id: UUID(), firstName: "Kiran", initial: "K", colorName: "plum")
         ],
         selection: .constant(nil)
     )

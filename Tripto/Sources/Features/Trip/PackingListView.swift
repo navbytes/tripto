@@ -43,11 +43,11 @@ struct PackingListView: View {
     var didLoadFail: Bool = false
     /// UX audit finding 3: retries this trip's pull — `TripView` wires this
     /// to `syncEngine.schedulePullTrip(trip.id)`, matching the sibling tabs.
-    var onRetryLoad: (() -> Void)? = nil
+    var onRetryLoad: (() -> Void)?
     /// UX audit finding 2 (cross-screen): backs pull-to-refresh on this tab
     /// — see `ItineraryTabView.onRefresh`'s doc comment for why this is a
     /// separate, awaited closure rather than reusing `onRetryLoad`.
-    var onRefresh: (() async -> Void)? = nil
+    var onRefresh: (() async -> Void)?
 
     @Query private var packingItems: [PackingItem]
     @Query private var tripProfiles: [TripProfile]

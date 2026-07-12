@@ -32,7 +32,7 @@ struct ItineraryTabView: View {
     /// filtered-to-zero trip that still has *other* items must not claim
     /// the trip itself has nothing planned (this milestone's brief's own
     /// context banner already states the "N of M" count above this view).
-    var filteredPersonName: String? = nil
+    var filteredPersonName: String?
     @Binding var toast: String?
     /// Finding 2: true while this trip's first pull this session hasn't
     /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
@@ -65,14 +65,14 @@ struct ItineraryTabView: View {
     /// UX audit finding 1: retries this trip's pull — `TripView` wires this
     /// to `syncEngine.schedulePullTrip(trip.id)`. `nil` only in previews/
     /// tests that don't wire a live sync engine.
-    var onRetryLoad: (() -> Void)? = nil
+    var onRetryLoad: (() -> Void)?
     /// UX audit finding 2 (cross-screen): backs pull-to-refresh on this tab
     /// — `TripView` wires this to an awaited `syncEngine.pullTrip(trip.id)`,
     /// same trigger `onRetryLoad` uses, but awaited so the native refresh
     /// spinner stays up until the pull actually finishes (matching Home's
     /// `.refreshable` gesture, which was previously the only place in the
     /// app offering a manual refresh). `nil` only in previews/tests.
-    var onRefresh: (() async -> Void)? = nil
+    var onRefresh: (() async -> Void)?
 
     /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address
     /// (`get_or_create_trip_import_address`), fetched once per trip visit

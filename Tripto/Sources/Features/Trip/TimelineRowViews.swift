@@ -587,7 +587,7 @@ struct TZShiftChipRow: View, Equatable {
                     assignees: [
                         .init(id: UUID(), initial: "N", colorName: "amber", name: "Naveen"),
                         .init(id: UUID(), initial: "P", colorName: "moss", name: "Priya"),
-                        .init(id: UUID(), initial: "K", colorName: "plum", name: "Kiran"),
+                        .init(id: UUID(), initial: "K", colorName: "plum", name: "Kiran")
                     ],
                     tags: ["nap", "stroller-ok", "kids-menu"], isPast: false
                 ),

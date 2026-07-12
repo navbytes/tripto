@@ -109,7 +109,7 @@ struct WrapLayout: Layout {
             AvatarStack(
                 people: [
                     .init(id: UUID(), initial: "N", colorName: "amber"),
-                    .init(id: UUID(), initial: "P", colorName: "moss"),
+                    .init(id: UUID(), initial: "P", colorName: "moss")
                 ],
                 maxVisible: 4,
                 diameter: 18

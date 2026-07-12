@@ -872,35 +872,35 @@ struct BookingDetailView: View {
                 ("Passenger", displayName(for: item.createdBy)),
                 ("Seat", details.seat ?? "—"),
                 ("Confirmation", item.confirmation ?? "—"),
-                ("Terminal · Gate", terminalGateText(details)),
+                ("Terminal · Gate", terminalGateText(details))
             ]
         case .hotel:
             return [
                 ("Guest", displayName(for: item.createdBy)),
                 ("Nights", item.stayNightCount > 0 ? "\(item.stayNightCount)" : "—"),
                 ("Confirmation", item.confirmation ?? "—"),
-                ("Check-in", ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz)),
+                ("Check-in", ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz))
             ]
         case .activity:
             return [
                 ("Date", TimelineBuilder.dayTitleText(item.startLocalDay)),
                 ("Time", timeAndZoneText(item)),
                 ("Ticket", item.confirmation ?? "—"),
-                ("Address", details.address ?? (item.locationName.isEmpty ? "—" : item.locationName)),
+                ("Address", details.address ?? (item.locationName.isEmpty ? "—" : item.locationName))
             ]
         case .food:
             return [
                 ("Date", TimelineBuilder.dayTitleText(item.startLocalDay)),
                 ("Time", timeAndZoneText(item)),
                 ("Party size", details.partySize.map(String.init) ?? "—"),
-                ("Reservation", details.reservationName ?? "—"),
+                ("Reservation", details.reservationName ?? "—")
             ]
         case .transport:
             return [
                 ("Provider", details.provider ?? "—"),
                 ("Confirmation", item.confirmation ?? "—"),
                 ("Pickup", ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz)),
-                ("Drop-off", ItineraryTimeZone.timeString(item.endsAt ?? item.startsAt, in: item.effectiveTz)),
+                ("Drop-off", ItineraryTimeZone.timeString(item.endsAt ?? item.startsAt, in: item.effectiveTz))
             ]
         }
     }

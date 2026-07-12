@@ -82,13 +82,13 @@ struct AvatarStack: View {
     VStack(alignment: .leading, spacing: Spacing.lg) {
         AvatarStack(people: [
             .init(id: UUID(), initial: "N", colorName: "amber"),
-            .init(id: UUID(), initial: "P", colorName: "moss"),
+            .init(id: UUID(), initial: "P", colorName: "moss")
         ])
         AvatarStack(people: [
             .init(id: UUID(), initial: "N", colorName: "amber"),
             .init(id: UUID(), initial: "P", colorName: "moss"),
             .init(id: UUID(), initial: "K", colorName: "plum"),
-            .init(id: UUID(), initial: "M", colorName: "sky"),
+            .init(id: UUID(), initial: "M", colorName: "sky")
         ])
         // 6 people at the default maxVisible of 3 (finding 6): 2 avatars +
         // a "+4" overflow chip, total circle count still 3.
@@ -98,7 +98,7 @@ struct AvatarStack: View {
             .init(id: UUID(), initial: "K", colorName: "plum"),
             .init(id: UUID(), initial: "M", colorName: "sky"),
             .init(id: UUID(), initial: "S", colorName: "amber"),
-            .init(id: UUID(), initial: "T", colorName: "moss"),
+            .init(id: UUID(), initial: "T", colorName: "moss")
         ])
     }
     .padding(Spacing.xl)

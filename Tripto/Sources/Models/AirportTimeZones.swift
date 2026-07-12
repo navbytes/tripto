@@ -33,7 +33,7 @@ enum AirportTimeZones {
         "GRU": "America/Sao_Paulo", "EZE": "America/Argentina/Buenos_Aires",
         "GIG": "America/Sao_Paulo", "BOG": "America/Bogota", "SCL": "America/Santiago",
         "JNB": "Africa/Johannesburg", "CPT": "Africa/Johannesburg", "CAI": "Africa/Cairo",
-        "NBO": "Africa/Nairobi", "CMN": "Africa/Casablanca",
+        "NBO": "Africa/Nairobi", "CMN": "Africa/Casablanca"
     ]
 
     /// The IANA zone identifier for a 3-letter IATA code, or nil for a code
@@ -72,7 +72,7 @@ enum AirportTimeZones {
         "GRU": "S\u{E3}o Paulo", "EZE": "Buenos Aires",
         "GIG": "Rio de Janeiro", "BOG": "Bogot\u{E1}", "SCL": "Santiago",
         "JNB": "Johannesburg", "CPT": "Cape Town", "CAI": "Cairo",
-        "NBO": "Nairobi", "CMN": "Casablanca",
+        "NBO": "Nairobi", "CMN": "Casablanca"
     ]
 
     /// The actual airport city for a 3-letter IATA code, or nil for a code

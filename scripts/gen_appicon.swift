@@ -171,7 +171,7 @@ func renderIcon(groundStops: [String]) -> CGImage {
         CGPoint(x: -0.55, y: 0.10),
         CGPoint(x: -0.78, y: 0.00),
         CGPoint(x: -0.55, y: -0.10),
-        CGPoint(x: -0.95, y: -0.50),
+        CGPoint(x: -0.95, y: -0.50)
     ]
     let planePath = CGMutablePath()
     planePath.addLines(between: planeLocal.map { place($0, scale: scale, angleDegrees: angle, center: center) })

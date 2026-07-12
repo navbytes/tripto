@@ -19,7 +19,7 @@ struct BookingsTabView: View {
     /// Backs the empty state's CTA; `TripView` also shows the shared FAB on
     /// this tab for editors (UX audit finding 5), so this isn't the only
     /// entry point once there's at least one booking on screen.
-    var onAdd: (() -> Void)? = nil
+    var onAdd: (() -> Void)?
     /// Finding 2: true while this trip's first pull this session hasn't
     /// completed yet — see `TripView.awaitingFirstTripPull`'s doc comment.
     var isAwaitingFirstSync: Bool = false
@@ -45,11 +45,11 @@ struct BookingsTabView: View {
     /// UX audit finding 1: retries this trip's pull — `TripView` wires this
     /// to `syncEngine.schedulePullTrip(trip.id)`. `nil` only in previews/
     /// tests that don't wire a live sync engine.
-    var onRetryLoad: (() -> Void)? = nil
+    var onRetryLoad: (() -> Void)?
     /// UX audit finding 2 (cross-screen): backs pull-to-refresh on this tab
     /// — see `ItineraryTabView.onRefresh`'s doc comment for why this is a
     /// separate, awaited closure rather than reusing `onRetryLoad`.
-    var onRefresh: (() async -> Void)? = nil
+    var onRefresh: (() async -> Void)?
 
     /// DBG-bookings: membership is `ItineraryItem.isBooking`, not a bare
     /// `confirmation != ""` check — a confirmed hotel/flight/transport item
@@ -403,7 +403,7 @@ private struct BookingRow: View {
         var parts = [
             item.category.displayName,
             item.title,
-            TimelineBuilder.dayTitleText(item.startLocalDay),
+            TimelineBuilder.dayTitleText(item.startLocalDay)
         ]
         // DBG-bookings: a code-less booking must not read "confirmation" with
         // nothing after it (or the visual "—", which VoiceOver would speak as

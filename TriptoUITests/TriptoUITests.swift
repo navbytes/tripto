@@ -49,7 +49,7 @@ final class TriptoUITests: XCTestCase {
 
         let app = XCUIApplication()
         app.launchArguments = [
-            "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestOpenFirstTrip",
+            "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestOpenFirstTrip"
         ] + extraArgs
         app.launch()
         return app

@@ -5,7 +5,7 @@ tests require anonymous sign-in to be enabled on the Supabase backend.**
 
 ## Test suites
 
-- **Unit tests** (`TriptoTests`, ~420) — hermetic: in-memory SwiftData, no
+- **Unit tests** (`TriptoTests`, 509 as of 2026-07-12) — hermetic: in-memory SwiftData, no
   network, no auth. Always pass regardless of backend config. Run in Xcode
   (⌘U, TriptoTests) or:
   ```
@@ -25,6 +25,11 @@ tests require anonymous sign-in to be enabled on the Supabase backend.**
 (If you run these from the command line while Xcode is open on the project, add
 your own `-derivedDataPath /tmp/dd-xyz` — Xcode holds a lock on the shared
 DerivedData and concurrent CLI builds corrupt each other.)
+
+**Lint:** CI enforces `swiftlint --strict` (installed and run by
+`ci_scripts/ci_post_clone.sh`); the local build runs a non-strict SwiftLint
+phase only if `swiftlint` is installed. Run `swiftlint --strict` from the repo
+root before pushing to catch violations early. Same convention as SpotHK.
 
 ## The anonymous-sign-in prerequisite — read before UI testing
 

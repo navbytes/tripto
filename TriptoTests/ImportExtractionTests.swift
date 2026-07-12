@@ -44,7 +44,7 @@ final class ImportExtractionTests: XCTestCase {
             Case(mode: .cloud, available: true, fits: true, consentGranted: false, route: .remote(.cloudPreferred), dialog: true),
             Case(mode: .cloud, available: true, fits: false, consentGranted: true, route: .remote(.cloudPreferred), dialog: false),
             Case(mode: .cloud, available: false, fits: true, consentGranted: true, route: .remote(.cloudPreferred), dialog: false),
-            Case(mode: .cloud, available: false, fits: false, consentGranted: false, route: .remote(.cloudPreferred), dialog: true),
+            Case(mode: .cloud, available: false, fits: false, consentGranted: false, route: .remote(.cloudPreferred), dialog: true)
         ]
         for testCase in cases {
             let route = ImportRouting.route(

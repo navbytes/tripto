@@ -207,7 +207,7 @@ struct TripCard: View {
         trip: trip,
         people: [
             .init(id: UUID(), initial: "N", colorName: "amber"),
-            .init(id: UUID(), initial: "P", colorName: "moss"),
+            .init(id: UUID(), initial: "P", colorName: "moss")
         ],
         isPending: true
     )
@@ -274,7 +274,7 @@ extension TripCard {
             trip: trip,
             people: [
                 .init(id: UUID(), initial: "N", colorName: "amber"),
-                .init(id: UUID(), initial: "P", colorName: "moss"),
+                .init(id: UUID(), initial: "P", colorName: "moss")
             ],
             isPending: true
         )
