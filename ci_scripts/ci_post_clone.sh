@@ -31,9 +31,15 @@ echo "▸ Done: $(ls -d Tripto.xcodeproj) + Package.resolved in place"
 # project.yml is guarded/non-blocking so devs without swiftlint installed
 # aren't broken). `--strict` treats warnings as failures, so any violation
 # fails the build here.
-echo "▸ Installing SwiftLint…"
-brew install swiftlint
+# Pinned: the --strict gate must not drift with whatever brew serves that day
+# (a new SwiftLint release enabling a default rule would redden unrelated
+# builds). Bump deliberately, re-baselining violations in the same PR.
+SWIFTLINT_VERSION="0.65.0"
+echo "▸ Installing SwiftLint ${SWIFTLINT_VERSION} (pinned)…"
+SWIFTLINT_TMP="$(mktemp -d)"
+curl -fsSL "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/portable_swiftlint.zip" -o "$SWIFTLINT_TMP/swiftlint.zip"
+unzip -q "$SWIFTLINT_TMP/swiftlint.zip" -d "$SWIFTLINT_TMP"
 
-echo "▸ Running SwiftLint (--strict)…"
+echo "▸ Running SwiftLint ${SWIFTLINT_VERSION} (--strict)…"
 cd "$CI_PRIMARY_REPOSITORY_PATH"
-swiftlint --strict
+"$SWIFTLINT_TMP/swiftlint" --strict

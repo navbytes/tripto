@@ -23,12 +23,9 @@ disabled_rules:
   # not a style smell.
   - multiple_closures_with_trailing_closure
   # Short domain abbreviations (tz, op, id-style pairs, r/g/b) read fine
-  # in context; this rule flags length, not casing or clarity.
+  # in context. Note: disabling this also drops the rule's casing checks —
+  # accepted; naming is a review concern here.
   - identifier_name
-  # Only fires in a standalone dev script (scripts/gen_appicon.swift);
-  # "fixing" it means changing error-handling behavior, which is a
-  # semantic change, not a lint-only one.
-  - force_try
 
 # Thresholds nudged up from default to match this codebase's real (already
 # reviewed) ceilings, not disabled outright — each still catches genuine
@@ -43,8 +40,13 @@ cyclomatic_complexity:
   warning: 20
   error: 30
 
+# Union of both repos' non-app paths so the file stays byte-identical across
+# them (entries that don't exist in a given repo are harmless). `scripts` holds
+# standalone dev tooling (e.g. gen_appicon.swift's force_try) — excluded so
+# app code keeps the full default safety rules, incl. force_try.
 excluded:
   - Tripto/Generated
   - TriptoWidgets/Generated
+  - scripts
   - .build
   - DerivedData
