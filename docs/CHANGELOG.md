@@ -13,14 +13,16 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 #### Fixed
 - **Calendar-permission crash:** app no longer crashes on devices without prior calendar access grant when attempting calendar export. Permission request is graceful and recovery is user-controlled.
 
-### On-device import processing (2026-07-12)
+### On-device import processing with user choice (2026-07-12)
 
 #### Added
-- **Paste-import extraction runs on-device** on iOS 26+ with Apple Intelligence enabled (using Apple's built-in language model), keeping pasted text on the device and eliminating the privacy consent dialog for that path.
+- **User-selectable import processing:** on iOS 26+ with Apple Intelligence, users can choose between on-device (default) or cloud AI processing via an in-sheet picker; the picker is only shown when a real choice exists (on capable devices).
+- **Paste-import extraction runs on-device** by default on iOS 26+ with Apple Intelligence enabled (using Apple's built-in language model), keeping pasted text on the device and eliminating the privacy consent dialog for that path.
 - **Rate limit messaging:** remote import path now enforces a 20/hr/user limit with a friendly, recoverable message ("try again in an hour").
 
 #### Changed
 - **AI consent dialog** appears only when remote import path is used (on-device path requires no consent).
+- **Fallback re-confirmation** no longer references "devices without Apple Intelligence"; now offers "You can also switch to Cloud AI above" for clarity on devices with a choice.
 
 ### Signature interactions & platform features (2026-07-11)
 

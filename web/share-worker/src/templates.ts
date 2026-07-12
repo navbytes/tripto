@@ -273,18 +273,30 @@ ${SHARED_STYLES}
       offline.</p>
 
     <h2>Importing bookings: AI processing</h2>
-    <p>When you choose to import trip details by pasting text or forwarding an
-      email, Tripto sends that booking text — which may include confirmation
-      codes, names, and email addresses — to a <strong>third-party
+    <p>When you import trip details via paste, Tripto extracts booking
+      information (flights, hotel stays, activities, and confirmation codes).
+      On iPhones with Apple Intelligence enabled (iOS 26+), you choose where
+      processing happens:</p>
+    <p><strong>On this iPhone (default):</strong> extraction runs on your device
+      using Apple's built-in language model. Pasted text never leaves your
+      device and is not sent to any third party.</p>
+    <p><strong>Cloud AI (optional on capable devices, automatic on others):</strong>
+      if you prefer cloud processing or your device doesn't support on-device
+      extraction, your booking text — which may contain confirmation codes,
+      personal names, and email addresses — is sent to a <strong>third-party
       large-language-model provider</strong> (currently OpenAI) through
-      <strong>Cloudflare's AI Gateway</strong> to pull out structured booking
-      details. This happens only when you explicitly choose to import; it is
-      never automatic. Only the extracted details are kept — the raw text is
-      not stored in your Tripto account afterward. The current provider,
-      OpenAI, does not use API data to train or improve its models, and request
-      logging is disabled in the gateway. Cloudflare and the model provider act
-      as <strong>sub-processors</strong> for this feature only. You are never
-      required to use import; you can always enter trips manually.</p>
+      <strong>Cloudflare's AI Gateway</strong>.</p>
+    <p><strong>Both paths:</strong></p>
+    <ul style="margin:8px 0 12px;padding-left:20px;color:#2D2F52;font-size:15px;line-height:1.62">
+      <li>Happens only when you explicitly choose to import; it is never automatic.</li>
+      <li>Requires your consent before the first cloud send via any route.</li>
+      <li>Extracts and returns structured booking details only; the raw text is not stored in your Tripto account after extraction.</li>
+      <li>Is sent over encrypted HTTPS to Cloudflare and the model provider (cloud path only).</li>
+      <li>Does not train the provider's models: the current provider, OpenAI, does not use API data to train or improve its models per its data-usage terms. On-device processing uses Apple's first-party model and is not used for training. Request logging is disabled in the Cloudflare gateway (cloud path only).</li>
+    </ul>
+    <p>Cloudflare and the model provider are sub-processors of your data for
+      the cloud import path only. You are not required to use the import
+      feature; you can always enter trips manually.</p>
 
     <h2>Deleting your data</h2>
     <p>You can delete your account from <strong>Settings → Delete account</strong>

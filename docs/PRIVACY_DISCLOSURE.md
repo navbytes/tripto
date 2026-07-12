@@ -42,25 +42,32 @@ form.)
 **YES, for the remote import path only.** When a user chooses to import trip
 details via paste:
 
-**On supported iPhones (iOS 26+ with Apple Intelligence enabled):** import
-extraction runs entirely on the device using Apple's built-in language model.
-Pasted text never leaves the iPhone, is not sent to any third party, and is
-not stored anywhere after extraction.
+**On supported iPhones (iOS 26+ with Apple Intelligence enabled):** users choose
+where processing happens. The default is on-device: import extraction runs
+entirely on the device using Apple's built-in language model. Pasted text never
+leaves the iPhone, is not sent to any third party, and is not stored anywhere
+after extraction. Users can optionally switch to cloud processing via an in-sheet
+picker.
 
-**On other devices or if on-device processing is unavailable:** booking text
+**On other devices, or if the user chooses cloud processing:** booking text
 (including confirmation codes and personal names) is sent to a **third-party
 LLM provider (currently OpenAI)** through **Cloudflare AI Gateway** to extract
 structured booking information. The provider is set by the `LLM_MODEL` env var
-— if you switch providers, update this disclosure.
+— if you switch providers, update this disclosure. On devices without Apple
+Intelligence, cloud processing is used automatically with no choice offered.
 
-**Both paths:**
-- **Not automatic:** user must explicitly tap "Import."
+**All paths:**
+- **Not automatic:** user must explicitly tap "Import" (or choose to paste).
+- **Consent-gated:** before the first cloud send via any route, a dialog
+  discloses third-party processing (on-device path requires no consent).
 - **Not for training:** OpenAI API data is not used to train or improve models
   (per OpenAI's data-usage terms). Reconfirm if the provider changes. On-device
   processing uses Apple's first-party model and is not used for training.
 - **No long-term raw storage:** extracted booking details are stored; raw import text is not retained beyond extraction.
 - **Request logging disabled:** Cloudflare gateway logs are disabled for this
   endpoint (remote path only).
+- **No new data recipients:** the choice between on-device and cloud processing
+  does not change data types collected or shared — only the processor and path.
 
 ### When email import is enabled: Does your app process forwarded emails?
 
@@ -118,16 +125,23 @@ When completing App Store Connect's form:
 
 ## In-App Disclosure
 
-The import feature displays context-dependent notices at the paste point:
+The import feature displays context-dependent notices at the paste point,
+driven by the active processing route:
 
-**On supported iPhones with Apple Intelligence enabled:**
+**On-device processing (default on supported iPhones with Apple Intelligence):**
 > _"Processed on this iPhone — text never leaves your device."_
 
-**On other devices or if on-device processing is unavailable:**
+**Cloud processing (user-selected on supported devices, or automatic on others):**
 > _"Pasted text is sent to an AI service to find your bookings — codes and notes aren't retained beyond that."_
 
-(An expanded version in settings, shown to all users, covers both paths and
-can point to the full privacy policy.)
+**When the text is too long for on-device processing:**
+> _"Too long to process on this iPhone — will use the AI service."_
+
+(An expanded version in settings, shown to all users, covers both paths:
+"On supported iPhones you choose where processing happens — on-device by
+default (never leaves), or cloud AI (via Cloudflare) if you prefer; other
+iPhones always use the cloud. It isn't stored in your account afterward,
+and we ask permission before the first cloud send.")
 
 ---
 
