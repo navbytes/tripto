@@ -41,17 +41,27 @@ Review rejects (ITMS-90111) — reasoning + recipe in
 
 ## 2. Pre-launch backend and web (before real users)
 
-- [ ] **Deploy web/share-worker** (`npm run deploy`) together with the first
-  build that ships on-device import (when the processing-mode picker goes live
-  in the app). The live `/privacy` page must describe both on-device + cloud
-  paths the moment the app does. If deploying after the app goes public, ensure
-  the privacy-policy.md and templates.ts changes are in sync before deploy.
-- [ ] **Disable anonymous sign-ins.** `enable_anonymous_sign_ins = true` is on
-  only for DEBUG testing — turn it off (backend `config.toml` →
-  `supabase config push`) before launch. Leaving it on now keeps the test flows
-  working; flip it when you stop testing. The UI tests need it **on** —
-  toggle procedure and why in [`TESTING.md`](TESTING.md).
-- [ ] **Purge the anonymous test trips** accumulated in the DB.
+- [x] **Deploy web/share-worker** (`npm run deploy`) — DONE 2026-07-12 (worker
+  `tripto-share`, version `6a728195`). The live `/privacy` page now describes
+  the on-device + user-selectable-cloud paths, matching Build 6 in review.
+  Safe to do pre-approval on a first release: nothing is live to contradict,
+  and it makes the served page consistent with the reviewable build.
+- [ ] **Disable anonymous sign-ins — OWNER, via the Dashboard.**
+  Authentication → Sign-In/Providers → **Anonymous → Off**. The Release binary
+  has NO anonymous path (`#if DEBUG` only, compiled out of the shipped app), so
+  this is invisible to App Review — flip it any time before real users exist.
+  ⚠️ **Do NOT `supabase config push`** for this. The committed `config.toml` is
+  still local-dev (`site_url = http://127.0.0.1:3000`, localhost redirects, no
+  Apple provider block); a push would overwrite the production site URL /
+  redirects and break Sign in with Apple for the in-review app and real users.
+  Toggle only the single Anonymous setting in the Dashboard (or PATCH just that
+  field via the Management API). _(Instruction corrected 2026-07-12 — was
+  `config push`, which is unsafe with the current config.toml.)_ UI tests need
+  it **on**; see [`TESTING.md`](TESTING.md).
+- [x] **Purge the anonymous test trips** — DONE 2026-07-12: removed 297 anon
+  users + 92 trips + 1803 itinerary items + 422 packing rows (deleted trips
+  first to avoid `created_by` SET-NULL orphans, then the anon users). Verified
+  only the 2 real SiwA users / 2 trips / 52 items remain; 0 orphaned rows.
 
 ## 3. Device checks (need a real device)
 
