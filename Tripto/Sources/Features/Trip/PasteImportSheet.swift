@@ -109,6 +109,17 @@ struct PasteImportSheet: View {
     @ScaledMetric(relativeTo: .body) private var checkboxSide: CGFloat = 24
     @ScaledMetric(relativeTo: .body) private var checkmarkSize: CGFloat = 12
     @ScaledMetric(relativeTo: .body) private var groupIconSize: CGFloat = 10
+    /// `processingModeRow`'s trailing chevron — same recipe as
+    /// `ZonePicker`'s own chevron (the row this one's shape mirrors).
+    @ScaledMetric(relativeTo: .caption) private var processingChevronSize: CGFloat = 11
+
+    /// PLAN.md Addendum: the "Processing" row's persisted choice — read
+    /// once at sheet creation (SwiftUI's own `@State` default-value
+    /// timing), then kept in lockstep with `ImportProcessingMode.set(_:)`
+    /// whenever the user picks a different `processingModeRow` entry, so
+    /// `currentRoute` reflects the change immediately without re-reading
+    /// `UserDefaults` on every render.
+    @State private var processingMode: ImportProcessingMode = ImportProcessingMode.current()
 
     private struct PackingCandidate: Identifiable {
         let id = UUID()
@@ -141,6 +152,7 @@ struct PasteImportSheet: View {
     /// matches what tapping will actually do.
     private var currentRoute: ImportRoute {
         ImportRouting.route(
+            mode: processingMode,
             isOnDeviceAvailable: isOnDeviceAvailable,
             textFitsOnDevice: ImportContextBudget.textFits(trimmedText)
         )
@@ -183,9 +195,12 @@ struct PasteImportSheet: View {
         // the user can plausibly tap Import. A hint only (see
         // `OnDeviceExtractor.prewarm()`'s doc comment) — never blocks this
         // appearance, and a no-op whenever on-device isn't available.
+        // PLAN.md Addendum: also a no-op when `currentRoute` isn't
+        // `.onDevice` — e.g. mode is `.cloud` — so this never warms a
+        // session the current routing has no intention of using.
         .onAppear {
             #if canImport(FoundationModels)
-            if #available(iOS 26.0, *) {
+            if #available(iOS 26.0, *), currentRoute == .onDevice {
                 OnDeviceExtractor.prewarm()
             }
             #endif
@@ -236,8 +251,8 @@ struct PasteImportSheet: View {
             Button("Not now", role: .cancel) {}
         } message: {
             Text(
-                "Send the pasted text to a third-party AI service instead? (This is the standard "
-                    + "import path on devices without Apple Intelligence.)"
+                "Send the pasted text to a third-party AI service instead? "
+                    + "(You can also switch to Cloud AI above.)"
             )
         }
     }
@@ -270,22 +285,27 @@ struct PasteImportSheet: View {
                 // to paste, but isn't itself attached to this control.
                 .accessibilityLabel("Text to import")
 
-            // PLAN.md: the on-device route never shares this text with
-            // anyone, so its footer says so instead of the third-party
-            // disclosure below — the remote route's existing copy already
-            // covers that case (and its own consent dialog restates it),
-            // so no NEW line is added there, only this one swapped.
-            if currentRoute == .onDevice {
+            // PLAN.md Addendum: which line shows is keyed off the route's
+            // REASON, not just on-device-vs-not — `ImportRouting
+            // .footerVariant(for:)` is the single source of truth for this
+            // selection (and is what `ImportExtractionTests` exercises
+            // directly, with no view rendering involved).
+            switch ImportRouting.footerVariant(for: currentRoute) {
+            case .onDevicePromise:
                 Text("Processed on this iPhone \u{2014} text never leaves your device.")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
-            } else {
+            case .remoteDisclosure:
                 Text(
                     "Pasted text is sent to an AI service to find your bookings \u{2014} "
                         + "codes and notes aren\u{2019}t retained beyond that."
                 )
                 .font(Typo.body(Typo.Size.caption))
                 .foregroundStyle(Palette.slate)
+            case .tooLongHonesty:
+                Text("Too long to process on this iPhone \u{2014} will use the AI service.")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
             }
 
             if let noResultsMessage {
@@ -296,6 +316,16 @@ struct PasteImportSheet: View {
                 Text(errorMessage)
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.rose)
+            }
+
+            // PLAN.md Addendum: only when a real choice exists — "no fake
+            // choice on incapable devices." A device where on-device
+            // extraction isn't available at all always routes
+            // `.remote(.unavailable)` regardless of the stored preference
+            // (see `ImportRouting.route`), so offering the picker there
+            // would be a control with no observable effect.
+            if isOnDeviceAvailable {
+                processingModeRow
             }
 
             Button {
@@ -323,6 +353,59 @@ struct PasteImportSheet: View {
             .buttonStyle(.plain)
             .disabled(!canSubmit)
         }
+    }
+
+    // MARK: - Processing mode row (only offered when a real choice exists)
+
+    /// "Processing" row (PLAN.md Addendum) — same row shape as
+    /// `ZonePicker` (label + trailing value + chevron), swapping its
+    /// tap-to-sheet mechanic for a native two-entry `Menu`: Dynamic Type,
+    /// VoiceOver, and the 44pt tap target all come from `Menu`/`Text` for
+    /// free, same as every other control in this file. Only ever mounted
+    /// by `pasteSection` when `isOnDeviceAvailable` — see that call site's
+    /// comment for why a choice is never offered where it wouldn't do
+    /// anything.
+    private var processingModeRow: some View {
+        Menu {
+            ForEach(ImportProcessingMode.allCases, id: \.self) { mode in
+                Button {
+                    processingMode = mode
+                    ImportProcessingMode.set(mode)
+                } label: {
+                    if mode == processingMode {
+                        Label(mode.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(mode.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Processing")
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                Spacer()
+                Text(processingMode.displayName)
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: processingChevronSize, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+            }
+            .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor, same as SegmentedControl's
+            .contentShape(Rectangle())
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .background(Palette.mist.opacity(0.5), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+        // Same "one combined VoiceOver stop, explicit label + value" recipe
+        // as `packingCandidateRow`'s checkbox, instead of ZonePicker's
+        // single-concatenated-string label — reads as "Processing. On this
+        // iPhone. Button." rather than requiring a second swipe to reach
+        // the chevron glyph or the value text.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Processing")
+        .accessibilityValue(processingMode.displayName)
     }
 
     // MARK: - Packing vetting checklist (post-extraction, if any packing items were found)
@@ -681,6 +764,43 @@ struct PasteImportSheet: View {
                 return "Something went wrong. Try again."
             }
         }
+    }
+}
+
+/// PLAN.md Addendum (client-decided): users may prefer the third-party
+/// cloud AI even when on-device extraction is available on this device —
+/// e.g. they find it more accurate, or just don't want to wait on a local
+/// model. Two modes only, no third "never cloud" mode: refusing cloud sends
+/// entirely is already `AIImportConsent`'s job below (declining that dialog
+/// just leaves the paste unsent), so this preference only ever chooses
+/// between two paths that both complete the import. Same injectable-
+/// `UserDefaults` recipe as `AIImportConsent`/`EmailImportConsent`
+/// (`TripImportAddress.swift`), for the same reason: testable without
+/// touching the real `UserDefaults.standard`.
+///
+/// Read live by `currentRoute` (via `ImportRouting.route`) on every render,
+/// and by `processingModeRow`'s `Menu` to show/persist the current choice —
+/// changing it only changes ROUTING, never what `OnDeviceExtractor`/
+/// `ingest-text` each do once reached.
+enum ImportProcessingMode: String, CaseIterable {
+    case onDevice
+    case cloud
+
+    private static let key = "importProcessingMode"
+
+    var displayName: String {
+        switch self {
+        case .onDevice: return "On this iPhone"
+        case .cloud: return "Cloud AI"
+        }
+    }
+
+    static func current(defaults: UserDefaults = .standard) -> ImportProcessingMode {
+        defaults.string(forKey: key).flatMap(ImportProcessingMode.init(rawValue:)) ?? .onDevice
+    }
+
+    static func set(_ mode: ImportProcessingMode, defaults: UserDefaults = .standard) {
+        defaults.set(mode.rawValue, forKey: key)
     }
 }
 

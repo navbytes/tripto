@@ -28,8 +28,13 @@ Review rejects (ITMS-90111) — reasoning + recipe in
 - [x] **`.p8` set as a Supabase secret** — the Apple token revoke fired on the
   device account-deletion test (§3), confirming it's live.
 
-## 2. Pre-launch backend (before real users)
+## 2. Pre-launch backend and web (before real users)
 
+- [ ] **Deploy web/share-worker** (`npm run deploy`) together with the first
+  build that ships on-device import (when the processing-mode picker goes live
+  in the app). The live `/privacy` page must describe both on-device + cloud
+  paths the moment the app does. If deploying after the app goes public, ensure
+  the privacy-policy.md and templates.ts changes are in sync before deploy.
 - [ ] **Disable anonymous sign-ins.** `enable_anonymous_sign_ins = true` is on
   only for DEBUG testing — turn it off (backend `config.toml` →
   `supabase config push`) before launch. Leaving it on now keeps the test flows

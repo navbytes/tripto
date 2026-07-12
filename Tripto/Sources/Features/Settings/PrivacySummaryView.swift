@@ -106,10 +106,10 @@ struct PrivacySummaryView: View {
             id: "import",
             symbolName: "sparkles",
             title: "AI helps only when you paste to import",
-            body: "On supported iPhones this happens on your device and never leaves it \u{2014} "
-                + "otherwise, pasted text goes to a third-party AI service (via Cloudflare) just to find "
-                + "your bookings and isn\u{2019}t stored in your account afterward, and we ask your "
-                + "permission first."
+            body: "On supported iPhones you choose where processing happens \u{2014} on-device by default "
+                + "(never leaves), or cloud AI (via Cloudflare) if you prefer; other iPhones always use "
+                + "the cloud. It isn\u{2019}t stored in your account afterward, and we ask permission "
+                + "before the first cloud send."
         ),
         PrivacyPoint(
             id: "delete",

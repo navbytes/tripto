@@ -55,24 +55,37 @@ device, and the app keeps a local copy of your trips so they work offline.
 
 ### Import feature: third-party processing
 
-When you import trip details via paste or email, Tripto extracts booking
-information (flights, hotel stays, activities, and confirmation codes) by
-sending your booking text — which may contain confirmation codes, personal
-names, and email addresses — to a **third-party large-language-model
-provider** (currently OpenAI) through **Cloudflare's AI Gateway**. This
-processing:
+When you import trip details via paste, Tripto extracts booking information
+(flights, hotel stays, activities, and confirmation codes). On iPhones with
+Apple Intelligence enabled (iOS 26+), you choose where processing happens:
+
+**On this iPhone (default):** extraction runs on your device using Apple's
+built-in language model. Pasted text never leaves your device and is not
+sent to any third party.
+
+**Cloud AI (optional on capable devices, automatic on others):** if you prefer
+cloud processing or your device doesn't support on-device extraction, your
+booking text — which may contain confirmation codes, personal names, and
+email addresses — is sent to a **third-party large-language-model provider**
+(currently OpenAI) through **Cloudflare's AI Gateway**.
+
+**Both paths:**
 
 - Happens only when you explicitly choose to import; it is not automatic.
+- Requires your consent before the first cloud send via any route.
 - Extracts and returns structured booking details only; the raw text is not
   stored in your Tripto account after extraction.
-- Is sent over encrypted HTTPS to Cloudflare and the model provider.
+- Is sent over encrypted HTTPS to Cloudflare and the model provider (cloud
+  path only).
 - Does not train the provider's models: the current provider, OpenAI, does
   not use API data to train or improve its models per its data-usage terms.
-  Request logging is disabled in the Cloudflare gateway.
+  On-device processing uses Apple's first-party model and is not used for
+  training. Request logging is disabled in the Cloudflare gateway (cloud
+  path only).
 
-Cloudflare and the model provider are sub-processors of your data for this
-function only. You are not required to use the import feature; you can
-enter trips manually.
+Cloudflare and the model provider are sub-processors of your data for the
+cloud import path only. You are not required to use the import feature; you
+can enter trips manually.
 
 ## Deleting your data
 
