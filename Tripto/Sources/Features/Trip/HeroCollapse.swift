@@ -294,6 +294,14 @@ struct TripHeroView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .opacity(1 - min(1, p * 1.6))
+                // Reviewer N1: without this override VoiceOver reads the
+                // full visual string, including "N days" — which `metaRow`
+                // right below already speaks as part of its own
+                // "{dates}, N days" label. Speaking just the destination
+                // here also sidesteps the "·" itself being read as a
+                // literal fragment (same reasoning `accessibleDateRangeText`
+                // already documents for the meta row's en-dash).
+                .accessibilityLabel(destinationLabel)
 
             Text(trip.title)
                 .font(Typo.display(Typo.Size.display - 10 * p))
@@ -552,8 +560,15 @@ struct TripHeroView: View {
     /// docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.2): "{DESTINATION} · {N}
     /// DAYS" — reuses `durationText` above rather than re-deriving the same
     /// day count a second way.
+    ///
+    /// Reviewer N2: `destinationLabel` can still come back blank (an
+    /// invalid/missing country code AND an empty `destination` field) —
+    /// guarded here so that renders as a plain "N days" instead of a
+    /// dangling "· N days" leading separator.
     private var heroEyebrowText: String {
-        "\(destinationLabel) \u{00B7} \(durationText)"
+        let destination = destinationLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !destination.isEmpty else { return durationText }
+        return "\(destination) \u{00B7} \(durationText)"
     }
 
     /// `TripCard.locationText`'s own "localized country name, falling back

@@ -85,14 +85,28 @@ enum StayConflicts {
 
     // MARK: - Pure overlap math
 
+    /// Reviewer D2: the conflict DECISION is made on real instants
+    /// (`instantRange`), not on bare calendar-day labels — two different
+    /// `.hotel` items can carry different `tz` values, and comparing their
+    /// `nightRange` labels directly is only valid when both stays share a
+    /// zone (see `instantRange`'s doc comment for the date-line case where
+    /// bare labels desync from actual physical overlap in both
+    /// directions). The "N nights" COPY, once a conflict is confirmed,
+    /// still comes from `nightRange`'s calendar-day labels exactly as
+    /// before — unaffected by this fix for the overwhelming common case
+    /// (both stays in the same zone, where the two methods always agree),
+    /// and `max(1, ...)`-clamped for the rare confirmed-but-label-disjoint
+    /// cross-zone case so the copy never reads a nonsensical "0 nights".
     private static func overlap(_ a: ItineraryItem, _ b: ItineraryItem) -> Conflict? {
+        let (aInstantStart, aInstantEnd) = instantRange(a)
+        let (bInstantStart, bInstantEnd) = instantRange(b)
+        guard aInstantStart < bInstantEnd, bInstantStart < aInstantEnd else { return nil }
+
         let (aStart, aEnd) = nightRange(a)
         let (bStart, bEnd) = nightRange(b)
-        guard aStart < bEnd, bStart < aEnd else { return nil }
-
         let sharedStart = max(aStart, bStart)
         let sharedEnd = min(aEnd, bEnd)
-        let sharedNights = ItineraryDayBucketing.dayCount(from: sharedStart, to: sharedEnd, calendar: utcCalendar)
+        let sharedNights = max(1, ItineraryDayBucketing.dayCount(from: sharedStart, to: sharedEnd, calendar: utcCalendar))
         let isFull = sharedStart == aStart && sharedEnd == aEnd && sharedStart == bStart && sharedEnd == bEnd
 
         return Conflict(
@@ -103,16 +117,37 @@ enum StayConflicts {
 
     /// Half-open `[start, end)` of calendar nights `item` occupies, read in
     /// its own zone (`ItineraryItem.startLocalDay`/`endLocalDay` —
-    /// `ItineraryTimeZone.swift`) rather than raw UTC instants, so a stay
-    /// spanning a DST change or the international date line still compares
-    /// the nights a traveler actually experiences. A missing `endsAt` is a
-    /// single-night stay: `[start, start + 1)`.
+    /// `ItineraryTimeZone.swift`). A missing `endsAt` is a single-night
+    /// stay: `[start, start + 1)`. Feeds both `instantRange` (the actual
+    /// overlap decision) and the "N nights" copy math above.
     private static func nightRange(_ item: ItineraryItem) -> (DayDate, DayDate) {
         let start = item.startLocalDay
         guard let end = item.endLocalDay, end > start else {
             return (start, addingOneDay(to: start))
         }
         return (start, end)
+    }
+
+    /// The physical `[start, end)` instant interval `item`'s stay actually
+    /// occupies — `nightRange`'s calendar-night labels resolved to local
+    /// midnight in the item's OWN zone (`item.primaryTz`; hotels never
+    /// have a separate arrival zone the way a flight does, so this is the
+    /// one zone `startLocalDay`/`endLocalDay` were already computed
+    /// against). Comparing bare `DayDate` labels (as `nightRange` alone
+    /// would) is only correct between stays that share a zone: two real
+    /// IANA zones straddling the international date line (Kiritimati
+    /// UTC+14, Pago Pago UTC-11 — a genuine 25h offset) can desync a
+    /// same-looking label from actual simultaneity in BOTH directions — a
+    /// real overlap whose labels don't match, and matching labels with no
+    /// real overlap. Converting to genuine instants first (this function)
+    /// makes "do these two stays double-book the same physical time" the
+    /// literal question being asked, regardless of which zone each side is
+    /// in.
+    private static func instantRange(_ item: ItineraryItem) -> (Date, Date) {
+        let (startDay, endDay) = nightRange(item)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = item.primaryTz
+        return (startDay.asDate(calendar: calendar), endDay.asDate(calendar: calendar))
     }
 
     private static var utcCalendar: Calendar {

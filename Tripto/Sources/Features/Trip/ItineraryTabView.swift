@@ -11,6 +11,13 @@ import SwiftUI
 struct ItineraryTabView: View {
     let trip: Trip
     let items: [ItineraryItem]
+    /// Reviewer D3: the trip's full, unfiltered confirmed items (`TripView`'s
+    /// own `items` query) — used ONLY to derive `tripCalendar`'s zone below.
+    /// `items` above is already "Just mine"-filtered, and toggling that
+    /// filter must not shift what "today" means for this trip (unlike
+    /// `conflicts`, which is deliberately scoped to the filtered feed — see
+    /// that property's own doc comment).
+    let allTripItems: [ItineraryItem]
     let pendingRowIds: Set<UUID>
     let myUserId: UUID?
     let namesById: [UUID: String]
@@ -119,7 +126,7 @@ struct ItineraryTabView: View {
     /// the next.
     private var tripCalendar: Calendar {
         var calendar = Calendar.current
-        calendar.timeZone = TripDateBucketing.liveTimeZone(items: items)
+        calendar.timeZone = TripDateBucketing.liveTimeZone(items: allTripItems)
         return calendar
     }
 
@@ -623,7 +630,12 @@ struct ItineraryTabView: View {
                         .foregroundStyle(Palette.ink)
                     Text(StayConflicts.body(for: conflict))
                         .font(Typo.body(Typo.Size.caption))
-                        .foregroundStyle(Palette.slate)
+                        // Reviewer D1: `.slate` measured ~4.21:1 on
+                        // `amberSoft` (fails AA); `.amberInk` (~4.45:1) also
+                        // falls short here — `.ink` (~14.4:1, already the
+                        // headline's own color right above) is what
+                        // actually clears the 4.5:1 bar on this background.
+                        .foregroundStyle(Palette.ink)
                 }
             }
             // SyncIssuesSheet.issueRow's precedent (Features/Settings — via

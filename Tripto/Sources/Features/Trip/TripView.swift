@@ -510,6 +510,7 @@ struct TripView: View {
                         ItineraryTabView(
                             trip: trip,
                             items: filteredItems,
+                            allTripItems: items,
                             pendingRowIds: syncStatus.pendingRowIds,
                             myUserId: authManager.userId,
                             namesById: profileNames,

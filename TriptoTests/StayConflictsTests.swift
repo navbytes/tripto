@@ -220,25 +220,21 @@ final class StayConflictsTests: XCTestCase {
 
     // MARK: - Cross-timezone pairs (the Pacific date-line trap)
     //
-    // `nightRange` reads each stay's nights in its OWN zone, then compares
-    // the resulting `DayDate` values as bare (year, month, day) labels with
-    // no zone attached (`DayDate.swift`'s own `<` is a plain tuple compare).
-    // That's exactly right when both stays share a zone (the existing
-    // `testCalendarNightsAreComparedInEachItemsOwnZoneNotRawUTCInstants`
-    // above) — the whole point is comparing "the night a traveler
-    // experienced," not a raw UTC day. But for two DIFFERENT-zone `.hotel`
-    // items, a bare label is no longer a shared clock: two real IANA zones
-    // straddling the international date line (Kiritimati UTC+14, Pago Pago
-    // UTC-11 — a real 25h offset) can desync label vs. absolute overlap in
-    // BOTH directions. Both scenarios below are verified independently
-    // against real `Date` instants (not just against `StayConflicts`'
-    // own math) before asserting what `conflicts(in:)` does with them.
+    // Reviewer D2 (fixed): the overlap DECISION now compares real instants
+    // (`StayConflicts.instantRange`), not bare `DayDate` labels — two
+    // different IANA zones straddling the international date line
+    // (Kiritimati UTC+14, Pago Pago UTC-11 — a real 25h offset) can desync
+    // a same-looking label from actual simultaneity in BOTH directions, a
+    // real overlap whose labels don't match, and matching labels with no
+    // real overlap. Both scenarios below are verified independently
+    // against real `Date` instants (not just against `StayConflicts`' own
+    // math) before asserting what `conflicts(in:)` does with them.
 
-    /// FALSE NEGATIVE: B's real check-in/check-out window is entirely
-    /// nested inside A's (proved below via raw instants) — an unambiguous,
-    /// genuine overlap — yet A's own local night reads "the 20th" while B's
-    /// reads "the 19th", so today's label comparison misses it entirely.
-    func testCrossTimezonePairWithGenuineOverlapAcrossTheDateLineIsCurrentlyMissed() {
+    /// B's real check-in/check-out window is entirely nested inside A's
+    /// (proved below via raw instants) — an unambiguous, genuine overlap —
+    /// even though A's own local night label reads "the 20th" while B's
+    /// reads "the 19th".
+    func testCrossTimezonePairWithGenuineOverlapAcrossTheDateLineIsFlagged() {
         let a = hotel(
             "Kiritimati stay", checkIn: instant(2026, 7, 20, 15, 0, tz: "Pacific/Kiritimati"),
             checkOut: instant(2026, 7, 21, 11, 0, tz: "Pacific/Kiritimati"), tz: "Pacific/Kiritimati"
@@ -250,23 +246,14 @@ final class StayConflictsTests: XCTestCase {
         guard let bEnd = b.endsAt, let aEnd = a.endsAt else { return XCTFail("fixture requires both endsAt") }
         XCTAssertTrue(a.startsAt < bEnd && b.startsAt < aEnd, "sanity: B's absolute window is nested inside A's")
 
-        XCTExpectFailure("""
-            DEFECT (Tester, P2 milestone): StayConflicts compares bare \
-            calendar-day labels across items that may carry DIFFERENT `tz` \
-            values, so a genuinely overlapping cross-date-line hotel pair is \
-            missed. Narrow — needs two different-zone .hotel items on one \
-            trip (multi-stop is out of v1 scope per this file's own doc \
-            comment) — but the function doesn't validate same-zone inputs.
-            """) {
-            XCTAssertFalse(StayConflicts.conflicts(in: [a, b]).isEmpty, "these stays truly overlap and should be flagged")
-        }
+        XCTAssertFalse(StayConflicts.conflicts(in: [a, b]).isEmpty, "these stays truly overlap and must be flagged")
     }
 
-    /// FALSE POSITIVE: the mirror trap. C and D's local night labels both
-    /// read "the 20th" (today's code reports a full-overlap conflict), yet
-    /// their real check-in/check-out windows (proved below) never
-    /// intersect — a genuine 10-hour real gap.
-    func testCrossTimezonePairWithNoRealOverlapAcrossTheDateLineIsCurrentlyFlaggedAnyway() {
+    /// The mirror case: C and D's local night labels both read "the 20th",
+    /// yet their real check-in/check-out windows (proved below) never
+    /// intersect — a genuine 10-hour real gap — so this must NOT be
+    /// flagged despite the matching labels.
+    func testCrossTimezonePairWithNoRealOverlapAcrossTheDateLineIsNotFlagged() {
         let c = hotel(
             "Kiritimati stay", checkIn: instant(2026, 7, 20, 15, 0, tz: "Pacific/Kiritimati"),
             checkOut: instant(2026, 7, 21, 11, 0, tz: "Pacific/Kiritimati"), tz: "Pacific/Kiritimati"
@@ -278,14 +265,7 @@ final class StayConflictsTests: XCTestCase {
         guard let cEnd = c.endsAt else { return XCTFail("fixture requires endsAt") }
         XCTAssertFalse(cEnd > d.startsAt, "sanity: C ends before D starts — a real 10-hour gap, no overlap")
 
-        XCTExpectFailure("""
-            DEFECT (Tester, P2 milestone): same bare-label comparison, \
-            opposite direction — two stays whose calendar-day LABELS match \
-            get flagged as a full overlap even though their real check-in/\
-            check-out windows never intersect.
-            """) {
-            XCTAssertTrue(StayConflicts.conflicts(in: [c, d]).isEmpty, "these stays never really overlap and should not be flagged")
-        }
+        XCTAssertTrue(StayConflicts.conflicts(in: [c, d]).isEmpty, "these stays never really overlap and must not be flagged")
     }
 
     // MARK: - DST transitions
