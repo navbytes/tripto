@@ -628,14 +628,23 @@ struct ItineraryTabView: View {
                     Text(StayConflicts.headline(for: conflict))
                         .font(Typo.body(weight: .bold))
                         .foregroundStyle(Palette.ink)
-                    Text(StayConflicts.body(for: conflict))
-                        .font(Typo.body(Typo.Size.caption))
-                        // Reviewer D1: `.slate` measured ~4.21:1 on
-                        // `amberSoft` (fails AA); `.amberInk` (~4.45:1) also
-                        // falls short here — `.ink` (~14.4:1, already the
-                        // headline's own color right above) is what
-                        // actually clears the 4.5:1 bar on this background.
-                        .foregroundStyle(Palette.ink)
+                    // ux-expert milestone M2: at accessibility Dynamic Type
+                    // sizes this body line alone could push the CTA off an
+                    // AX3 viewport — dropped there, not truncated: both
+                    // hotel names already repeat on their own per-card
+                    // flags (`conflictFlag`, below), so nothing is actually
+                    // lost, just this one redundant restatement.
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Text(StayConflicts.body(for: conflict))
+                            .font(Typo.body(Typo.Size.caption))
+                            // Reviewer D1: `.slate` measured ~4.21:1 on
+                            // `amberSoft` (fails AA); `.amberInk` (~4.45:1)
+                            // also falls short here — `.ink` (~14.4:1,
+                            // already the headline's own color right
+                            // above) is what actually clears the 4.5:1 bar
+                            // on this background.
+                            .foregroundStyle(Palette.ink)
+                    }
                 }
             }
             // SyncIssuesSheet.issueRow's precedent (Features/Settings — via
@@ -653,14 +662,25 @@ struct ItineraryTabView: View {
                         withAnimation { proxy.scrollTo(targetId, anchor: .center) }
                     }
                 } label: {
+                    // ux-expert milestone M1: was a large filled-amber
+                    // capsule sitting on this banner's own amber-wash,
+                    // stacking a second big amber affordance right above
+                    // the amber FAB — mockup's own `.btn-dark` control
+                    // instead (compact ink-filled pill, paper text).
+                    // Ink-on-paper measures ~14:1, nowhere near the 4.5:1
+                    // floor. `.background` before `.frame(minHeight:)`
+                    // (not after, the bug that made the old capsule itself
+                    // 44pt tall) is the same "small visual chip, larger
+                    // invisible hit band" order `PersonFilterBar`'s own
+                    // chips already use.
                     Text("Review stays")
-                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                        .foregroundStyle(Palette.onAmber)
+                        .font(Typo.body(13, weight: .semibold))
+                        .foregroundStyle(Palette.paper)
                         .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.xs)
+                        .padding(.vertical, Spacing.sm)
+                        .background(Palette.ink, in: Capsule())
                         .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
                         .contentShape(Capsule())
-                        .background(Palette.amber, in: Capsule())
                 }
                 .buttonStyle(.plain)
             }

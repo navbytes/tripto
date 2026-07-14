@@ -441,38 +441,41 @@ struct TripHeroView: View {
         .heroFrameReporting(model: heroFlight)
     }
 
-    /// Finding 4 + 9b: two VoiceOver-distinct pieces instead of one run-on
-    /// row of literal "·" fragments — dates/duration read as a single
-    /// sentence, and the traveler count is a real tappable route (not just
-    /// decorative text) to `ShareRoute`'s "who's coming" screen.
+    /// Finding 4 + 9b: the traveler count is a real tappable route (not
+    /// just decorative text) to `ShareRoute`'s "who's coming" screen.
+    ///
+    /// ux-expert milestone M3: dropped the "· N days" this row used to
+    /// append after the date range — the eyebrow above (`heroEyebrowText`)
+    /// is now the one place duration lives; showing it twice in the same
+    /// hero read as a straight duplicate ("May 14 – May 27 · 14 days" right
+    /// under "PORTUGAL · 14 DAYS").
     ///
     /// AX5 overlap fix (qa-evidence-s5 B / J-itinerary / J-home): the
-    /// default single HStack below squeezes `dateDurationGroup` against
-    /// `travelerPill` — at accessibility sizes the date/duration string
-    /// alone is wider than the screen, forcing two separate `Text`s to
-    /// each independently decide where to wrap while sharing one HStack
-    /// row's width, the exact "two Texts negotiating a squeezed row" shape
-    /// `flightHeader`/`transportHeader` (BookingDetailView.swift) already
-    /// document giving up on in favor of a vertical stack. This alone
-    /// isn't the overlap's root cause (see the `.frame(minHeight:)` call
-    /// this feeds, in `body`, for that) but it's real, independent
-    /// fragility worth removing on its own terms: the AX branch here gives
-    /// the traveler pill its own row and folds the date/duration into one
-    /// plain `Text` (a single view wrapping on its own — not three views
-    /// negotiating shared width). Default rendering (the `else` branch) is
-    /// untouched.
+    /// default single HStack below squeezes the date text against
+    /// `travelerPill` — at accessibility sizes a long/year-spanning date
+    /// range can still be wider than the screen on its own, forcing two
+    /// separate `Text`s to each independently decide where to wrap while
+    /// sharing one HStack row's width, the exact "two Texts negotiating a
+    /// squeezed row" shape `flightHeader`/`transportHeader`
+    /// (BookingDetailView.swift) already document giving up on in favor of
+    /// a vertical stack. This alone isn't the overlap's root cause (see
+    /// the `.frame(minHeight:)` call this feeds, in `body`, for that) but
+    /// it's real, independent fragility worth removing on its own terms:
+    /// the AX branch here gives the traveler pill its own row instead of
+    /// sharing one with the date text. Default rendering (the `else`
+    /// branch) is untouched but for dropping duration.
     private var metaRow: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("\(dateRangeText) \u{00B7} \(durationText)")
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(accessibleDateRangeText), \(durationText)")
+                    Text(dateRangeText)
+                        .accessibilityLabel(accessibleDateRangeText)
                     travelerPill
                 }
             } else {
                 HStack(spacing: Spacing.sm) {
-                    dateDurationGroup
+                    Text(dateRangeText)
+                        .accessibilityLabel(accessibleDateRangeText)
                     metaDot
                     travelerPill
                 }
@@ -480,16 +483,6 @@ struct TripHeroView: View {
         }
         .font(Typo.body(Typo.Size.caption))
         .foregroundStyle(.white.opacity(0.92))
-    }
-
-    private var dateDurationGroup: some View {
-        HStack(spacing: Spacing.sm) {
-            Text(dateRangeText)
-            metaDot
-            Text(durationText)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(accessibleDateRangeText), \(durationText)")
     }
 
     private var travelerPill: some View {
@@ -550,9 +543,9 @@ struct TripHeroView: View {
         TripDateRangeFormat.spokenText(start: trip.startDate, end: trip.endDate)
     }
 
-    /// Shared by `dateDurationGroup` (default) and `metaRow`'s AX branch —
-    /// same string either way, just rendered via a plain `Text` at AX sizes
-    /// instead of split across an `HStack` (see `metaRow`'s doc comment).
+    /// ux-expert milestone M3: no longer shown in `metaRow` (see that
+    /// property's own doc comment) — kept only for `heroEyebrowText` below,
+    /// the one place duration now lives.
     private var durationText: String {
         "\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")"
     }
