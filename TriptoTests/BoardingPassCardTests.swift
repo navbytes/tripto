@@ -104,6 +104,74 @@ final class BoardingPassMathTests: XCTestCase {
         let utc = TimeZone(identifier: "UTC")!
         XCTAssertEqual(BoardingPassMath.gmtOffsetLabel(for: utc, at: utcInstant(2026, 7, 20, 0, 0)), "GMT")
     }
+
+    /// Kathmandu (UTC+5:45) — the rarer 45-minute offset, alongside
+    /// Kolkata's 30-minute one above; this user's real trips include both
+    /// India and Nepal, and a naive half-hour-only formatter would
+    /// mis-render this one.
+    func testGmtOffsetLabelFormatsA45MinuteZone() {
+        let kathmandu = TimeZone(identifier: "Asia/Kathmandu")!
+        XCTAssertEqual(BoardingPassMath.gmtOffsetLabel(for: kathmandu, at: utcInstant(2026, 7, 20, 0, 0)), "GMT+5:45")
+    }
+
+    /// A negative offset that *also* isn't a whole hour — an untested
+    /// combination: the existing negative case above (New York) is
+    /// whole-hour, and the existing fractional cases (Kolkata/Kathmandu) are
+    /// positive. Marquesas has no DST, so this is deterministic on any date.
+    func testGmtOffsetLabelFormatsANegativeNonHourZone() {
+        let marquesas = TimeZone(identifier: "Pacific/Marquesas")!
+        XCTAssertEqual(BoardingPassMath.gmtOffsetLabel(for: marquesas, at: utcInstant(2026, 7, 20, 0, 0)), "GMT-9:30")
+    }
+
+    // MARK: - Duration edge cases
+
+    /// `durationText` must read as true elapsed time, not a wall-clock
+    /// subtraction — 01:00 EST to 04:00 EDT on 2026-03-08 (America/New_York's
+    /// own spring-forward instant) looks like "3h" on a clock face, but only
+    /// 2 real hours pass. The function only ever sees two raw `Date`
+    /// instants (no `TimeZone` parameter), so this also documents that
+    /// invariant for anyone tempted to reintroduce a `Calendar`-based
+    /// wall-clock computation.
+    func testDurationTextReflectsTrueElapsedTimeAcrossASpringForwardDstTransition() {
+        let departure = utcInstant(2026, 3, 8, 6, 0) // 01:00 EST
+        let arrival = utcInstant(2026, 3, 8, 8, 0) // 04:00 EDT, after the 2am jump
+        XCTAssertEqual(BoardingPassMath.durationText(from: departure, to: arrival), "2h")
+    }
+
+    func testDurationTextIsZeroMinutesWhenArrivalExactlyEqualsDeparture() {
+        let instant = utcInstant(2026, 7, 20, 4, 0)
+        XCTAssertEqual(BoardingPassMath.durationText(from: instant, to: instant), "0m")
+    }
+
+    // MARK: - Bad data / multi-day magnitude
+
+    /// Bad data (e.g. a corrupt import): `endsAt` earlier than `startsAt`.
+    /// `dayOffset`/`dayBadgeText` are plain calendar-day subtraction with no
+    /// ordering assumption baked in, so a reversed pair must still return a
+    /// deterministic value instead of crashing — `durationText`'s own clamp
+    /// (`testDurationTextNeverGoesNegativeForAnOutOfOrderInput` above)
+    /// already covers the duration half of this same bad-data case.
+    func testDayOffsetAndBadgeHandleArrivalBeforeDepartureWithoutCrashing() {
+        let tz = TimeZone(identifier: "UTC")!
+        let departure = utcInstant(2026, 7, 20, 10, 0)
+        let arrival = utcInstant(2026, 7, 19, 22, 0) // 12 hours *before* departure
+        XCTAssertEqual(BoardingPassMath.dayOffset(departure: departure, departureTz: tz, arrival: arrival, arrivalTz: tz), -1)
+        XCTAssertEqual(
+            BoardingPassMath.dayBadgeText(departure: departure, departureTz: tz, arrival: arrival, arrivalTz: tz),
+            "\u{2212}1d"
+        )
+    }
+
+    /// The ±1d cases above only ever exercise the offset's *sign* — this
+    /// pins its magnitude past 1, which is also what gives
+    /// `BoardingPassAccessibilityPartsTests` below something real to
+    /// pluralize.
+    func testDayBadgeShowsPlusTwoDaysForAMultiDayLaterArrival() {
+        let tz = TimeZone(identifier: "UTC")!
+        let departure = utcInstant(2026, 7, 20, 23, 0)
+        let arrival = utcInstant(2026, 7, 22, 2, 0) // 2 calendar days later
+        XCTAssertEqual(BoardingPassMath.dayBadgeText(departure: departure, departureTz: tz, arrival: arrival, arrivalTz: tz), "+2d")
+    }
 }
 
 /// `ItineraryItem` -> `BoardingPassCard.Model` adapter (`BoardingPassContent`,
@@ -175,5 +243,53 @@ final class BoardingPassContentTests: XCTestCase {
         details.airline = "Thai Airways"; details.flightNo = "TG639"
         let flight = TestFixtures.makeItineraryItem(category: .flight, startsAt: utcInstant(2026, 6, 1, 8, 0), details: details)
         XCTAssertEqual(BoardingPassContent.make(for: flight)?.carrierLine, "Thai Airways TG639")
+    }
+
+    /// Transport reuses `details.arrivalTz` for its own drop-off zone
+    /// (`TransportCategoryTests`) — a guard that ever loosened from an exact
+    /// `category == .flight` check to "has an arrivalTz" would wrongly hand
+    /// a transport row a boarding pass. `testNonFlightCategoryProducesNoBoardingPass`
+    /// above covers a category with no arrivalTz at all (hotel); this pins
+    /// the sharper, easier-to-regress-into case.
+    func testTransportCategoryProducesNoBoardingPassEvenWithADropoffZoneSet() {
+        var details = ItemDetails.empty
+        details.provider = "Hertz"; details.dropoffLocation = "Boston Logan"; details.arrivalTz = "America/New_York"
+        let rentalCar = TestFixtures.makeItineraryItem(
+            category: .transport, startsAt: utcInstant(2026, 6, 1, 14, 0), endsAt: utcInstant(2026, 6, 1, 16, 0),
+            tz: "America/Los_Angeles", details: details
+        )
+        XCTAssertNil(BoardingPassContent.make(for: rentalCar))
+    }
+}
+
+/// `BoardingPassCard.accessibilityParts(for:)` — the one VoiceOver sentence
+/// builder behind both the card's own label and `TimelineCardRow.a11yLabel`
+/// (docs/UX_REDESIGN_ROADMAP.md Phase 1's AX bullet: "one coherent sentence
+/// per pass"). Previously untested; this pins its one real branch (day-note
+/// pluralization) that the visual "+Nd" badge doesn't share, since the badge
+/// never spells out "day(s)".
+final class BoardingPassAccessibilityPartsTests: XCTestCase {
+    private func utcInstant(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        var components = DateComponents()
+        components.year = year; components.month = month; components.day = day
+        components.hour = hour; components.minute = minute
+        return utc.date(from: components)!
+    }
+
+    /// A plain `offset == 1 ? "" : "s"` slip (dropped or inverted) only ever
+    /// surfaces past the first day — `dayBadgeText`'s own tests only reach
+    /// magnitude 1, so this is the case that would actually catch it.
+    func testAccessibilityPartsPluralizesADayCountGreaterThanOne() {
+        let utc = TimeZone(identifier: "UTC")!
+        let model = BoardingPassCard.Model(
+            carrierLine: "Test Air TA1",
+            origin: .init(code: "AAA", name: nil, date: utcInstant(2026, 7, 20, 23, 0), timeZone: utc),
+            destination: .init(code: "BBB", name: nil, date: utcInstant(2026, 7, 22, 2, 0), timeZone: utc),
+            footerText: nil
+        )
+        let parts = BoardingPassCard.accessibilityParts(for: model)
+        XCTAssertTrue(parts[2].hasSuffix("2 days later"), parts[2])
     }
 }

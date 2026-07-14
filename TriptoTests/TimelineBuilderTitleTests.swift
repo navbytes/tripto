@@ -310,4 +310,89 @@ final class TimelineBuilderTZShiftKindTests: XCTestCase {
         guard case .tzShift(let shiftModel) = models[0].rows[1] else { return XCTFail("expected a tzShift row") }
         XCTAssertEqual(shiftModel.kind, .zoneChange)
     }
+
+    /// Round-trip regression (docs/UX_REDESIGN_ROADMAP.md Phase 1): a
+    /// multi-flight, multi-tz itinerary — the mockup's own HKG<->BKK city
+    /// pair, there and back — must keep exactly the marker kinds/order this
+    /// milestone's single-flight tests above already pin: two landing rows,
+    /// zero spurious zone-change rows in between, even though the return
+    /// leg re-crosses back through Hong Kong's own zone (a bug in
+    /// `effectiveTz`/`zoneChanged` could otherwise fire a redundant
+    /// zone-change chip right before the return flight's own card). Also
+    /// pins the "one surface" contract (DECISIONS.md 2026-07-15): each
+    /// flight's `boardingPass.footerText` — the pass footer, the one
+    /// surface a viewer actually sees since `ItineraryTabView`
+    /// view-suppresses the `.landing` row — carries byte-identical text to
+    /// its suppressed-but-still-emitted `.tzShift(kind: .landing)` sibling,
+    /// so the two can never silently drift apart.
+    func testRoundTripMultiFlightKeepsLandingKindsOrderAndMatchingFooterText() {
+        var outboundDetails = ItemDetails.empty
+        outboundDetails.arrivalTz = "Asia/Bangkok"
+        let outbound = TestFixtures.makeItineraryItem(
+            category: .flight,
+            startsAt: instant(2026, 7, 20, 12, 20, tz: "Asia/Hong_Kong"),
+            endsAt: instant(2026, 7, 20, 14, 0, tz: "Asia/Bangkok"),
+            tz: "Asia/Hong_Kong", details: outboundDetails
+        )
+        var returnDetails = ItemDetails.empty
+        returnDetails.arrivalTz = "Asia/Hong_Kong"
+        let returnFlight = TestFixtures.makeItineraryItem(
+            category: .flight,
+            startsAt: instant(2026, 7, 27, 15, 30, tz: "Asia/Bangkok"),
+            endsAt: instant(2026, 7, 27, 19, 10, tz: "Asia/Hong_Kong"),
+            tz: "Asia/Bangkok", details: returnDetails
+        )
+        let sections = [
+            ItineraryDayBucketing.Section(day: day(2026, 7, 20), dayNumber: 1, rows: [.item(outbound)]),
+            ItineraryDayBucketing.Section(day: day(2026, 7, 27), dayNumber: 8, rows: [.item(returnFlight)])
+        ]
+
+        let models = TimelineBuilder.build(sections: sections, pendingRowIds: [], myUserId: nil, namesById: [:])
+
+        XCTAssertEqual(models[0].rows.map(\.id), ["card-\(outbound.id.uuidString)", "landing-\(outbound.id.uuidString)"])
+        XCTAssertEqual(
+            models[1].rows.map(\.id), ["card-\(returnFlight.id.uuidString)", "landing-\(returnFlight.id.uuidString)"]
+        )
+
+        guard
+            case .card(let outboundCard) = models[0].rows[0], case .tzShift(let outboundLanding) = models[0].rows[1],
+            case .card(let returnCard) = models[1].rows[0], case .tzShift(let returnLanding) = models[1].rows[1]
+        else { return XCTFail("unexpected row shape") }
+
+        XCTAssertEqual(outboundLanding.kind, .landing)
+        XCTAssertEqual(returnLanding.kind, .landing)
+        XCTAssertNotEqual(outboundLanding.text, returnLanding.text, "outbound and return legs must not share a landing note")
+        XCTAssertEqual(outboundCard.boardingPass?.footerText, outboundLanding.text)
+        XCTAssertEqual(returnCard.boardingPass?.footerText, returnLanding.text)
+    }
+
+    /// A flight with no known arrival zone at all has nothing to land into
+    /// — no footer, no `.landing` row (`BoardingPassContentTests
+    /// .testFooterTextIsAbsentWhenArrivalZoneMatchesDeparture` covers the
+    /// same-zone case; this one has no `arrivalTz` at all). But the
+    /// *incoming* crossing into its own departure zone is a separate,
+    /// ordinary `.zoneChange` chip that fires for any item regardless of
+    /// category — it must not be silently swallowed by the same
+    /// `.landing`-suppression mechanism just because the row right after it
+    /// happens to be a flight.
+    func testIncomingZoneChangeBeforeAFlightWithNoArrivalTzIsNotLost() {
+        let lisbonActivity = TestFixtures.makeItineraryItem(
+            category: .activity, startsAt: instant(2026, 5, 20, 9, 0, tz: "Europe/Lisbon"), tz: "Europe/Lisbon"
+        )
+        let localFlight = TestFixtures.makeItineraryItem(
+            category: .flight, startsAt: instant(2026, 5, 21, 10, 0, tz: "Europe/Madrid"), tz: "Europe/Madrid"
+        )
+        let sections = [
+            ItineraryDayBucketing.Section(day: day(2026, 5, 20), dayNumber: 1, rows: [.item(lisbonActivity)]),
+            ItineraryDayBucketing.Section(day: day(2026, 5, 21), dayNumber: 2, rows: [.item(localFlight)])
+        ]
+
+        let models = TimelineBuilder.build(sections: sections, pendingRowIds: [], myUserId: nil, namesById: [:])
+
+        XCTAssertEqual(
+            models[1].rows.map(\.id), ["shift-to-\(localFlight.id.uuidString)", "card-\(localFlight.id.uuidString)"]
+        )
+        guard case .tzShift(let shiftModel) = models[1].rows[0] else { return XCTFail("expected a tzShift row") }
+        XCTAssertEqual(shiftModel.kind, .zoneChange)
+    }
 }
