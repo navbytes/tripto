@@ -266,15 +266,55 @@ struct TripHeroView: View {
 
             Spacer(minLength: Spacing.sm)
 
+            // docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.2): destination
+            // context now lives in its own eyebrow line, above the title,
+            // instead of the old parenthetical-in-the-title approach the
+            // title's own `lineLimit` below used to have to make room for.
+            // Same eyebrow recipe `TZShiftChipRow.eyebrow` already
+            // established (Sofia Sans, 10pt bold, 0.8 tracking,
+            // `.textCase(.uppercase)` rather than baking the uppercase into
+            // the string itself, so VoiceOver still reads it as words, not
+            // spelled out). Full white, not the meta row's dimmed
+            // `.opacity(0.92)`: this eyebrow sits higher in the hero, where
+            // `CoverGradient.textScrim` (PaletteExtras.swift) is thinner
+            // than at the title/meta's own depth — full opacity keeps its
+            // contrast headroom where the scrim gives it less help. Fades
+            // with `metaRow` on collapse (same `1 - min(1, p * 1.6)` curve)
+            // so a fully-collapsed hero shows just the compact title, as
+            // before.
+            Text(heroEyebrowText)
+                .font(Typo.body(10, weight: .bold))
+                .tracking(0.8)
+                .textCase(.uppercase)
+                .foregroundStyle(.white)
+                // Same single-line-but-shrink-first safety net as the
+                // title below: `destinationLabel` can be as long as a
+                // user's own free-text destination, not just a short
+                // country name.
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .opacity(1 - min(1, p * 1.6))
+                // Reviewer N1: without this override VoiceOver reads the
+                // full visual string, including "N days" — which `metaRow`
+                // right below already speaks as part of its own
+                // "{dates}, N days" label. Speaking just the destination
+                // here also sidesteps the "·" itself being read as a
+                // literal fragment (same reasoning `accessibleDateRangeText`
+                // already documents for the meta row's en-dash).
+                .accessibilityLabel(destinationLabel)
+
             Text(trip.title)
                 .font(Typo.display(Typo.Size.display - 10 * p))
                 .foregroundStyle(.white)
-                // Nit from the collapse review: only clamp to one line once
-                // fully collapsed (`p >= 1`, hit at the reduce-motion snap
-                // threshold too), instead of switching mid-scroll at `p >
-                // 0.5` — that hard switch visibly reflowed the title while
-                // scrolling with reduce-motion off.
-                .lineLimit(p >= 1 ? 1 : 2)
+                // docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.2): "no two-line
+                // wrap" — the eyebrow above now carries destination
+                // context, so the title no longer needs the old `p >= 1 ?
+                // 1 : 2` collapse-conditional (itself only there to avoid a
+                // reflow-mid-scroll bug — see the collapse review nit this
+                // replaces). Pinning to 1 line unconditionally removes that
+                // whole class of bug rather than just avoiding it: there's
+                // nothing left to reflow between.
+                .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -401,38 +441,41 @@ struct TripHeroView: View {
         .heroFrameReporting(model: heroFlight)
     }
 
-    /// Finding 4 + 9b: two VoiceOver-distinct pieces instead of one run-on
-    /// row of literal "·" fragments — dates/duration read as a single
-    /// sentence, and the traveler count is a real tappable route (not just
-    /// decorative text) to `ShareRoute`'s "who's coming" screen.
+    /// Finding 4 + 9b: the traveler count is a real tappable route (not
+    /// just decorative text) to `ShareRoute`'s "who's coming" screen.
+    ///
+    /// ux-expert milestone M3: dropped the "· N days" this row used to
+    /// append after the date range — the eyebrow above (`heroEyebrowText`)
+    /// is now the one place duration lives; showing it twice in the same
+    /// hero read as a straight duplicate ("May 14 – May 27 · 14 days" right
+    /// under "PORTUGAL · 14 DAYS").
     ///
     /// AX5 overlap fix (qa-evidence-s5 B / J-itinerary / J-home): the
-    /// default single HStack below squeezes `dateDurationGroup` against
-    /// `travelerPill` — at accessibility sizes the date/duration string
-    /// alone is wider than the screen, forcing two separate `Text`s to
-    /// each independently decide where to wrap while sharing one HStack
-    /// row's width, the exact "two Texts negotiating a squeezed row" shape
-    /// `flightHeader`/`transportHeader` (BookingDetailView.swift) already
-    /// document giving up on in favor of a vertical stack. This alone
-    /// isn't the overlap's root cause (see the `.frame(minHeight:)` call
-    /// this feeds, in `body`, for that) but it's real, independent
-    /// fragility worth removing on its own terms: the AX branch here gives
-    /// the traveler pill its own row and folds the date/duration into one
-    /// plain `Text` (a single view wrapping on its own — not three views
-    /// negotiating shared width). Default rendering (the `else` branch) is
-    /// untouched.
+    /// default single HStack below squeezes the date text against
+    /// `travelerPill` — at accessibility sizes a long/year-spanning date
+    /// range can still be wider than the screen on its own, forcing two
+    /// separate `Text`s to each independently decide where to wrap while
+    /// sharing one HStack row's width, the exact "two Texts negotiating a
+    /// squeezed row" shape `flightHeader`/`transportHeader`
+    /// (BookingDetailView.swift) already document giving up on in favor of
+    /// a vertical stack. This alone isn't the overlap's root cause (see
+    /// the `.frame(minHeight:)` call this feeds, in `body`, for that) but
+    /// it's real, independent fragility worth removing on its own terms:
+    /// the AX branch here gives the traveler pill its own row instead of
+    /// sharing one with the date text. Default rendering (the `else`
+    /// branch) is untouched but for dropping duration.
     private var metaRow: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("\(dateRangeText) \u{00B7} \(durationText)")
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(accessibleDateRangeText), \(durationText)")
+                    Text(dateRangeText)
+                        .accessibilityLabel(accessibleDateRangeText)
                     travelerPill
                 }
             } else {
                 HStack(spacing: Spacing.sm) {
-                    dateDurationGroup
+                    Text(dateRangeText)
+                        .accessibilityLabel(accessibleDateRangeText)
                     metaDot
                     travelerPill
                 }
@@ -440,16 +483,6 @@ struct TripHeroView: View {
         }
         .font(Typo.body(Typo.Size.caption))
         .foregroundStyle(.white.opacity(0.92))
-    }
-
-    private var dateDurationGroup: some View {
-        HStack(spacing: Spacing.sm) {
-            Text(dateRangeText)
-            metaDot
-            Text(durationText)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(accessibleDateRangeText), \(durationText)")
     }
 
     private var travelerPill: some View {
@@ -510,10 +543,35 @@ struct TripHeroView: View {
         TripDateRangeFormat.spokenText(start: trip.startDate, end: trip.endDate)
     }
 
-    /// Shared by `dateDurationGroup` (default) and `metaRow`'s AX branch —
-    /// same string either way, just rendered via a plain `Text` at AX sizes
-    /// instead of split across an `HStack` (see `metaRow`'s doc comment).
+    /// ux-expert milestone M3: no longer shown in `metaRow` (see that
+    /// property's own doc comment) — kept only for `heroEyebrowText` below,
+    /// the one place duration now lives.
     private var durationText: String {
         "\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")"
+    }
+
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.2): "{DESTINATION} · {N}
+    /// DAYS" — reuses `durationText` above rather than re-deriving the same
+    /// day count a second way.
+    ///
+    /// Reviewer N2: `destinationLabel` can still come back blank (an
+    /// invalid/missing country code AND an empty `destination` field) —
+    /// guarded here so that renders as a plain "N days" instead of a
+    /// dangling "· N days" leading separator.
+    private var heroEyebrowText: String {
+        let destination = destinationLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !destination.isEmpty else { return durationText }
+        return "\(destination) \u{00B7} \(durationText)"
+    }
+
+    /// `TripCard.locationText`'s own "localized country name, falling back
+    /// to the raw destination string" rule (`Features/Home/TripCard.swift`)
+    /// — reused rather than re-deriving a second country/destination label
+    /// convention; this is exactly what already renders on Home's own trip
+    /// cards. Falls back to `trip.destination` outright on the `nil` case
+    /// (blank destination and no usable country code) so the eyebrow is
+    /// never empty.
+    private var destinationLabel: String {
+        TripCard.locationText(countryCode: trip.countryCode, destination: trip.destination) ?? trip.destination
     }
 }

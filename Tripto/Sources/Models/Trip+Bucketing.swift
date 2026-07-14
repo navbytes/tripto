@@ -66,6 +66,26 @@ enum TripDateBucketing {
         let span = calendar.dateComponents([.day], from: start, to: end).day ?? 0
         return span + 1
     }
+
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.4): the time zone "today"/
+    /// liveness should be judged against for a trip whose own items carry
+    /// zones (`ItineraryItem`, unlike `Trip.startDate`/`endDate` themselves
+    /// — see this enum's own doc comment) — the *effective* zone
+    /// (`ItineraryItem.effectiveTz`, `ItineraryTimeZone.swift`: a flight's
+    /// arrival zone, else its own) of whichever item ends latest. A trip's
+    /// last night in Naha should stay "today" until midnight there, not the
+    /// device's, even once the device's own calendar has already rolled
+    /// over. Falls back to `deviceTimeZone` when there are no items yet to
+    /// derive anything from. Sorts by `endsAt ?? startsAt` (an open-ended
+    /// item "ends" at its own start), matching `TimelineBuilder.build`'s own
+    /// check-out fallback — added here, not duplicated at each call site,
+    /// so every "what's today for this trip" question is answered by the
+    /// same one calculation (`ItineraryTabView`'s day-bucketing and its
+    /// today-anchor both call this).
+    static func liveTimeZone(items: [ItineraryItem], deviceTimeZone: TimeZone = .current) -> TimeZone {
+        let latest = items.max { ($0.endsAt ?? $0.startsAt) < ($1.endsAt ?? $1.startsAt) }
+        return latest?.effectiveTz ?? deviceTimeZone
+    }
 }
 
 extension Trip {

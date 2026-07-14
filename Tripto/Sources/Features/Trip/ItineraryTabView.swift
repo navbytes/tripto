@@ -11,6 +11,13 @@ import SwiftUI
 struct ItineraryTabView: View {
     let trip: Trip
     let items: [ItineraryItem]
+    /// Reviewer D3: the trip's full, unfiltered confirmed items (`TripView`'s
+    /// own `items` query) — used ONLY to derive `tripCalendar`'s zone below.
+    /// `items` above is already "Just mine"-filtered, and toggling that
+    /// filter must not shift what "today" means for this trip (unlike
+    /// `conflicts`, which is deliberately scoped to the filtered feed — see
+    /// that property's own doc comment).
+    let allTripItems: [ItineraryItem]
     let pendingRowIds: Set<UUID>
     let myUserId: UUID?
     let namesById: [UUID: String]
@@ -109,6 +116,20 @@ struct ItineraryTabView: View {
     private var tripStartDay: DayDate { DayDate.from(trip.startDate, calendar: .current) }
     private var tripEndDay: DayDate { DayDate.from(trip.endDate, calendar: .current) }
 
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.4): "today" judged in the
+    /// trip's own effective zone (`TripDateBucketing.liveTimeZone`,
+    /// `Models/Trip+Bucketing.swift`), not the device's — computed once
+    /// here and threaded through every "today" call site below
+    /// (`dayModels(now:)`, the auto-scroll `.task`, `todayScrollTargetId`,
+    /// `firstFreeDayId`) instead of each deriving its own, so this trip's
+    /// notion of "today" can't disagree with itself from one call site to
+    /// the next.
+    private var tripCalendar: Calendar {
+        var calendar = Calendar.current
+        calendar.timeZone = TripDateBucketing.liveTimeZone(items: allTripItems)
+        return calendar
+    }
+
     /// Finding F8: 1-based total day count of the trip itself, used to tell
     /// "Day N" apart from "Before/After the trip" in the section titles.
     private var tripDayCount: Int {
@@ -118,16 +139,16 @@ struct ItineraryTabView: View {
     /// D4 ("now" presence): takes the caller's `now` instead of reading
     /// `.now` internally, so the one shared clock (`TimelineView
     /// (.everyMinute)` in `body`, below) is the single source of "now" for
-    /// both `today`/`isToday` and the now-line/`isPast` — reusing the
-    /// existing `today: DayDate.from(now, calendar: .current)` derivation
-    /// rather than inventing a second one.
+    /// both `today`/`isToday` and the now-line/`isPast`. P2.4: `today` reads
+    /// `now` through `tripCalendar` (the trip's own effective zone), not
+    /// the device's — see that property's doc comment.
     private func dayModels(now: Date) -> [TimelineDayModel] {
         let sections = ItineraryDayBucketing.sections(items: items, tripStart: tripStartDay, tripEnd: tripEndDay)
         return TimelineBuilder.build(
             sections: sections, pendingRowIds: pendingRowIds, myUserId: myUserId, namesById: namesById,
             assigneesByItem: assigneesByItem,
             now: now,
-            today: DayDate.from(now, calendar: .current),
+            today: DayDate.from(now, calendar: tripCalendar),
             tripDayCount: tripDayCount
         )
     }
@@ -150,6 +171,7 @@ struct ItineraryTabView: View {
         let models = dayModels(now: .now)
         let hintDayId = firstFreeDayId(in: models)
         let todayTargetId = todayScrollTargetId(in: models)
+        let conflictTargetId = conflictScrollTargetId(in: models)
         return Group {
             if models.isEmpty {
                 emptyState
@@ -175,6 +197,11 @@ struct ItineraryTabView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                                if let firstConflict = conflicts.first {
+                                    conflictBanner(firstConflict, proxy: proxy, targetId: conflictTargetId)
+                                        .padding(.top, Spacing.md)
+                                        .padding(.bottom, Spacing.sm)
+                                }
                                 ForEach(liveModels) { day in
                                     Section {
                                         if day.isFreeDay {
@@ -237,7 +264,7 @@ struct ItineraryTabView: View {
                             #endif
                             if !hasUITestScrollTarget, !hasAutoScrolledToToday {
                                 hasAutoScrolledToToday = true
-                                let today = DayDate.from(.now, calendar: .current)
+                                let today = DayDate.from(.now, calendar: tripCalendar)
                                 if today >= tripStartDay, today <= tripEndDay,
                                     let target = liveModels.first(where: { $0.id >= today.stringValue }) {
                                     // Finding 4: always an instant jump, not an
@@ -362,7 +389,26 @@ struct ItineraryTabView: View {
     @ViewBuilder
     private func rowView(for row: TimelineRowModel) -> some View {
         switch row {
-        case .card(let model): TimelineCardRow(model: model, typeSize: dynamicTypeSize).equatable()
+        case .card(let model):
+            // docs/UX_REDESIGN_ROADMAP.md Phase 2, P2.1: an offending
+            // check-in card gets a rose flag line naming the other stay it
+            // clashes with, directly under the card itself.
+            if flaggedItemIds.contains(model.id), let otherHotel = StayConflicts.otherHotelName(for: model.id, in: conflicts) {
+                VStack(alignment: .leading, spacing: 0) {
+                    TimelineCardRow(model: model, typeSize: dynamicTypeSize).equatable()
+                    conflictFlag(otherHotelName: otherHotel)
+                }
+                // "flag line read with its card": the card's own
+                // NavigationLink is the only interactive descendant here,
+                // so combining is safe (unlike the banner's separate CTA
+                // above, which stays its own control) — VoiceOver reads the
+                // card's existing label followed by the flag text as one
+                // stop, and double-tap still activates the card's own
+                // navigation.
+                .accessibilityElement(children: .combine)
+            } else {
+                TimelineCardRow(model: model, typeSize: dynamicTypeSize).equatable()
+            }
         case .staying(let model): StayingStripRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .checkOut(let model): CheckOutRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .tzShift(let model):
@@ -507,7 +553,7 @@ struct ItineraryTabView: View {
     /// whether the hint actually renders.
     private func firstFreeDayId(in models: [TimelineDayModel]) -> String? {
         let genuinelyFree = models.filter { $0.isFreeDay && hiddenCountByDay[$0.id, default: 0] == 0 }
-        let todayId = DayDate.from(.now, calendar: .current).stringValue
+        let todayId = DayDate.from(.now, calendar: tripCalendar).stringValue
         return genuinelyFree.first(where: { $0.id >= todayId })?.id ?? genuinelyFree.first?.id
     }
 
@@ -520,9 +566,149 @@ struct ItineraryTabView: View {
     /// day on or after today by sortable id for the (rare) case a
     /// same-day bucketing edge leaves no row flagged.
     private func todayScrollTargetId(in models: [TimelineDayModel]) -> String? {
-        let today = DayDate.from(.now, calendar: .current)
+        let today = DayDate.from(.now, calendar: tripCalendar)
         guard today >= tripStartDay, today <= tripEndDay else { return nil }
         return models.first(where: { $0.isToday })?.id ?? models.first(where: { $0.id >= today.stringValue })?.id
+    }
+
+    // MARK: - Stay conflicts (docs/UX_REDESIGN_ROADMAP.md Phase 2, P2.1)
+
+    /// Computed from this view's own (already person-filtered) `items`,
+    /// not the trip's full unfiltered list — a hotel booking is almost
+    /// never assigned to just one person (unassigned = shared with
+    /// everyone, `PersonFilter`'s own doc comment), but keeping this in
+    /// lockstep with what's actually rendered means the banner and
+    /// "Review stays"' scroll target can never disagree with the current
+    /// filter, even in that rare case.
+    ///
+    /// ponytail: unlike `dayModels(now:)` (Finding F5's doc comment), this
+    /// is deliberately NOT hoisted into one `let` in `body` and threaded
+    /// through — it's re-evaluated once per rendered card row too. A
+    /// trip's hotel count is a handful, not the ~70-row full timeline
+    /// `dayModels` walks, so the repeat is noise; hoist only if that
+    /// assumption stops holding.
+    private var conflicts: [StayConflicts.Conflict] {
+        StayConflicts.conflicts(in: items)
+    }
+
+    private var flaggedItemIds: Set<UUID> {
+        StayConflicts.flaggedItemIds(in: conflicts)
+    }
+
+    /// The row id (`TimelineRowModel.id`) of the first offending check-in
+    /// card — `StayConflicts.conflicts(in:)`'s own ordering guarantees
+    /// `conflicts.first?.firstId` is the earliest-starting flagged stay
+    /// (see that function's doc comment), so this only needs to locate
+    /// that item's `.card` row inside the already-built `models`. `nil`
+    /// when there's no conflict.
+    private func conflictScrollTargetId(in models: [TimelineDayModel]) -> String? {
+        guard let firstOffendingId = conflicts.first?.firstId else { return nil }
+        return models.flatMap(\.rows).first {
+            if case .card(let model) = $0 { model.id == firstOffendingId } else { false }
+        }?.id
+    }
+
+    /// Shown above the day list whenever `conflicts` finds an overlapping
+    /// pair of hotel bookings — almost always an accidental duplicate
+    /// (intentional multi-stop/split-stay trips are out of v1 scope,
+    /// CLAUDE.md/BUILD_PLAN §2). Amber-wash, matching `SyncBanner`/
+    /// `ImportReviewBanner`'s "heads up" register (`Palette.amberSoft`/
+    /// `amberInk`) — the per-card flag on the offending cards themselves
+    /// (`conflictFlag`, below) is the rose "this exact row" signal; this
+    /// banner is the trip-level summary, not itself an error state.
+    private func conflictBanner(
+        _ conflict: StayConflicts.Conflict, proxy: ScrollViewProxy, targetId: String?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Palette.amberInk)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(StayConflicts.headline(for: conflict))
+                        .font(Typo.body(weight: .bold))
+                        .foregroundStyle(Palette.ink)
+                    // ux-expert milestone M2: at accessibility Dynamic Type
+                    // sizes this body line alone could push the CTA off an
+                    // AX3 viewport — dropped there, not truncated: both
+                    // hotel names already repeat on their own per-card
+                    // flags (`conflictFlag`, below), so nothing is actually
+                    // lost, just this one redundant restatement.
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Text(StayConflicts.body(for: conflict))
+                            .font(Typo.body(Typo.Size.caption))
+                            // Reviewer D1: `.slate` measured ~4.21:1 on
+                            // `amberSoft` (fails AA); `.amberInk` (~4.45:1)
+                            // also falls short here — `.ink` (~14.4:1,
+                            // already the headline's own color right
+                            // above) is what actually clears the 4.5:1 bar
+                            // on this background.
+                            .foregroundStyle(Palette.ink)
+                    }
+                }
+            }
+            // SyncIssuesSheet.issueRow's precedent (Features/Settings — via
+            // SyncIssueBanner): combine only the informational subtree into
+            // one VoiceOver stop; "Review stays" below stays its own,
+            // individually reachable control rather than being folded into
+            // one ambiguous element alongside it.
+            .accessibilityElement(children: .combine)
+
+            if let targetId {
+                Button {
+                    if reduceMotion {
+                        proxy.scrollTo(targetId, anchor: .center)
+                    } else {
+                        withAnimation { proxy.scrollTo(targetId, anchor: .center) }
+                    }
+                } label: {
+                    // ux-expert milestone M1: was a large filled-amber
+                    // capsule sitting on this banner's own amber-wash,
+                    // stacking a second big amber affordance right above
+                    // the amber FAB — mockup's own `.btn-dark` control
+                    // instead (compact ink-filled pill, paper text).
+                    // Ink-on-paper measures ~14:1, nowhere near the 4.5:1
+                    // floor. `.background` before `.frame(minHeight:)`
+                    // (not after, the bug that made the old capsule itself
+                    // 44pt tall) is the same "small visual chip, larger
+                    // invisible hit band" order `PersonFilterBar`'s own
+                    // chips already use.
+                    Text("Review stays")
+                        .font(Typo.body(13, weight: .semibold))
+                        .foregroundStyle(Palette.paper)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.sm)
+                        .background(Palette.ink, in: Capsule())
+                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(Spacing.md)
+        .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+    }
+
+    /// Rose "Overlaps {other}, same nights" line under an offending
+    /// check-in card — rose (`PaletteExtras.swift`), not the banner's
+    /// amber: this exact card is the specific conflict, `conflictBanner`
+    /// above is the trip-level heads-up. Same small-capsule recipe as
+    /// `TagChip` (`TimelineRowViews.swift`), recolored.
+    private func conflictFlag(otherHotelName: String) -> some View {
+        HStack(spacing: Spacing.xxs) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 9, weight: .semibold))
+                .accessibilityHidden(true)
+            Text("Overlaps \(otherHotelName), same nights")
+                .font(Typo.body(10, weight: .bold))
+        }
+        .foregroundStyle(Palette.rose)
+        .padding(.horizontal, Spacing.sm)
+        .padding(.vertical, 3)
+        .background(Palette.roseSoft, in: Capsule())
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+        .padding(.leading, TimelineLayout.indentedLeading(for: dynamicTypeSize))
+        .padding(.top, Spacing.xxs)
     }
 
     /// UX audit finding 2: the pill itself — same resting-chip look as
