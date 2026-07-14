@@ -1,11 +1,12 @@
 # Tripto — testing runbook
 
-How to run the test suites, and the one non-obvious prerequisite: **the UI
-tests require anonymous sign-in to be enabled on the Supabase backend.**
+How to run the test suites. Both `TriptoTests` and `TriptoUITests` are fully
+hermetic: no network calls, no backend settings to toggle (see "The
+anonymous-sign-in prerequisite" below for the now-resolved history).
 
 ## Test suites
 
-- **Unit tests** (`TriptoTests`, 509 as of 2026-07-12) — hermetic: in-memory SwiftData, no
+- **Unit tests** (`TriptoTests`, 611 as of 2026-07-14) — hermetic: in-memory SwiftData, no
   network, no auth. Always pass regardless of backend config. Run in Xcode
   (⌘U, TriptoTests) or:
   ```
@@ -17,10 +18,9 @@ tests require anonymous sign-in to be enabled on the Supabase backend.**
     -only-testing:TriptoTests
   ```
 - **UI tests** (`TriptoUITests`, 6) — drive the real app. Each launches with
-  `-uitestAutoSignIn`, which calls the **real**
-  `Supa.client.auth.signInAnonymously()` against the backend to reach a
-  signed-in state. **They only pass while anonymous sign-in is enabled on the
-  backend** (see below). Run with `-only-testing:TriptoUITests`.
+  `-uitestAutoSignIn`, which (since 2026-07-14) injects a fixed synthetic
+  session in `AuthManager.init` (`#if DEBUG`) — no network, no backend
+  settings involved. Run with `-only-testing:TriptoUITests`.
 - **Real Sign in with Apple** — a separate auth path, unaffected by the
   anonymous toggle; needs the App ID / SiwA console setup (see
   [`RELEASE_READINESS.md`](RELEASE_READINESS.md)).
@@ -36,53 +36,42 @@ root before pushing to catch violations early. Same convention as SpotHK.
 
 **CI tests:** every push to main auto-triggers the Xcode Cloud "CI" workflow —
 a Test-only run of the `Tripto-CI` scheme (unit tests, Required to Pass; Cloud
-can't scope a Test action to targets, and the UI tests need the anon-sign-in
-toggle, so they stay out of the CI scheme). The "Default" workflow (manual +
-`v*` tags) additionally runs Test + Archive for releases.
+can't scope a Test action to targets, so the scheme decides). The UI tests
+were historically excluded because they needed the backend anon-sign-in
+toggle; they're hermetic now, so adding them to the CI scheme is possible —
+an owner call, since 6 simulator UI tests cost real Cloud compute minutes.
+The "Default" workflow (manual + `v*` tags) additionally runs Test + Archive
+for releases.
 
-## The anonymous-sign-in prerequisite — read before UI testing
+## The anonymous-sign-in prerequisite (resolved 2026-07-14)
 
-**Decision (2026-07-11):** keep anonymous sign-in **enabled during
-development/testing** and **disable it at launch**. Rationale: v1 exposes no
-anonymous feature, the anonymous code is `#if DEBUG`-only (compiled out of
-Release), so the only reason to disable it is trimming production attack
-surface — which only matters once real users can reach the backend. It's a
-**reversible backend toggle**, not a code change.
+**No longer applies — kept here for history.** `TriptoUITests` used to call
+the real `Supa.client.auth.signInAnonymously()` via `-uitestAutoSignIn`, so
+every run required toggling anonymous sign-in on in the backend first (and
+off again before launch) — a production auth setting, tolerable pre-launch
+but not a sane recurring workflow. That coupling is gone: `-uitestAutoSignIn`
+now injects a fixed fake session directly in `AuthManager.init` (`#if
+DEBUG`), so the suite never touches the network or the backend's auth
+settings at all. See "The durable fix" below.
 
-- **Before running the UI suite:** make sure anonymous sign-in is **ON**.
-- **At launch / when done testing:** turn it **OFF** (the final pre-launch step
-  in `RELEASE_READINESS.md` §2). Toggle it back on for any later UI-test run.
+## Seeding real-shaped data via archive import
 
-### How to toggle
+**Sanctioned way to load realistic trips for manual testing:** Settings → "Import trips" → select a Tripto Archive v1 JSON (`docs/IMPORT_FORMAT.md`). Conversion is deterministic and on-device (no AI, no consent dialog); imported rows then sync through the normal outbox like any other edit, so use a signed build when you want them to reach the backend. Re-import is idempotent. See the format spec's appendix for an LLM prompt to convert exports from other apps.
 
-The setting lives in the backend repo at
-`~/repos/backend/projects/tripto/supabase/config.toml`:
-```
-[auth]
-enable_anonymous_sign_ins = true   # true = testing, false = launch
-```
-Apply it:
-```
-cd ~/repos/backend/projects/tripto && supabase config push
-```
-Quick one-off alternative (no repo change): Supabase dashboard → project
-`qgtveaqukvbtyunupzhn` → Authentication → **Allow anonymous sign-ins**. If you
-toggle in the dashboard, mirror it in `config.toml` so the repo stays the
-source of truth.
+`DemoSeeder` remains the DEBUG-menu "Seed demo trip" fixture for lightweight deterministic testing. Archive import is for seeding a realistic multi-trip landscape before E2E flows.
 
-### Symptom if you forget
+## The durable fix — done (2026-07-14, BACKLOG.md C4)
 
-The UI tests fail as **"trip/element never appeared" timeouts**, not as visible
-auth errors — the app just never leaves the welcome screen because the
-anonymous sign-in call is rejected. If a UI run fails that way, **check this
-toggle first.**
+`TriptoUITests` are now hermetic: in the `#if DEBUG` `-uitestAutoSignIn`
+path, `AuthManager.init` installs a fixed, fully-synthetic `Session`/`User`
+(deterministic UUID, far-future expiry, no `Date()`-dependent fields) and
+skips subscribing to `authStateChanges` entirely, instead of calling the
+real `signInAnonymously()` (now deleted). Production keeps anonymous
+sign-in off permanently, the suite makes zero live network calls, and the
+old seed/auth-race flakiness — plus the Keychain-persisted-session
+`-uitestSignOut` pre-launch workaround it required — is gone with it.
 
-## The durable fix (if toggling becomes a chore)
-
-The tidy long-term option is to stop the UI tests depending on the backend at
-all: in the `#if DEBUG` `-uitestAutoSignIn` path, inject a **fake authenticated
-session** instead of calling `signInAnonymously()`. Then the UI tests are
-hermetic, production can keep anonymous sign-in off permanently, and the
-occasional seed/auth-race flakiness (a UI run that lands on an empty home and
-has to retry) goes away too. Not done yet — recorded here as the upgrade path.
-Deferred rationale is in [`BACKLOG.md`](BACKLOG.md).
+One known (harmless) limitation: in `-uitestAutoSignIn` mode, signing out
+in-app won't return to WelcomeView — the synthetic session has no
+`authStateChanges` subscriber to clear it. No test combines the two flows;
+if one ever needs to, clear the session directly in the DEBUG seam.

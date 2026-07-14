@@ -38,6 +38,16 @@ final class ItineraryItem {
     /// already-installed app's existing local rows simply read "manual" on
     /// next launch, the same value the server itself defaults absent one.
     var sourceRaw: String = ItemSource.manual.rawValue
+    /// `itinerary_items.sender_verified` (EI-4) — additive/nullable,
+    /// same purely-additive, lightweight-migration-safe pattern as
+    /// `sourceRaw` above: an already-installed app's existing local rows
+    /// simply read `nil` on next launch. `nil` means not applicable (a
+    /// manual/paste-imported item, or a row pulled before this column
+    /// existed server-side); `false` means the item arrived via a
+    /// forwarded email and the forwarder isn't a member of this trip;
+    /// `true` means they are. Only `false` is ever surfaced in the UI —
+    /// see `isFromUnverifiedSender`.
+    var senderVerified: Bool?
     /// Nullable since the F3 account-deletion migration
     /// (`ON DELETE SET NULL`): an item a since-departed user added to
     /// someone else's trip survives with `createdBy == nil` rather than
@@ -64,6 +74,7 @@ final class ItineraryItem {
         detailsJSON: String,
         statusRaw: String,
         sourceRaw: String = ItemSource.manual.rawValue,
+        senderVerified: Bool? = nil,
         createdBy: UUID?,
         createdAt: Date,
         updatedAt: Date,
@@ -84,6 +95,7 @@ final class ItineraryItem {
         self.detailsJSON = detailsJSON
         self.statusRaw = statusRaw
         self.sourceRaw = sourceRaw
+        self.senderVerified = senderVerified
         self.createdBy = createdBy
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -104,6 +116,14 @@ final class ItineraryItem {
         get { ItemSource(rawValue: sourceRaw) ?? .manual }
         set { sourceRaw = newValue.rawValue }
     }
+
+    /// EI-4: the one predicate `SuggestedItemsSheet`'s row badge and
+    /// `AddItemSheet`'s review-mode callout both key off, so the two can't
+    /// drift out of sync with each other. Deliberately `== false`, not
+    /// `!= true`: `nil` ("not applicable" — see `senderVerified`'s doc
+    /// comment) must never badge, only a confirmed "forwarder isn't a
+    /// trip member" `false` does.
+    var isFromUnverifiedSender: Bool { senderVerified == false }
 
     /// DBG-bookings: the single definition of "is this a booking," replacing
     /// the two definitions that never met — the import pipeline's `status`
@@ -151,6 +171,14 @@ struct ItineraryItemDTO: Codable, Sendable, Equatable {
     /// unchanged — real PostgREST rows always carry a value (`not null
     /// default 'manual'`), so this default only ever matters for those.
     var source: String = ItemSource.manual.rawValue
+    /// `itinerary_items.sender_verified` — see `ItineraryItem.senderVerified`'s
+    /// doc comment for the tri-state meaning. An ordinary `Bool?` already
+    /// decodes fine whether the key is entirely absent (server hasn't
+    /// shipped the column yet) or explicitly `null` (`decodeIfPresent`
+    /// handles both), and defaults to `nil` here too so a DTO built via the
+    /// plain memberwise init (rather than decoded off the wire) keeps
+    /// compiling unchanged.
+    var senderVerified: Bool?
     var createdBy: UUID?
     var createdAt: Date
     var updatedAt: Date
@@ -175,6 +203,7 @@ extension ItineraryItem {
             detailsJSON: dto.details.jsonText,
             statusRaw: dto.status,
             sourceRaw: dto.source,
+            senderVerified: dto.senderVerified,
             createdBy: dto.createdBy,
             createdAt: dto.createdAt,
             updatedAt: dto.updatedAt,
@@ -197,6 +226,7 @@ extension ItineraryItem {
         detailsJSON = dto.details.jsonText
         statusRaw = dto.status
         sourceRaw = dto.source
+        senderVerified = dto.senderVerified
         createdBy = dto.createdBy
         createdAt = dto.createdAt
         updatedAt = dto.updatedAt
@@ -220,6 +250,7 @@ extension ItineraryItem {
             details: AnyJSON(jsonText: detailsJSON),
             status: statusRaw,
             source: sourceRaw,
+            senderVerified: senderVerified,
             createdBy: createdBy,
             createdAt: createdAt,
             updatedAt: updatedAt,

@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Settings + account deletion (M3 brief; Apple 5.1.1(v)). Reached via
 /// `SettingsRoute` pushed onto the shared `NavigationStack` from
@@ -35,6 +36,22 @@ struct SettingsView: View {
     /// below, since this screen is pushed (not sheet-presented) and so can't
     /// use `interactiveDismissDisabled`/`SheetDismissAttemptObserver`.
     @State private var showDiscardConfirm = false
+
+    /// Tripto Archive v1 (docs/IMPORT_FORMAT.md) — "Import trips"/"Export
+    /// trips" (roadmap 2.2/2.3). `archiveImportError` drives the
+    /// atomic-failure alert; `archiveImportReport` drives either a plain
+    /// success alert or the skip-detail sheet, split on the report's own
+    /// `isFullSuccess`.
+    @State private var isPresentingArchiveImporter = false
+    @State private var isImportingArchive = false
+    @State private var isExportingArchive = false
+    @State private var archiveImportError: TripArchiveError?
+    @State private var archiveImportReport: TripArchiveImportReport?
+    @State private var didFinishArchiveImport = false
+    /// D2/SEC: the export temp file's own URL is the source of truth (not
+    /// `[Any]?` directly) so it can be deleted the moment the share sheet
+    /// dismisses — see `exportShareItems` below.
+    @State private var exportTempFileURL: URL?
 
     private var myProfile: Profile? {
         guard let userId = authManager.userId else { return nil }
@@ -121,6 +138,50 @@ struct SettingsView: View {
             }
 
             Section {
+                Button {
+                    isPresentingArchiveImporter = true
+                } label: {
+                    if isImportingArchive {
+                        HStack {
+                            ProgressView()
+                            Text("Importing\u{2026}")
+                        }
+                    } else {
+                        Text("Import trips")
+                    }
+                }
+                .disabled(isImportingArchive || isExportingArchive || isDeletingAccount)
+
+                Button {
+                    exportArchive()
+                } label: {
+                    if isExportingArchive {
+                        HStack {
+                            ProgressView()
+                            Text("Preparing export\u{2026}")
+                        }
+                    } else {
+                        Text("Export trips")
+                    }
+                }
+                .disabled(isImportingArchive || isExportingArchive || isDeletingAccount)
+
+                Button("Copy conversion prompt") {
+                    copyConversionPrompt()
+                }
+                .disabled(isImportingArchive || isExportingArchive || isDeletingAccount)
+            } header: {
+                Text("Your data")
+            } footer: {
+                Text(
+                    "Import trips from a Tripto Archive file, or export your trips to share or back up. "
+                        + "Coming from another app? Copy the conversion prompt, paste it (and your old trip data) "
+                        + "into any AI assistant, and import what it gives back."
+                )
+                .font(Typo.body(Typo.Size.caption))
+            }
+
+            Section {
                 Button(role: .destructive) {
                     isPresentingDeleteConfirm = true
                 } label: {
@@ -174,7 +235,10 @@ struct SettingsView: View {
                         Text("Back")
                     }
                 }
-                .disabled(isDeletingAccount)
+                // UX#5: leaving mid-import used to silently drop the
+                // report (including any "check times" zone-assumption
+                // warnings) even though the data had already imported.
+                .disabled(isDeletingAccount || isImportingArchive || isExportingArchive)
             }
         }
         .toastOverlay($toast)
@@ -257,6 +321,66 @@ struct SettingsView: View {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
         }
+        .fileImporter(isPresented: $isPresentingArchiveImporter, allowedContentTypes: [.json]) { result in
+            handleArchivePick(result)
+        }
+        .activityShareSheet(items: exportShareItems)
+        .sensoryFeedback(.success, trigger: didFinishArchiveImport)
+        .alert("Couldn\u{2019}t import", isPresented: isPresentingArchiveImportError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(archiveImportError?.message ?? "")
+        }
+        .alert("Import complete", isPresented: isPresentingArchiveImportSuccessAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(archiveImportReport.map(Self.importSummary) ?? "")
+        }
+        .sheet(isPresented: isPresentingArchiveImportReportSheet) {
+            if let archiveImportReport {
+                ArchiveImportReportSheet(report: archiveImportReport)
+            }
+        }
+    }
+
+    /// Broken out of `body` as explicit-typed `Binding<Bool>` properties
+    /// (rather than inline `Binding(get:set:)` closures in the modifier
+    /// chain) — an already-long `body` plus several inline closures pushed
+    /// the type checker over its "reasonable time" limit.
+    private var isPresentingArchiveImportError: Binding<Bool> {
+        Binding(
+            get: { archiveImportError != nil },
+            set: { isPresented in if !isPresented { archiveImportError = nil } }
+        )
+    }
+
+    private var isPresentingArchiveImportSuccessAlert: Binding<Bool> {
+        Binding(
+            get: { archiveImportReport?.isFullSuccess == true },
+            set: { isPresented in if !isPresented { archiveImportReport = nil } }
+        )
+    }
+
+    private var isPresentingArchiveImportReportSheet: Binding<Bool> {
+        Binding(
+            get: { archiveImportReport != nil && archiveImportReport?.isFullSuccess == false },
+            set: { isPresented in if !isPresented { archiveImportReport = nil } }
+        )
+    }
+
+    /// SEC LOW: bridges `exportTempFileURL` (the real source of truth) to
+    /// `.activityShareSheet`'s `[Any]?` — when the sheet dismisses (setting
+    /// this back to `nil`), the temp file is deleted immediately rather
+    /// than left in `tmp/` indefinitely.
+    private var exportShareItems: Binding<[Any]?> {
+        Binding(
+            get: { exportTempFileURL.map { [$0] } },
+            set: { newValue in
+                guard newValue == nil, let url = exportTempFileURL else { return }
+                try? FileManager.default.removeItem(at: url)
+                exportTempFileURL = nil
+            }
+        )
     }
 
     private func backTapped() {
@@ -352,5 +476,227 @@ struct SettingsView: View {
                 toast = "Something went wrong on our end deleting your account. Try again in a moment."
             }
         }
+    }
+
+    // MARK: - Tripto Archive (import/export, roadmap 2.2/2.3)
+
+    private func handleArchivePick(_ result: Result<URL, Error>) {
+        switch result {
+        case .failure:
+            // UX#8: a picker-level failure is "couldn't open the file"
+            // (permissions/IO), not "this isn't a valid archive" — distinct
+            // copy from a JSON parse failure.
+            archiveImportError = .unreadableFile
+        case .success(let url):
+            importArchive(from: url)
+        }
+    }
+
+    private func importArchive(from url: URL) {
+        guard !isImportingArchive else { return }
+        guard let userId = authManager.userId else {
+            toast = "Sign in first, then try importing again."
+            return
+        }
+        isImportingArchive = true
+        Task {
+            defer { isImportingArchive = false }
+            // `.fileImporter` hands back a security-scoped URL — must
+            // bracket the read (Apple's documented contract for picked
+            // files outside the app's own sandbox).
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+            // SEC LOW: reject an oversized file via its size attribute
+            // BEFORE reading the whole thing into memory.
+            if let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                fileSize > TripArchiveBounds.maxFileBytes {
+                archiveImportError = .fileTooLarge
+                return
+            }
+            guard let data = try? Data(contentsOf: url) else {
+                archiveImportError = .unreadableFile
+                return
+            }
+            let outcome = await TripArchiveImporter.importArchive(
+                data: data, modelContext: modelContext, syncEngine: syncEngine, userId: userId
+            )
+            switch outcome {
+            case .success(let report):
+                archiveImportReport = report
+                if report.tripsImported > 0 || report.itemsImported > 0 {
+                    didFinishArchiveImport.toggle()
+                }
+            case .failure(let error):
+                archiveImportError = error
+            }
+        }
+    }
+
+    /// D2/M3+UX#4: async now (`TripArchiveExporter.export` runs compose+
+    /// encode off the main actor for a large local store) with the same
+    /// busy/disabled + double-tap guard `importArchive` already has.
+    private func exportArchive() {
+        guard !isExportingArchive else { return }
+        isExportingArchive = true
+        Task {
+            defer { isExportingArchive = false }
+            let trips: [Trip]
+            let items: [ItineraryItem]
+            let profiles: [TripProfile]
+            do {
+                // L7 fix: a fetch failure used to silently degrade to an
+                // empty array, producing a misleadingly "successful" but
+                // empty export instead of a clear failure.
+                trips = try modelContext.fetch(FetchDescriptor<Trip>())
+                items = try modelContext.fetch(FetchDescriptor<ItineraryItem>())
+                profiles = try modelContext.fetch(FetchDescriptor<TripProfile>())
+            } catch {
+                toast = "Couldn\u{2019}t export your trips. Try again."
+                return
+            }
+            do {
+                exportTempFileURL = try await TripArchiveExporter.export(trips: trips, items: items, profiles: profiles)
+            } catch {
+                toast = "Couldn\u{2019}t export your trips. Try again."
+            }
+        }
+    }
+
+    /// UX#2: the IMPORT_FORMAT.md appendix prompt, bundled verbatim so a
+    /// user migrating from another app has an in-app path to it — no web
+    /// link, just copy + paste into any AI assistant alongside their data.
+    private func copyConversionPrompt() {
+        toast = ClipboardFeedback.copy(Self.conversionPromptText, label: "Prompt")
+    }
+
+    private static let conversionPromptText = """
+    Convert my trip data below into Tripto Archive v1 JSON. Rules:
+    - Envelope: {"format":"tripto-archive","version":1,"trips":[\u{2026}]}.
+    - Follow the trip/item fields exactly as specified in sections 2-3 of Tripto's IMPORT_FORMAT.md \
+    (categories: flight, hotel, activity, food, transport; snake_case keys).
+    - Give every trip and item a stable id (reuse the source's ids/PNRs where possible \u{2014} re-imports dedupe by id).
+    - Dates YYYY-MM-DD; times as naive local YYYY-MM-DDTHH:MM plus the IANA tz you know for that place/airport \
+    (and arrival_tz for flights). Use from_iata/to_iata airport codes.
+    - country_code is ISO 3166-1 alpha-2. travellers lists companions by display name \u{2014} do NOT include me (the account owner).
+    - Bookings that aren't flights become items too: hotels \u{2192} hotel, car rentals/transfers \u{2192} transport, \
+    attraction tickets \u{2192} activity. Put PNRs in confirmation, disruption/refund history in notes.
+    - Skip nothing; if a trip has no known dates, still emit it (Tripto will report it as skipped rather than guess).
+
+    My data: \u{2026}
+    """
+
+    private static func importSummary(_ report: TripArchiveImportReport) -> String {
+        let tripWord = report.tripsImported == 1 ? "trip" : "trips"
+        let itemWord = report.itemsImported == 1 ? "item" : "items"
+        return "\(report.tripsImported) \(tripWord), \(report.itemsImported) \(itemWord) imported."
+    }
+}
+
+/// Settings' "Import trips" result when the archive had any skips or flags
+/// — a clean import gets the simpler `.alert` instead (`SettingsView.body`'s
+/// split on `TripArchiveImportReport.isFullSuccess`).
+private struct ArchiveImportReportSheet: View {
+    let report: TripArchiveImportReport
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    LabeledContent("Trips imported", value: "\(report.tripsImported)")
+                    LabeledContent("Items imported", value: "\(report.itemsImported)")
+                    if report.profilesImported > 0 {
+                        LabeledContent("Travellers added", value: "\(report.profilesImported)")
+                    }
+                }
+
+                if report.zoneAssumedCount > 0 {
+                    Section {
+                        Text(zoneAssumedText)
+                    }
+                }
+
+                if !report.tripSkips.isEmpty {
+                    Section("Trips skipped") {
+                        ForEach(Array(report.tripSkips.enumerated()), id: \.offset) { _, skip in
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                Text(skip.title.isEmpty ? "Untitled trip" : skip.title)
+                                    .font(Typo.body(weight: .semibold))
+                                Text(Self.sentenceCased(skip.reason.reportText))
+                                    .font(Typo.body(Typo.Size.caption))
+                                    .foregroundStyle(Palette.slate)
+                            }
+                            // UX#7: read as one VoiceOver element (name +
+                            // reason together), not two separate stops.
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                }
+
+                if !report.itemSkips.isEmpty {
+                    Section("Items skipped") {
+                        ForEach(Array(report.itemSkips.enumerated()), id: \.offset) { _, skip in
+                            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                // UX#3: the item's own title/category, not
+                                // the raw archive item id (often empty).
+                                Text(skip.itemLabel)
+                                    .font(Typo.body(weight: .semibold))
+                                Text("\(Self.sentenceCased(skip.reason.reportText)) \u{2014} "
+                                    + (skip.tripTitle.isEmpty ? "Untitled trip" : skip.tripTitle))
+                                    .font(Typo.body(Typo.Size.caption))
+                                    .foregroundStyle(Palette.slate)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                }
+
+                if report.droppedNotesCount > 0 {
+                    Section {
+                        Text(droppedNotesText)
+                    }
+                }
+            }
+            .navigationTitle("Import results")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            // UX#7: this sheet's own content is the only signal a VoiceOver
+            // user gets that the import finished — announce the headline
+            // counts the moment it presents, same as any other result toast.
+            .onAppear {
+                AccessibilityNotification.Announcement(summaryAnnouncement).post()
+            }
+        }
+    }
+
+    private var summaryAnnouncement: String {
+        let tripWord = report.tripsImported == 1 ? "trip" : "trips"
+        let itemWord = report.itemsImported == 1 ? "item" : "items"
+        let skipCount = report.tripSkips.count + report.itemSkips.count
+        let skipWord = skipCount == 1 ? "item" : "items"
+        return "\(report.tripsImported) \(tripWord), \(report.itemsImported) \(itemWord) imported. "
+            + "\(skipCount) \(skipWord) skipped."
+    }
+
+    private var zoneAssumedText: String {
+        let word = report.zoneAssumedCount == 1 ? "item" : "items"
+        return "\(report.zoneAssumedCount) \(word) assumed your device time zone \u{2014} check times."
+    }
+
+    private var droppedNotesText: String {
+        let word = report.droppedNotesCount == 1 ? "trip\u{2019}s notes weren\u{2019}t" : "trips\u{2019} notes weren\u{2019}t"
+        return "\(report.droppedNotesCount) \(word) imported \u{2014} Tripto doesn\u{2019}t store trip-level notes yet."
+    }
+
+    /// UX#6: BUILD_PLAN §6.2 sentence case — `reportText` values are
+    /// already lowercase; only the first letter needs raising (`.capitalized`
+    /// title-cased every word, e.g. "Missing Id").
+    private static func sentenceCased(_ text: String) -> String {
+        guard let first = text.first else { return text }
+        return first.uppercased() + text.dropFirst()
     }
 }

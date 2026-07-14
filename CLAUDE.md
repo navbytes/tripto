@@ -78,8 +78,10 @@ Publishable:  sb_publishable_4x21OrhJWtnB1tDrhD9ueA_79p98yN-
   - **Auth-write verification needs a SIGNED build.** supabase-swift keeps the
     session in the Keychain (absent when unsigned) → writes fall back to the
     anon key → `42501`. Looks like an RLS bug; isn't.
-  - **`TriptoUITests` need backend anonymous sign-in enabled**
-    (`-uitestAutoSignIn` → real `signInAnonymously()`); off at launch. See
+  - **`TriptoUITests` are hermetic** (since 2026-07-14): `-uitestAutoSignIn`
+    injects a synthetic session in `AuthManager.init` (`#if DEBUG`) — no
+    backend toggle needed. Only the opt-in `LiveAuthWriteTests`
+    (`TRIPTO_LIVE_TESTS=1`) touch real auth. See
     [docs/TESTING.md](docs/TESTING.md).
 - **Quality bar — non-negotiable on new UI:** full Dynamic Type incl.
   accessibility sizes, VoiceOver labels, Reduce Motion, AA contrast, 44pt

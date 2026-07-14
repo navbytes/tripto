@@ -5,48 +5,28 @@ import XCTest
 /// (`App/*View.swift`, `Support/DemoSeeder.swift`) rather than raw taps
 /// through Sign in with Apple, which XCUITest can't drive at all.
 ///
-/// `-uitestAutoSignIn` calls the real `Supa.client.auth.signInAnonymously()`
-/// (a live network call — this is the app's own sanctioned DEBUG-only test
-/// path, not something invented for this suite; see `WelcomeView.swift`).
-/// `-simulateOffline` is added to every launch so `DemoSeeder`'s seed data
-/// (and every add/edit this suite performs) stays queued in the local
-/// outbox instead of pushing to the real backend — the only live call this
-/// suite makes is that one anonymous sign-in.
-///
-/// Requires a SIGNED build (`DEVELOPMENT_TEAM`/`CODE_SIGN_STYLE: Automatic`,
-/// not `CODE_SIGNING_ALLOWED=NO`) — an unsigned build has no Keychain, so
-/// the anonymous session never persists and `authManager.userId` stays nil,
-/// which makes `DemoSeeder.seed` silently no-op. (Same gotcha as
-/// `TriptoTests/LiveAuthWriteTests`.)
+/// `-uitestAutoSignIn` injects a fixed fake session directly in
+/// `AuthManager.init` (`#if DEBUG`, BACKLOG.md C4) — no network call, no
+/// Keychain, no dependency on the backend's anonymous-sign-in setting
+/// (disabled in production). `-simulateOffline` is added to every launch on
+/// top of that so `DemoSeeder`'s seed data (and every add/edit this suite
+/// performs) stays queued in the local outbox instead of attempting a push
+/// — together the two flags make this suite's every launch fully hermetic.
 final class TriptoUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
 
     /// Launches with the sign-in + seed + open-first-trip combo every test
-    /// below builds on.
-    ///
-    /// Bug fix: the anonymous Supabase session persists in the Keychain
-    /// across app uninstall/reinstall on the iOS *Simulator* specifically
-    /// (a known simulator quirk — Keychain items survive app deletion
-    /// there, unlike on a real device). A prior run's signed-in identity —
-    /// or even a completely unrelated test's, e.g.
-    /// `TriptoTests/LiveAuthWriteTests`, if it ever ran against this same
-    /// simulator — leaks into this suite: `-uitestSeedIfEmpty` sees a
-    /// non-empty `trips` (pulled down for that stale identity) and skips
-    /// seeding, and `-uitestOpenFirstTrip` opens whatever trip already
-    /// existed instead of the expected "Lisbon" seed (confirmed via an
-    /// `app.debugDescription` dump on failure: a leftover "InviteClaimTest"
-    /// trip). `-uitestSignOut` in a disposable throwaway launch first
-    /// forces a genuinely fresh anonymous identity for the real launch
-    /// below, every time — this is what actually fixes it; reinstalling
-    /// the app alone (tried first) did not.
+    /// below builds on. `-uitestAutoSignIn`'s fixed user id means every
+    /// launch is the same identity, so `DemoSeeder`'s "Lisbon" seed (keyed
+    /// off `HomeView`'s `trips.isEmpty` check) and anything this suite adds
+    /// persist consistently across every launch within a run. This used to
+    /// need a disposable `-uitestSignOut` pre-launch to dodge a stale
+    /// *real* anonymous identity surviving in the Keychain across app
+    /// reinstall on the Simulator (a known simulator quirk) — moot now that
+    /// this path never touches the SDK's session/Keychain at all.
     private func launch(_ extraArgs: [String] = []) -> XCUIApplication {
-        let signOutApp = XCUIApplication()
-        signOutApp.launchArguments = ["-uitestSignOut"]
-        signOutApp.launch()
-        signOutApp.terminate()
-
         let app = XCUIApplication()
         app.launchArguments = [
             "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestOpenFirstTrip"

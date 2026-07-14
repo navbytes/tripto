@@ -4,6 +4,12 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Data import & export (2026-07-14)
+
+#### Added
+- **Tripto Archive v1 — import & export:** Settings → "Import trips" accepts JSON archives from other apps or previous Tripto exports; deterministic on-device conversion, no AI/consent required, idempotent re-import via UUIDv5 deduplication. Settings → "Export trips" writes the same format for data portability. Time zone resolution per IATA airport tables, category-specific defaults; report shows summaries + skipped items with reasons. Spec: `docs/IMPORT_FORMAT.md` with LLM-conversion appendix for source-app migration. Unit test suite 509→610.
+- **Email-import operations runbook:** `web/email-worker/RUNBOOK.md` consolidated go-live checklist (pre-flight, smoke test, post-MX verification). `scripts/check-golive.sh` automated health check.
+
 ### Tooling & release infrastructure (2026-07-12)
 
 #### Added

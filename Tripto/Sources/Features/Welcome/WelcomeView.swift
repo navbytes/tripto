@@ -2,17 +2,17 @@ import AuthenticationServices
 import SwiftUI
 import UIKit
 
-/// Auth gate's signed-out state (RootView). Production path is Sign in
-/// with Apple; DEBUG builds add an anonymous test path since the backend
-/// has anonymous sign-ins enabled specifically to unblock development (M1
-/// brief's "Backend facts").
+/// Auth gate's signed-out state (RootView). The only sign-in path is Sign
+/// in with Apple — the former DEBUG-only anonymous test path is gone
+/// (backend anon sign-ins are disabled in production, RELEASE_READINESS.md;
+/// `-uitestAutoSignIn` now injects a fake session directly in
+/// `AuthManager.init`, BACKLOG.md C4, before this view ever mounts).
 struct WelcomeView: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(AppRouter.self) private var appRouter
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var errorMessage: String?
-    @State private var isSigningInAnonymously = false
     @State private var isCompletingAppleSignIn = false
 
     var body: some View {
@@ -60,14 +60,6 @@ struct WelcomeView: View {
         }
         .task {
             #if DEBUG
-            // M2 verify-drill autopilot (docs/BUILD_PLAN.md milestone
-            // process, not a shipped feature): a plain launch argument, so
-            // the simulator drill can reach a signed-in state with no GUI
-            // tap automation available in this environment. Never fires
-            // without the flag, so normal launches are unaffected.
-            if ProcessInfo.processInfo.arguments.contains("-uitestAutoSignIn") {
-                await signInAnonymously()
-            }
             // Injects a mock invite preview so the pre-sign-in invite card can
             // be screenshotted without a live two-user invite flow.
             if ProcessInfo.processInfo.arguments.contains("-uitestInvitePreview") {
@@ -153,25 +145,6 @@ struct WelcomeView: View {
                     .foregroundStyle(Palette.slate)
                     .transition(.opacity)
                 }
-
-                #if DEBUG
-                Button {
-                    Task { await signInAnonymously() }
-                } label: {
-                    HStack {
-                        if isSigningInAnonymously {
-                            ProgressView().tint(Palette.ink)
-                        }
-                        Text("Continue (test account)")
-                    }
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 50) // matches the Sign in with Apple button's height, but lets the label grow
-                }
-                .background(Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-                .disabled(isSigningInAnonymously)
-                #endif
 
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.circle")
@@ -437,19 +410,4 @@ struct WelcomeView: View {
         guard nsError.domain == NSURLErrorDomain else { return nil }
         return URLError.Code(rawValue: nsError.code)
     }
-
-    #if DEBUG
-    private func signInAnonymously() async {
-        // Cleared at attempt start (see the SignInWithAppleButton onRequest
-        // closure above for why) rather than only on success.
-        errorMessage = nil
-        isSigningInAnonymously = true
-        defer { isSigningInAnonymously = false }
-        do {
-            try await authManager.signInAnonymously()
-        } catch {
-            errorMessage = "Couldn\u{2019}t start a test session \u{2014} try again."
-        }
-    }
-    #endif
 }

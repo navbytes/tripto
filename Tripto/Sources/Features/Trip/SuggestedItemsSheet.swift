@@ -86,6 +86,13 @@ struct SuggestedItemsSheet: View {
                 Text("Suggested for \(TimelineBuilder.dayTitleText(item.startLocalDay))")
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(Palette.slate)
+                // EI-4: below the title/date line (not squeezed against the
+                // trailing chevron) so it wraps gracefully at accessibility
+                // Dynamic Type sizes instead of clipping.
+                if item.isFromUnverifiedSender {
+                    PillLabel(text: "Sender not on this trip", tint: .amber)
+                        .padding(.top, Spacing.xxs)
+                }
             }
             Spacer(minLength: Spacing.sm)
             Image(systemName: "chevron.right")
@@ -97,6 +104,7 @@ struct SuggestedItemsSheet: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(item.category.displayName), \(item.title), suggested for \(TimelineBuilder.dayTitleText(item.startLocalDay))"
+                + (item.isFromUnverifiedSender ? ", Sender not on this trip" : "")
         )
         .accessibilityAddTraits(.isButton)
     }

@@ -389,6 +389,14 @@ struct AddItemSheet: View {
     /// flips the status to `.confirmed`, right before this sheet dismisses.
     private var isReviewingSuggestion: Bool { editing?.status == .suggested }
 
+    /// EI-4: gates `unverifiedSenderCallout` — `editing` is guaranteed
+    /// non-nil whenever `isReviewingSuggestion` is true, but the two
+    /// properties don't share that guarantee at the type level, so this
+    /// still reads `editing` via `?`, not a force-unwrap.
+    private var isReviewingUnverifiedSuggestion: Bool {
+        isReviewingSuggestion && editing?.isFromUnverifiedSender == true
+    }
+
     /// Finding 3: the live counterpart to `initialSnapshot` — diffed against
     /// it (plus the separately-tracked assignee set) by `hasChanges`.
     private var currentSnapshot: EditSnapshot {
@@ -438,6 +446,10 @@ struct AddItemSheet: View {
                 )
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
+                        if isReviewingUnverifiedSuggestion {
+                            unverifiedSenderCallout
+                        }
+
                         if !isEditing {
                             categorySelector
                         }
@@ -553,6 +565,26 @@ struct AddItemSheet: View {
         // Symbol accessibility text into the default label, so a plain
         // identifier is more reliable than matching on visible text here.
         .accessibilityIdentifier("addItemCategoryTile-\(cat.rawValue)")
+    }
+
+    /// EI-4: shown above the form only while reviewing a suggestion whose
+    /// forwarder isn't a trip member (`isReviewingUnverifiedSuggestion`) —
+    /// amber/caution, the same "heads up, not an error" treatment as
+    /// `ImportReviewBanner` rather than `SyncIssueBanner`'s rose one: a
+    /// prompt to double-check before confirming, not a failure.
+    private var unverifiedSenderCallout: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                // Decorative — `.combine` below folds this row into one
+                // VoiceOver stop that reads just the sentence.
+                .accessibilityHidden(true)
+            Text("Forwarded by someone who isn\u{2019}t on this trip \u{2014} double-check before confirming.")
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+        }
+        .foregroundStyle(Palette.amberInk)
+        .padding(Spacing.md)
+        .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     /// Findings 2 & 7: the CTA-adjacent guidance line, mirroring
