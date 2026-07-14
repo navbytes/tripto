@@ -313,7 +313,9 @@ enum TimelineBuilder {
             assignees: assignees,
             tags: item.details.tags,
             isPast: isPast,
-            boardingPass: BoardingPassContent.make(for: item)
+            boardingPass: BoardingPassContent.make(
+                for: item, isPending: pendingRowIds.contains(item.id), assignees: assignees
+            )
         )
     }
 
@@ -406,7 +408,19 @@ enum TimelineBuilder {
 /// helpers `BookingDetailView.flightHeader` and the rail's landing chip
 /// already rely on, so the pass never disagrees with either.
 enum BoardingPassContent {
-    static func make(for item: ItineraryItem) -> BoardingPassCard.Model? {
+    /// `isPending`/`assignees` (milestone add-on, wired in Phase 3): the
+    /// same two values `TimelineBuilder.cardModel` already computes for
+    /// `TimelineCardModel` itself — passed straight through here rather than
+    /// re-derived, so the pass face can never disagree with what its own
+    /// row's `pendingRowIds`/`assigneesByItem` lookup produced. Defaulted so
+    /// every other call site (the add-flight form's own live preview,
+    /// existing tests) that has no sync/assignee context of its own keeps
+    /// compiling unchanged and simply omits both.
+    static func make(
+        for item: ItineraryItem,
+        isPending: Bool = false,
+        assignees: [AvatarStack.Person] = []
+    ) -> BoardingPassCard.Model? {
         guard item.category == .flight else { return nil }
         let details = item.details
         let carrier = [details.airline, details.flightNo]
@@ -433,7 +447,9 @@ enum BoardingPassContent {
                 date: item.endsAt,
                 timeZone: item.effectiveTz
             ),
-            footerText: TZShiftChip.landingText(for: item)
+            footerText: TZShiftChip.landingText(for: item),
+            assignees: assignees,
+            isPending: isPending
         )
     }
 

@@ -94,6 +94,73 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 10))
     }
 
+    // MARK: - Double-tap Save: exactly one item, not one per tap
+    //
+    // Fix-round D2: `AddItemSheet.save()` used to have no in-flight guard
+    // between its synchronous SwiftData insert and the `dismiss()` call it
+    // ends with — a fast double-tap could land both taps before the sheet's
+    // dismiss animation removed the button from the hittable hierarchy, each
+    // one independently passing `guard isValid` and inserting its own
+    // `ItineraryItem` (confirmed live pre-fix: reproducibly created two
+    // "ZZ..." flights from one double-tap). `save()` now guards on a
+    // synchronous `isSaving` flag (same shape as `dismissSuggestion()`'s own
+    // `isDismissingSuggestion`), which also disables both footer Save
+    // buttons. This test used to wrap its final assertion in
+    // `XCTExpectFailure` as a tripwire for that fix landing; now unwrapped —
+    // it asserts the real, fixed behavior directly.
+
+    /// `.doubleTap()` (one XCUITest call synthesizing two touches back to
+    /// back) reproduces a real fast double-tap far more reliably than two
+    /// separate `.tap()` calls, which XCUITest's own quiescence wait can
+    /// serialize past whatever dismiss animation the first tap kicks off.
+    func testDoubleTapSaveCreatesAtMostOneFlightItem() {
+        let app = launch(["-uitestOpenAdd", "-uitestOpenBookings"])
+        let fromField = app.textFields["e.g. JFK"]
+        XCTAssertTrue(fromField.waitForExistence(timeout: 30), "Add-item sheet (flight) never appeared")
+        fromField.tap()
+        fromField.typeText("SFO")
+        let toField = app.textFields["e.g. LIS"]
+        toField.tap()
+        toField.typeText("LAX")
+        // Unique per run (same reasoning as `testPackingAddAndCheckOff`'s
+        // UUID-suffixed label): the seeded trip persists across relaunches,
+        // so a fixed flight number would collide with — and silently
+        // accumulate on top of — whatever an earlier run of this exact test
+        // already left behind. Feeds the transient title (and the
+        // boarding-pass carrier line).
+        let flightNo = "ZZ" + UUID().uuidString.prefix(8)
+        let flightNoField = app.textFields["TP1234"]
+        flightNoField.tap()
+        flightNoField.typeText(flightNo)
+
+        let saveButton = app.buttons["Add flight to itinerary"]
+        XCTAssertTrue(saveButton.exists)
+        saveButton.doubleTap()
+
+        XCTAssertTrue(
+            app.staticTexts["Lisbon"].waitForExistence(timeout: 10), "sheet didn't dismiss back to the trip"
+        )
+
+        // `BookingRow` is a `NavigationLink` (bridges to a `.button`-type
+        // element outside a `List`) wrapping `.accessibilityElement(children:
+        // .ignore)` + a combined label — VoiceOver hears one stop per row.
+        // But `.ignore` only governs what VoiceOver announces; it does NOT
+        // remove the row's inner `Text(item.title)` from XCUITest's own
+        // element tree, so a broad `descendants(matching: .any)` query
+        // double-counts a single real row: once for the row's own combined
+        // `.button` element, again for that inner static text — both
+        // independently contain the flight number substring. Scoping to
+        // `.buttons` only (the row's own bridged type; a plain `Text` is
+        // `.staticText`, never `.button`) counts real rows, not incidental
+        // sub-elements. Flight is the first category group (`BookingsTabView
+        // .groups` iterates `ItemCategory.allCases`) and this is the only
+        // "current" (not "past") flight in the seed, so it's on-screen with
+        // no scrolling.
+        let matches = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", flightNo))
+        XCTAssertGreaterThan(matches.count, 0, "the new flight never appeared on the Bookings tab")
+        XCTAssertEqual(matches.count, 1, "double-tapping Save should create exactly one flight, not one per tap")
+    }
+
     // MARK: - Packing: add an item, then check it off
 
     func testPackingAddAndCheckOff() {
@@ -222,6 +289,110 @@ final class TriptoUITests: XCTestCase {
         // auto-scroll `.task` settle before capturing.
         Thread.sleep(forTimeInterval: 1.5)
         attachScreenshot(named: "itinerary", of: app)
+    }
+
+    // MARK: - P3 milestone screenshot (add-item sheet rework: verb tiles,
+    // paste banner, live BoardingPassCard preview, seat/gate disclosure,
+    // sticky footer + return leg) — same "config-agnostic test,
+    // appearance/Dynamic Type flipped from OUTSIDE between separate
+    // invocations" recipe as `testCaptureItineraryScreen` above (see the
+    // Tester report for the exact `xcrun simctl ui` commands). The pass-face
+    // assignee/pending parity half of this milestone needs no new capture
+    // here — `testCaptureItineraryScreen` above already frames Day 1's
+    // `TAP TP1234` card, which (`DemoSeeder.flights`, assigned to Grandma)
+    // renders both an assignee avatar and — every seeded row stays queued
+    // under this suite's standard `-simulateOffline` launch flag — the
+    // pending pill with no seed changes needed.
+
+    /// Fills the flight form with the same JFK/LIS/TAP1234/14C-1-22-QK7P2M
+    /// values `DemoSeeder`'s own outbound flight and
+    /// `AddItemSheetFlightDetailsSummaryTests` already use (so the
+    /// screenshot's data reads as a consistent fixture, not arbitrary test
+    /// filler) — enough for the live `BoardingPassCard` preview (P3.2) to
+    /// render a real route/carrier instead of placeholder em-dashes — then
+    /// expands the seat/terminal/gate/confirmation disclosure (P3.3), which
+    /// is collapsed by default on a blank form.
+    ///
+    /// Captures at *two* natural scroll depths rather than forcing one:
+    /// right after the route fields (where XCUITest's own auto-scroll-to-
+    /// hittable hasn't moved the form far — the live pass preview is still
+    /// in frame, `add-item-flight-preview`), and again after the
+    /// disclosure's own fields (where, at accessibility Dynamic Type sizes,
+    /// the same auto-scroll has naturally moved much further down —
+    /// `add-item-flight-disclosure`, the always-sticky footer still in
+    /// frame either way since it's a fixed sibling of the `ScrollView`, not
+    /// part of its scrollable content). The default-size runs (light/dark)
+    /// use the first; the accessibility-size run uses the second — see the
+    /// Tester report for which attachment maps to which of the 3 requested
+    /// PNGs.
+    func testCaptureAddItemFlightSheet() {
+        let app = launch(["-uitestOpenAdd"])
+        let fromField = app.textFields["e.g. JFK"]
+        XCTAssertTrue(fromField.waitForExistence(timeout: 30), "Add-item sheet (flight) never appeared")
+
+        let airlineField = app.textFields["TAP Air Portugal"]
+        airlineField.tap()
+        airlineField.typeText("TAP Air Portugal")
+        let flightNoField = app.textFields["TP1234"]
+        flightNoField.tap()
+        flightNoField.typeText("TP1234")
+        fromField.tap()
+        fromField.typeText("JFK")
+        let toField = app.textFields["e.g. LIS"]
+        toField.tap()
+        toField.typeText("LIS")
+        // Dismiss the keyboard *before* reaching for the next-day chip
+        // below — while it's up, it covers roughly the bottom half of the
+        // screen, and XCUITest's auto-scroll-to-hittable has to scroll
+        // considerably further to bring an otherwise-nearby control into
+        // the remaining, keyboard-free visible area.
+        app.keyboards.buttons["return"].tap()
+
+        // JFK's real zone (America/New_York, auto-detected from the code
+        // just typed) sits ~5h behind the trip-default zone `departsTime`'s
+        // clock value was originally set against, so — unadjusted — the
+        // composed arrival instant now lands *before* departure (the
+        // "+1 day" auto-suggest is wall-clock-only, doesn't know a zone
+        // changed) and the form would show a red validation error instead
+        // of a clean preview. Forcing "+1 day" (`arrivalDayOffsetOverride`)
+        // is the same fix a real person filling this same route would
+        // reach for.
+        let nextDayChip = app.buttons["Arrives next day"]
+        XCTAssertTrue(nextDayChip.waitForExistence(timeout: 5), "+1 day chip never appeared")
+        nextDayChip.tap()
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "add-item-flight-preview", of: app)
+
+        // P3.3: the label row is the `DisclosureGroup`'s own native tap
+        // target — no custom `.disclosureGroupStyle` involved — matched by
+        // its combined accessibility label (`disclosureLabel`'s
+        // `.accessibilityElement(children: .combine)`) since the two
+        // underlying `Text`s aren't independently queryable.
+        let disclosure = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "Seat, terminal, gate")).firstMatch
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5), "seat/terminal/gate disclosure never appeared")
+        disclosure.tap()
+
+        let seatField = app.textFields["14C"]
+        XCTAssertTrue(seatField.waitForExistence(timeout: 5), "disclosure didn't expand")
+        seatField.tap()
+        seatField.typeText("14C")
+        let terminalField = app.textFields["1"]
+        terminalField.tap()
+        terminalField.typeText("1")
+        let gateField = app.textFields["22"]
+        gateField.tap()
+        gateField.typeText("22")
+        let confirmationField = app.textFields["QK7P2M"]
+        confirmationField.tap()
+        confirmationField.typeText("QK7P2M")
+        // Dismiss the keyboard (the software Return key resigns first
+        // responder on this single-line field, same as any plain
+        // `TextField` with no `.onSubmit` override) — otherwise it covers
+        // the lower half of the screenshot.
+        app.keyboards.buttons["return"].tap()
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "add-item-flight-disclosure", of: app)
     }
 
     private func attachScreenshot(named name: String, of app: XCUIApplication) {

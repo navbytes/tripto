@@ -244,11 +244,14 @@ struct TimelineCardRow: View, Equatable {
         if let pass = model.boardingPass {
             BoardingPassCard(model: pass, isPast: model.isPast, typeSize: typeSize)
                 .overlay {
+                    // Milestone add-on: a solid outline, not the dashed
+                    // stroke `legacyCard` below uses — the pass already has
+                    // two dash vocabularies of its own (the route line, the
+                    // footer's top rule), and a third here would collide.
+                    // `BoardingPassCard`'s own `statusRow` pill is the
+                    // primary pending signal; this is just a quiet frame.
                     RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
-                        .strokeBorder(
-                            model.isPending ? Palette.slate.opacity(0.35) : Color.clear,
-                            style: StrokeStyle(lineWidth: 1.25, dash: model.isPending ? [5, 4] : [])
-                        )
+                        .strokeBorder(model.isPending ? Palette.slate.opacity(0.35) : Color.clear, lineWidth: 1.25)
                 }
                 .padding(.leading, Spacing.sm)
         } else {

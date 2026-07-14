@@ -37,6 +37,23 @@ struct BoardingPassCard: View {
         /// `TZShiftChip.landingText(for:)`'s own wording, unmodified — `nil`
         /// when the flight lands in the same zone it departed from.
         let footerText: String?
+        /// Milestone add-on (docs/UX_REDESIGN_ROADMAP.md P1/P2 ux check,
+        /// wired in Phase 3): assignee avatar initials on the pass face —
+        /// parity with what `TimelineCardRow.legacyCard`'s hotel/activity/
+        /// food/transport rows already show. `= []` (a plain default, not
+        /// `Optional`) keeps every pre-existing `Model(...)` call site
+        /// (`BoardingPassContentTests`, this file's own previews) compiling
+        /// unchanged — see `TimelineCardModel.assignees`'s identical
+        /// "empty means nobody assigned" convention.
+        var assignees: [AvatarStack.Person] = []
+        /// Milestone add-on: mirrors `TimelineCardModel.isPending`'s
+        /// "Waiting to sync" state, rendered here as the same
+        /// `PendingSyncChip` pill hotel/activity rows use. `TimelineRowViews
+        /// .TimelineCardRow.card` still adds its own subtle outline around
+        /// the whole pass when this is `true` — deliberately NOT dashed like
+        /// this card's own route/footer rules (three dash vocabularies on
+        /// one face would collide), the pill is the primary signal.
+        var isPending: Bool = false
     }
 
     let model: Model
@@ -75,6 +92,7 @@ struct BoardingPassCard: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 eyebrow
                 routeBody
+                statusRow
             }
             .padding(Spacing.md)
             footerView
@@ -192,6 +210,27 @@ struct BoardingPassCard: View {
         }
         .frame(width: isAXSize ? nil : 64)
         .accessibilityHidden(true)
+    }
+
+    /// Milestone add-on: assignees + the pending pill, on the face — the
+    /// same two indicators `TimelineCardRow.legacyCard` shows every other
+    /// category, so a flight row doesn't quietly opt out of "who's this
+    /// for" / "waiting to sync" just because it renders as a pass. Omitted
+    /// entirely (no reserved space) when there's nothing to show, same
+    /// `if`-with-no-`else` convention `footerView` already uses below.
+    @ViewBuilder
+    private var statusRow: some View {
+        if !model.assignees.isEmpty || model.isPending {
+            HStack(spacing: Spacing.sm) {
+                if !model.assignees.isEmpty {
+                    AvatarStack(people: model.assignees, maxVisible: 4, diameter: 18)
+                }
+                if model.isPending {
+                    PendingSyncChip()
+                }
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     /// Perforated-edge footer (BookingDetailView.stubContent's own notch

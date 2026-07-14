@@ -366,6 +366,37 @@ final class TimelineBuilderTZShiftKindTests: XCTestCase {
         XCTAssertEqual(returnCard.boardingPass?.footerText, returnLanding.text)
     }
 
+    /// Milestone add-on (P1/P2 ux check, wired in Phase 3): the pass face
+    /// gains the same parity indicators every other row already shows —
+    /// `TimelineBuilder.cardModel` already computes `pendingRowIds
+    /// .contains(item.id)` and `assigneesByItem[item.id]` for
+    /// `TimelineCardModel` itself; this pins that a flight's
+    /// `boardingPass` gets the identical values, not silently `false`/`[]`
+    /// just because it renders as a pass instead of `legacyCard`.
+    func testBoardingPassCarriesTheSamePendingAndAssigneeStateAsItsOwnCardModel() {
+        var details = ItemDetails.empty
+        details.fromIATA = "HKG"; details.toIATA = "BKK"
+        let flight = TestFixtures.makeItineraryItem(
+            category: .flight,
+            startsAt: instant(2026, 7, 20, 12, 20, tz: "Asia/Hong_Kong"), tz: "Asia/Hong_Kong", details: details
+        )
+        let priya = AvatarStack.Person(id: UUID(), initial: "P", colorName: "moss", name: "Priya")
+        let sections = [
+            ItineraryDayBucketing.Section(day: day(2026, 7, 20), dayNumber: 1, rows: [.item(flight)])
+        ]
+
+        let models = TimelineBuilder.build(
+            sections: sections, pendingRowIds: [flight.id], myUserId: nil, namesById: [:],
+            assigneesByItem: [flight.id: [priya]]
+        )
+
+        guard case .card(let cardModel) = models[0].rows[0] else { return XCTFail("expected a card row") }
+        XCTAssertTrue(cardModel.isPending)
+        XCTAssertEqual(cardModel.assignees, [priya])
+        XCTAssertEqual(cardModel.boardingPass?.isPending, cardModel.isPending)
+        XCTAssertEqual(cardModel.boardingPass?.assignees, cardModel.assignees)
+    }
+
     /// A flight with no known arrival zone at all has nothing to land into
     /// — no footer, no `.landing` row (`BoardingPassContentTests
     /// .testFooterTextIsAbsentWhenArrivalZoneMatchesDeparture` covers the
