@@ -94,4 +94,35 @@ final class AddItemSheetReturnLegTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(next.departsTime, before)
         XCTAssertEqual(next.arrivesTime.timeIntervalSince(next.departsTime), 2 * 3600, accuracy: 1.0)
     }
+
+    /// A 31-day month rolling into the next — pins that the "+1 day" goes
+    /// through real `Calendar` arithmetic (`Calendar.date(byAdding:)`), not
+    /// some naive manual day-increment that would silently overflow a
+    /// month's actual length.
+    func testDateAdvancesAcrossAMonthBoundary() {
+        let next = AddItemSheet.returnLegFields(
+            fromIATA: "BKK", toIATA: "HKG", departureZone: bangkok, arrivalZone: hongKong, flightDate: day(2026, 1, 31)
+        )
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let comps = cal.dateComponents([.year, .month, .day], from: next.flightDate)
+        XCTAssertEqual(comps.year, 2026)
+        XCTAssertEqual(comps.month, 2)
+        XCTAssertEqual(comps.day, 1)
+    }
+
+    /// December 31 rolling into January 1 of the *next* year — the same
+    /// "+1 day" must also roll the year component, not wrap the month back
+    /// to 1 while leaving the year untouched.
+    func testDateAdvancesAcrossAYearBoundary() {
+        let next = AddItemSheet.returnLegFields(
+            fromIATA: "BKK", toIATA: "HKG", departureZone: bangkok, arrivalZone: hongKong, flightDate: day(2026, 12, 31)
+        )
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let comps = cal.dateComponents([.year, .month, .day], from: next.flightDate)
+        XCTAssertEqual(comps.year, 2027)
+        XCTAssertEqual(comps.month, 1)
+        XCTAssertEqual(comps.day, 1)
+    }
 }

@@ -34,4 +34,20 @@ final class AddItemSheetFlightDetailsSummaryTests: XCTestCase {
     func testASingleFieldRendersAlone() {
         XCTAssertEqual(AddItemSheet.flightDetailsSummary(seat: "", terminal: "", gate: "", confirmation: "QK7P2M"), "QK7P2M")
     }
+
+    /// The three `DisclosureGroup` fields specifically (not confirmation,
+    /// already covered above) — each rendered alone in turn, so a single
+    /// interior value never picks up a stray leading/trailing separator
+    /// regardless of *which* of the three positions holds it.
+    func testOnlySeatFilledRendersAlone() {
+        XCTAssertEqual(AddItemSheet.flightDetailsSummary(seat: "14C", terminal: "", gate: "", confirmation: ""), "14C")
+    }
+
+    func testOnlyTerminalFilledRendersAlone() {
+        XCTAssertEqual(AddItemSheet.flightDetailsSummary(seat: "", terminal: "1", gate: "", confirmation: ""), "1")
+    }
+
+    func testOnlyGateFilledRendersAlone() {
+        XCTAssertEqual(AddItemSheet.flightDetailsSummary(seat: "", terminal: "", gate: "22", confirmation: ""), "22")
+    }
 }

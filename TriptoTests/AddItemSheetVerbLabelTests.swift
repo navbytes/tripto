@@ -36,4 +36,20 @@ final class AddItemSheetVerbLabelTests: XCTestCase {
         XCTAssertEqual(ItemCategory.food.displayName, "Food")
         XCTAssertEqual(ItemCategory.transport.displayName, "Transport")
     }
+
+    /// `CaseIterable` sweep, independent of the fixed list above: the
+    /// exhaustive `switch` in `addSheetVerbLabel` already forces the
+    /// compiler to catch an unmapped case, but it wouldn't catch a *lazy*
+    /// mapping — e.g. a copy-pasted `case .newCategory: "Flight"` that still
+    /// compiles. This pins the mapping as a true bijection: every case
+    /// present, none blank, and no two categories sharing one label.
+    func testVerbLabelIsABijectionOverEveryItemCategoryCase() {
+        let labels = ItemCategory.allCases.map(\.addSheetVerbLabel)
+        XCTAssertEqual(labels.count, ItemCategory.allCases.count, "every case must produce exactly one label")
+        XCTAssertTrue(labels.allSatisfy { !$0.isEmpty }, "no category should get a blank verb label")
+        XCTAssertEqual(
+            Set(labels).count, ItemCategory.allCases.count,
+            "verb labels must be a bijection \u{2014} no two categories may share one"
+        )
+    }
 }
