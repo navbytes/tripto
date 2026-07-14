@@ -4,7 +4,9 @@ Drafted 2026-07-13 from [BACKLOG.md](BACKLOG.md), [EMAIL_IMPORT_PLAN.md](EMAIL_I
 [RELEASE_READINESS.md](RELEASE_READINESS.md), and [BUILD_PLAN.md](BUILD_PLAN.md) §2.
 This is the execution plan for everything open in the backlog, sequenced and
 sized. BUILD_PLAN.md remains the product source of truth; this doc orders the
-work and records what each item needs to ship.
+work and records what each item needs to ship. The UX-redesign adoption
+program (2026-07-15) runs as its own phased track in
+[UX_REDESIGN_ROADMAP.md](UX_REDESIGN_ROADMAP.md).
 
 **Position today (updated 2026-07-14):** v1 submitted to App Review
 2026-07-12 (Build 6, Waiting for Review). Backend cutover complete (anon

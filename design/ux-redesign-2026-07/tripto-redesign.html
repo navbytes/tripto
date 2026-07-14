@@ -1,0 +1,1327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tripto — screen redesigns</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Sofia+Sans:wght@300..800&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────
+   TOKENS — "Dusk Departure"
+   ───────────────────────────────────────────── */
+:root{
+  --ink:#161533;
+  --ink-2:#2A2752;
+  --muted:#6E6A92;
+  --muted-2:#9B98B5;
+  --ivory:#FBF7F1;
+  --paper:#FFFEFB;
+  --line:rgba(22,21,51,.09);
+  --line-2:rgba(22,21,51,.18);
+  --amber:#E58A3C;
+  --amber-2:#C96F27;
+  --amber-soft:#F6C48A;
+  --amber-wash:#FCEFDF;
+  --sage:#4E7C6A;
+  --clay:#BE5138;
+  --clay-wash:#FAEAE5;
+  --lilac:#EFEEF8;
+  --lilac-2:#E3E1F0;
+
+  --r-l:26px; --r-m:18px; --r-s:12px; --r-xs:9px;
+  --sh-1:0 1px 2px rgba(22,21,51,.04), 0 10px 26px -14px rgba(22,21,51,.22);
+  --sh-2:0 30px 60px -28px rgba(22,21,51,.42);
+
+  --display:'Fraunces','Iowan Old Style','Palatino Linotype',Georgia,serif;
+  --ui:'Sofia Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:var(--ui);
+  color:#EDE9F5;
+  background:
+    radial-gradient(120% 80% at 15% 0%, #2E2C5C 0%, rgba(46,44,92,0) 55%),
+    radial-gradient(90% 70% at 92% 8%, #46325F 0%, rgba(70,50,95,0) 60%),
+    #0F0F24;
+  padding:44px 22px 90px;
+  min-height:100vh;
+}
+::selection{background:var(--amber);color:#241304}
+
+/* page chrome */
+.page-head{max-width:1180px;margin:0 auto 34px}
+.kicker{font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--amber-soft)}
+.page-head h1{font-family:var(--display);font-size:clamp(30px,5vw,46px);font-weight:600;letter-spacing:-.02em;margin:12px 0 10px;color:#fff}
+.page-head p{color:#A7A2C6;line-height:1.6;max-width:64ch;font-size:15px}
+.head-row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:20px}
+.toggle{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#EDE9F5;font:600 13px var(--ui);padding:9px 16px;border-radius:999px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.toggle:hover{background:rgba(255,255,255,.12)}
+.toggle .dot{width:7px;height:7px;border-radius:50%;background:var(--amber)}
+body:not(.notes-on) .toggle .dot{background:rgba(255,255,255,.3)}
+.hint{font-size:12.5px;color:#8E89AF}
+
+/* deck of phones */
+.deck{display:flex;gap:46px;overflow-x:auto;padding:10px 2px 30px;scroll-snap-type:x proximity;max-width:1180px;margin:0 auto}
+.deck::-webkit-scrollbar{height:8px}
+.deck::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:9px}
+.stage{flex:0 0 auto;width:390px;scroll-snap-align:center}
+.stage-cap{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.stage-cap b{font-family:var(--display);font-size:20px;font-weight:600;color:#fff}
+.stage-cap span{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#7E79A2;font-weight:600}
+
+/* device */
+.phone{position:relative;width:390px;height:844px;padding:6px;border-radius:50px;background:#0B0A1C;
+  box-shadow:0 50px 100px -34px rgba(0,0,0,.85), inset 0 0 0 1px rgba(255,255,255,.09)}
+.island{position:absolute;top:16px;left:50%;transform:translateX(-50%);width:110px;height:32px;border-radius:20px;background:#0B0A1C;z-index:60}
+.hbar{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:rgba(22,21,51,.3);z-index:61}
+.screen{position:relative;width:100%;height:100%;border-radius:44px;overflow-y:auto;overflow-x:hidden;background:var(--ivory);color:var(--ink);font-size:15px;line-height:1.35;scrollbar-width:none}
+.screen::-webkit-scrollbar{display:none}
+
+/* status bar (sticky, zero-height so content runs beneath it) */
+.statusbar{position:sticky;top:0;height:56px;margin-bottom:-56px;z-index:40;display:flex;align-items:flex-end;justify-content:space-between;
+  padding:0 26px 6px;font-weight:700;font-size:15px;letter-spacing:.01em;
+  background:linear-gradient(var(--ivory) 62%, rgba(251,247,241,0));transition:background .18s, color .18s}
+.statusbar .sb-r{display:flex;gap:6px;align-items:center}
+.statusbar.on-dark{color:#fff;background:linear-gradient(rgba(16,15,40,.5), rgba(16,15,40,0))}
+.screen.scrolled .statusbar.on-dark{color:var(--ink);background:rgba(251,247,241,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.below-status{padding-top:56px}
+
+/* grain */
+.grain::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.2;mix-blend-mode:overlay;border-radius:inherit;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='120' height='120' filter='url(%23n)' opacity='0.65'/></svg>");
+  background-size:170px 170px}
+
+/* covers */
+.cover-dusk{background:
+  radial-gradient(120% 85% at 10% 6%, #6E5DA8 0%, rgba(110,93,168,0) 58%),
+  radial-gradient(95% 80% at 88% 16%, #2F5F7E 0%, rgba(47,95,126,0) 60%),
+  radial-gradient(130% 95% at 62% 104%, #E58A3C 0%, rgba(229,138,60,0) 52%),
+  linear-gradient(162deg,#2C2B58,#151530)}
+.cover-ember{background:
+  radial-gradient(110% 90% at 18% 0%, #EAA35F 0%, rgba(234,163,95,0) 56%),
+  radial-gradient(100% 90% at 92% 34%, #BE5138 0%, rgba(190,81,56,0) 58%),
+  linear-gradient(150deg,#3B2A52,#1B1938)}
+.cover-teal{background:
+  radial-gradient(110% 90% at 22% 4%, #3E7E8C 0%, rgba(62,126,140,0) 58%),
+  radial-gradient(100% 90% at 88% 40%, #5C5AA0 0%, rgba(92,90,160,0) 60%),
+  linear-gradient(150deg,#23325A,#141A33)}
+
+/* shared type */
+.display{font-family:var(--display);font-weight:600;letter-spacing:-.02em}
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-2)}
+.mini-label{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.pad{padding:0 20px}
+
+/* pins */
+.pin{position:absolute;left:8px;top:-10px;width:21px;height:21px;border-radius:7px;background:var(--amber);color:#301A05;
+  font:800 11.5px/21px var(--ui);text-align:center;z-index:9;box-shadow:0 2px 6px rgba(22,21,51,.28);pointer-events:none}
+.pin.tr{left:auto;right:10px}
+body:not(.notes-on) .pin{display:none}
+
+/* buttons */
+.btn-primary{flex:1;height:52px;border:0;border-radius:16px;background:var(--ink);color:#FFF6EA;font:700 15.5px var(--ui);
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;box-shadow:var(--sh-1)}
+.btn-primary.amber{background:var(--amber);color:#2B1706}
+.btn-primary:disabled{background:var(--lilac-2);color:var(--muted-2);box-shadow:none}
+.btn-icon{width:52px;height:52px;border-radius:16px;border:1px solid var(--line-2);background:var(--paper);color:var(--ink);display:grid;place-items:center;cursor:pointer}
+.btn-sm{border:0;background:var(--ink);color:#FFF6EA;font:700 12.5px var(--ui);padding:8px 13px;border-radius:10px;cursor:pointer;white-space:nowrap}
+.btn-ghost{border:1px solid var(--line-2);background:transparent;color:var(--muted);font:600 12.5px var(--ui);padding:8px 12px;border-radius:10px;cursor:pointer;white-space:nowrap}
+.link{border:0;background:none;color:var(--muted);font:600 15px var(--ui);cursor:pointer;padding:0}
+.link.strong{color:var(--amber-2);font-weight:700}
+.link.sm{font-size:12.5px;color:var(--amber-2);font-weight:700}
+.link.dim{color:var(--muted-2)}
+
+/* dock (fixed to device, outside the scroller) */
+.dock{position:absolute;left:6px;right:6px;bottom:6px;z-index:50;display:flex;gap:10px;align-items:center;
+  padding:14px 20px 26px;border-radius:0 0 44px 44px;
+  background:linear-gradient(rgba(251,247,241,0), var(--ivory) 34%);backdrop-filter:blur(8px)}
+.spacer{height:118px}
+
+/* avatars */
+.stack{display:flex}
+.stack i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:800 11px var(--ui);color:#fff;
+  border:2px solid rgba(255,255,255,.9);margin-left:-8px;font-style:normal}
+.stack i:first-child{margin-left:0}
+.av-a{background:var(--amber)} .av-b{background:var(--sage)} .av-c{background:#5A57A8} .av-d{background:var(--clay)}
+
+/* alerts */
+.alert{position:relative;display:flex;gap:11px;padding:13px 14px;border-radius:var(--r-m);background:var(--amber-wash);
+  border:1px solid rgba(229,138,60,.28)}
+.alert.clay{background:var(--clay-wash);border-color:rgba(190,81,56,.24)}
+.alert svg{flex:0 0 auto;margin-top:1px;color:var(--amber-2)}
+.alert.clay svg{color:var(--clay)}
+.alert b{display:block;font-size:13.5px;font-weight:700;letter-spacing:-.01em}
+.alert p{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+.alert .acts{display:flex;gap:8px;margin-top:10px}
+
+/* ═══════════════ SCREEN 1 · TRIPS (one list) ═══════════════ */
+.home-head{display:flex;align-items:center;justify-content:space-between;padding:6px 20px 0}
+.brand{display:flex;align-items:center;gap:7px;font-family:var(--display);font-weight:600;font-size:17px;letter-spacing:-.01em}
+.brand .mark{width:26px;height:26px;border-radius:9px;background:var(--ink);color:var(--amber);display:grid;place-items:center}
+.me{width:38px;height:38px;border-radius:50%;background:var(--ink);color:#FFF6EA;display:grid;place-items:center;font-weight:700;font-size:14px}
+.greet{margin:22px 0 2px;position:relative}
+.home-h1{font-size:38px;line-height:1.05;margin-bottom:20px}
+
+/* ── card registers ── */
+.trip{position:relative;border-radius:var(--r-l);overflow:hidden;color:#fff;box-shadow:var(--sh-1);margin-bottom:14px;display:block;text-align:left;width:100%;border:0;cursor:pointer}
+.trip .inner{position:relative;z-index:2;padding:16px;display:flex;flex-direction:column;height:100%}
+.trip.hero .inner{min-height:250px}
+.trip.mini .inner{min-height:126px}
+.trip.fused{border-radius:var(--r-l) var(--r-l) 0 0;margin-bottom:0}
+.trip-top{display:flex;align-items:center;justify-content:space-between}
+.count{display:inline-flex;align-items:center;gap:7px;background:rgba(12,11,32,.42);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.16);
+  padding:5px 11px 5px 7px;border-radius:999px;font-size:11.5px;font-weight:700;letter-spacing:.02em}
+.ring{width:13px;height:13px;border-radius:50%;background:conic-gradient(var(--amber) 0 62%, rgba(255,255,255,.28) 62% 100%);position:relative}
+.ring::after{content:"";position:absolute;inset:3px;border-radius:50%;background:#1B1A38}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3.5px rgba(229,138,60,.28)}
+.trip-name{font-family:var(--display);font-weight:600;letter-spacing:-.02em;font-size:34px;line-height:1;margin-top:auto}
+.trip.mini .trip-name{font-size:25px}
+.trip.live .trip-name{margin-top:16px}
+.trip-meta{margin-top:7px;font-size:12.5px;color:rgba(255,255,255,.78);display:flex;align-items:center;gap:7px;font-weight:500}
+.next-up{margin-top:14px;display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:14px;
+  background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(8px)}
+.next-up .lbl{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--amber-soft)}
+.next-up .txt{font-size:13px;font-weight:600;margin-top:1px}
+.next-up .when{margin-left:auto;text-align:right;font-size:11.5px;color:rgba(255,255,255,.72);font-weight:600}
+
+/* ── now register: day progress + today's plan ── */
+.prog{display:flex;gap:4px;margin-top:12px}
+.prog i{height:3px;flex:1;border-radius:2px;background:rgba(255,255,255,.22)}
+.prog i.done{background:rgba(246,196,138,.55)}
+.prog i.now{background:#fff}
+.today-panel{position:relative;margin-top:13px;border-radius:14px;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.16);
+  backdrop-filter:blur(8px);overflow:hidden}
+.today-panel .lbl{padding:10px 12px 2px;font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--amber-soft)}
+.tp-row{display:flex;align-items:center;gap:10px;padding:6px 12px;font-size:13px;font-weight:600}
+.tp-row .t{flex:0 0 40px;font-size:12px;font-weight:700;color:rgba(255,255,255,.7);font-variant-numeric:tabular-nums}
+.tp-row.more{padding:2px 12px 11px 62px;font-size:11.5px;color:rgba(255,255,255,.6)}
+
+/* ── duplicate strip, fused to the offender ── */
+.dupe{position:relative;display:flex;align-items:center;gap:9px;margin:0 0 14px;padding:11px 13px;
+  border-radius:0 0 var(--r-l) var(--r-l);background:var(--amber-wash);border:1px solid rgba(229,138,60,.3);
+  font-size:12.5px;font-weight:600;color:var(--amber-2)}
+.dupe svg{flex:0 0 auto}
+.dupe .btn-sm{margin-left:auto}
+
+/* ── the fold: archive header ── */
+.arch{position:relative;display:flex;align-items:center;gap:11px;margin:28px 0 2px}
+.arch b{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.arch i{flex:1;height:1px;background:var(--line)}
+.arch .cnt{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2);white-space:nowrap}
+.arch .srch{width:32px;height:32px;border-radius:10px;border:1px solid var(--line-2);background:var(--paper);display:grid;place-items:center;
+  color:var(--muted);cursor:pointer;flex:0 0 auto}
+
+/* ── been-there rows: the quiet register ── */
+.year{position:sticky;top:56px;z-index:12;display:flex;align-items:center;gap:10px;padding:15px 0 7px;
+  background:linear-gradient(var(--ivory) 72%, rgba(251,247,241,0))}
+.year span{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--muted-2);font-variant-numeric:tabular-nums}
+.year i{flex:1;height:1px;background:var(--line)}
+.past{position:relative}
+.past + .past{border-top:1px solid var(--line)}
+.past.swiped{border-radius:12px;overflow:hidden;border-top:0}
+.past-row{position:relative;z-index:2;display:flex;align-items:center;gap:12px;width:100%;padding:11px 6px;border:0;
+  background:var(--ivory);text-align:left;cursor:pointer;transition:transform .18s ease}
+.past.swiped .past-row{transform:translateX(-94px)}
+.past-thumb{position:relative;flex:0 0 auto;width:44px;height:44px;border-radius:13px;filter:saturate(.5);opacity:.92}
+.past-body{display:flex;flex-direction:column;gap:3px;min-width:0}
+.past-body .t{font-size:14.5px;font-weight:700;letter-spacing:-.01em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.past-body .s{font-size:12.5px;font-weight:500;color:var(--muted-2)}
+.past-action{position:absolute;top:0;right:0;bottom:0;width:94px;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:5px;background:var(--amber);color:#2B1706;font-size:10.5px;font-weight:800;letter-spacing:.04em}
+
+.sec-head{display:flex;align-items:center;gap:10px;margin:22px 0 12px}
+.sec-head span{white-space:nowrap}
+.sec-head i{flex:1;height:1px;background:var(--line)}
+
+/* ═══════════════ SCREEN 2 · ITINERARY ═══════════════ */
+.trip-hero{position:relative;padding:56px 20px 20px;color:#fff;min-height:246px;display:flex;flex-direction:column}
+.hero-bar{display:flex;justify-content:space-between;position:relative;z-index:2}
+.hero-tools{display:flex;gap:8px}
+.round{width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.2);background:rgba(12,11,32,.4);backdrop-filter:blur(6px);
+  color:#fff;display:grid;place-items:center;cursor:pointer}
+.hero-copy{margin-top:auto;position:relative;z-index:2}
+.hero-eyebrow{font-size:10.5px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--amber-soft)}
+.hero-copy h1{font-family:var(--display);font-weight:600;font-size:32px;line-height:1.06;letter-spacing:-.02em;margin:8px 0 10px}
+.hero-meta{display:flex;align-items:center;gap:9px;font-size:12.5px;color:rgba(255,255,255,.8);font-weight:500}
+
+.tabs-sticky{position:sticky;top:56px;z-index:20;display:flex;align-items:center;gap:20px;padding:0 20px;height:48px;
+  background:var(--ivory);border-bottom:1px solid var(--line)}
+.tabs-sticky button{border:0;background:none;padding:14px 0 12px;font:600 14.5px var(--ui);color:var(--muted-2);cursor:pointer;position:relative}
+.tabs-sticky button.on{color:var(--ink)}
+.tabs-sticky button.on::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:2px;background:var(--amber)}
+.tabs-sticky .tab-action{margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:var(--amber-2);font-weight:700;font-size:13px;
+  background:var(--amber-wash);padding:7px 12px;border-radius:10px}
+
+.filter-row{position:relative;display:flex;gap:8px;padding:14px 20px;overflow-x:auto;scrollbar-width:none}
+.filter-row::-webkit-scrollbar{display:none}
+.who{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;padding:6px 12px 6px 6px;border-radius:999px;border:1px solid var(--line-2);
+  background:var(--paper);font:600 13px var(--ui);color:var(--muted);cursor:pointer}
+.who.on{background:var(--ink);border-color:var(--ink);color:#FFF6EA;padding-left:12px}
+.who i{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;font:800 10px var(--ui);font-style:normal}
+.who .name-missing{color:var(--amber-2);font-weight:700}
+
+.day{position:relative;padding-bottom:6px}
+.day-head{position:sticky;top:104px;z-index:14;display:flex;align-items:baseline;gap:9px;padding:16px 20px 8px;
+  background:linear-gradient(var(--ivory) 74%, rgba(251,247,241,0))}
+.day-head b{font-size:14px;font-weight:700;letter-spacing:-.01em}
+.day-head span{font-size:13px;color:var(--muted)}
+.day-head em{margin-left:auto;font-style:normal;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2)}
+.stay-strip{position:relative;display:flex;align-items:center;gap:8px;margin:0 20px 10px;padding:8px 11px;border-radius:11px;
+  background:var(--lilac);color:var(--muted);font-size:12.5px;font-weight:600}
+.stay-strip svg{opacity:.55;flex:0 0 auto}
+.stay-strip .n{margin-left:auto;font-size:11px;color:var(--muted-2);font-weight:600}
+.stay-strip.warn{background:var(--clay-wash);color:var(--clay)}
+.stay-strip.warn svg{opacity:.8}
+
+.rail{position:relative;padding:2px 20px 14px}
+.rail::before{content:"";position:absolute;left:64px;top:12px;bottom:22px;width:1.5px;background:var(--line-2);border-radius:2px}
+.ev{position:relative;display:grid;grid-template-columns:44px 22px 1fr;gap:0;margin-bottom:12px}
+.ev-time{padding-top:14px;text-align:right;font-size:12.5px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.ev-time small{display:block;font-size:9.5px;font-weight:700;color:var(--muted-2);letter-spacing:.06em;margin-top:2px}
+.ev-node{position:relative}
+.ev-node::after{content:"";position:absolute;left:50%;top:18px;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;
+  background:var(--ivory);border:2px solid var(--muted-2);z-index:2}
+.ev.is-key .ev-node::after{border-color:var(--amber);background:var(--amber);box-shadow:0 0 0 3px var(--amber-wash)}
+.ev-card{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-m);padding:13px 14px;box-shadow:var(--sh-1);cursor:pointer}
+.ev-head{display:flex;gap:11px;align-items:flex-start}
+.tile{flex:0 0 auto;width:34px;height:34px;border-radius:11px;background:var(--lilac);display:grid;place-items:center;color:var(--ink-2)}
+.ev-title{font-size:14.5px;font-weight:700;letter-spacing:-.01em;line-height:1.25}
+.ev-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.chip-warn{display:inline-flex;align-items:center;gap:5px;margin-top:9px;padding:5px 9px;border-radius:8px;background:var(--clay-wash);
+  color:var(--clay);font-size:11.5px;font-weight:700}
+
+/* boarding-pass flight card — the signature element */
+.card-flight{padding:14px}
+.bp-head{display:flex;align-items:center;justify-content:space-between}
+.bp-airline{display:flex;align-items:center;gap:9px}
+.bp-logo{width:30px;height:30px;border-radius:9px;background:var(--ink);color:var(--amber-soft);display:grid;place-items:center;font:800 11px var(--ui)}
+.bp-pnr{font:700 11px var(--ui);letter-spacing:.1em;color:var(--muted-2);background:var(--lilac);padding:4px 8px;border-radius:7px}
+.bp-route{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;margin-top:14px}
+.port b{display:block;font-family:var(--display);font-weight:600;font-size:24px;letter-spacing:.01em;line-height:1}
+.port .t{font-size:15px;font-weight:700;margin-top:5px;font-variant-numeric:tabular-nums}
+.port .z{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-2);margin-top:2px}
+.port.r{text-align:right}
+.leg{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:78px}
+.leg .ln{width:100%;height:12px;position:relative}
+.leg .ln::before{content:"";position:absolute;left:0;right:0;top:50%;border-top:1.5px dashed var(--line-2)}
+.leg .ln svg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(90deg);background:var(--paper);padding:0 3px;color:var(--amber-2)}
+.leg .dur{font-size:10.5px;font-weight:700;color:var(--muted-2);letter-spacing:.04em}
+.daybadge{display:inline-block;margin-left:4px;font-size:9.5px;font-weight:800;color:var(--amber-2);background:var(--amber-wash);
+  padding:2px 5px;border-radius:6px;vertical-align:2px;letter-spacing:.04em}
+.bp-foot{position:relative;margin:14px -14px 0;padding:11px 14px 0;border-top:1.5px dashed var(--line-2);
+  font-size:11.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:7px}
+.bp-foot::before,.bp-foot::after{content:"";position:absolute;top:-8px;width:15px;height:15px;border-radius:50%;background:var(--ivory);border:1px solid var(--line)}
+.bp-foot::before{left:-8px}
+.bp-foot::after{right:-8px}
+.bp-foot svg{color:var(--amber-2);flex:0 0 auto}
+
+/* timezone rail marker */
+.tz-marker{position:relative;z-index:3;display:flex;align-items:center;gap:9px;margin:6px 0 16px;padding:7px 0;background:var(--ivory)}
+.tz-marker span{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--muted-2);white-space:nowrap}
+.tz-marker i{flex:1;height:1px;background:repeating-linear-gradient(90deg,var(--line-2) 0 3px,transparent 3px 7px)}
+
+/* empty day */
+.ghost{grid-column:3;display:flex;align-items:center;gap:9px;padding:14px;border-radius:var(--r-m);border:1.5px dashed var(--line-2);
+  color:var(--muted-2);font-size:13px;font-weight:600;background:transparent;cursor:pointer;width:100%}
+.suggest{background:var(--amber-wash);border:1px solid rgba(229,138,60,.28);box-shadow:none}
+.suggest .ev-title{color:var(--amber-2)}
+.suggest .tile{background:rgba(229,138,60,.18);color:var(--amber-2)}
+
+/* ═══════════════ SCREEN 3 · ADD ITEM ═══════════════ */
+.sheet-bg{background:var(--ivory)}
+.sheet-head{position:sticky;top:56px;z-index:22;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:8px 20px 12px;background:var(--ivory);border-bottom:1px solid var(--line)}
+.sheet-title{text-align:center}
+.sheet-title b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.sheet-title span{font-size:11px;color:var(--muted-2);font-weight:600}
+.grabber{position:absolute;top:-4px;left:50%;transform:translateX(-50%);width:38px;height:5px;border-radius:3px;background:var(--line-2)}
+
+.smart{position:relative;display:flex;align-items:center;gap:11px;width:100%;margin:16px 0 18px;padding:14px;border-radius:var(--r-m);
+  border:1.5px solid rgba(229,138,60,.4);background:linear-gradient(180deg,#FDF3E7,#FCEADA);cursor:pointer;text-align:left;box-shadow:var(--sh-1)}
+.smart .tile{background:var(--amber);color:#2B1706}
+.smart b{display:block;font-size:14px;font-weight:700;color:var(--ink)}
+.smart span{font-size:12px;color:var(--amber-2);font-weight:600}
+
+.type-rail{position:relative;display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:22px}
+.type{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;height:66px;border-radius:14px;
+  border:1px solid var(--line-2);background:var(--paper);color:var(--muted);cursor:pointer;padding:0}
+.type span{font-size:11px;font-weight:700;line-height:1}
+.type.on{background:var(--ink);border-color:var(--ink);color:#FFF6EA}
+.type.on svg{color:var(--amber-soft)}
+
+.group{position:relative;margin-bottom:20px}
+.group>.mini-label{display:block;margin:0 0 9px 2px}
+.field-card{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--sh-1);overflow:hidden}
+.frow{display:flex;align-items:center;gap:10px;padding:13px 14px;border-bottom:1px solid var(--line)}
+.frow:last-child{border-bottom:0}
+.frow label{flex:0 0 92px;font-size:13px;color:var(--muted);font-weight:600}
+.frow input{flex:1;border:0;background:none;font:600 15px var(--ui);color:var(--ink);outline:none;min-width:0}
+.frow input::placeholder{color:var(--muted-2);font-weight:500}
+.frow .val{margin-left:auto;display:inline-flex;align-items:center;gap:6px;background:var(--lilac);padding:7px 11px;border-radius:9px;
+  font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.frow .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;font-weight:700}
+.airline-logo{width:30px;height:30px;border-radius:9px;background:var(--ink);color:var(--amber-soft);display:grid;place-items:center;font:800 11px var(--ui)}
+
+/* editable boarding pass */
+.bp-edit{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--sh-1);padding:16px 14px 0}
+.bp-edit .bp-route{margin-top:4px;align-items:start}
+.bp-edit .port input.code{width:100%;border:0;background:none;outline:none;font-family:var(--display);font-weight:600;font-size:28px;
+  letter-spacing:.02em;color:var(--ink);padding:0}
+.bp-edit .port.r input.code{text-align:right}
+.bp-edit .city{font-size:11.5px;color:var(--muted-2);font-weight:600;margin-top:1px}
+.bp-edit .tline{display:flex;align-items:baseline;gap:2px;margin-top:9px}
+.bp-edit .port.r .tline{justify-content:flex-end}
+.bp-edit input.time{width:58px;border:0;background:var(--lilac);border-radius:8px;padding:5px 7px;outline:none;
+  font:700 15px var(--ui);font-variant-numeric:tabular-nums;color:var(--ink)}
+.bp-edit .port.r input.time{text-align:right}
+.tzsel{margin-top:7px;display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:0;cursor:pointer;
+  font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--amber-2)}
+.port.r .tzsel{float:right}
+.bp-edit .bp-foot{margin:16px -14px 0;padding:11px 14px 12px}
+
+details.disc{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--sh-1);overflow:hidden}
+details.disc summary{list-style:none;display:flex;align-items:center;gap:10px;padding:14px;cursor:pointer;font-size:14px;font-weight:600}
+details.disc summary::-webkit-details-marker{display:none}
+details.disc summary .sum{margin-left:auto;font-size:12.5px;color:var(--muted-2);font-weight:600}
+details.disc summary .chev{transition:transform .2s;color:var(--muted-2)}
+details.disc[open] summary .chev{transform:rotate(90deg)}
+details.disc[open] summary{border-bottom:1px solid var(--line)}
+.triple{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line)}
+.triple div{background:var(--paper);padding:12px 14px}
+.triple .mini-label{display:block;margin-bottom:5px}
+.triple input{width:100%;border:0;background:none;outline:none;font:700 15px var(--ui);color:var(--ink)}
+
+.who-grid{display:flex;flex-wrap:wrap;gap:8px}
+.who-pick{display:inline-flex;align-items:center;gap:7px;padding:7px 13px 7px 7px;border-radius:999px;border:1px solid var(--line-2);
+  background:var(--paper);font:600 13px var(--ui);color:var(--muted);cursor:pointer}
+.who-pick.on{background:var(--amber-wash);border-color:var(--amber);color:var(--ink-2)}
+.who-pick i{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;font:800 10px var(--ui);font-style:normal}
+.helper{font-size:12px;color:var(--muted-2);margin-top:10px;line-height:1.45}
+
+/* ═══════════════ SCREEN 4 · IMPORT ═══════════════ */
+.import-hero{position:relative;text-align:center;padding:26px 10px 22px}
+.tick{width:52px;height:52px;border-radius:18px;margin:0 auto 16px;background:var(--sage);color:#fff;display:grid;place-items:center;
+  box-shadow:0 10px 24px -10px rgba(78,124,106,.7)}
+.import-hero h1{font-size:30px;line-height:1.1;margin-bottom:7px}
+.import-hero p{font-size:13.5px;color:var(--muted);line-height:1.45;max-width:30ch;margin:0 auto}
+.stats{position:relative;display:grid;grid-template-columns:repeat(3,1fr);background:var(--paper);border:1px solid var(--line);
+  border-radius:var(--r-m);box-shadow:var(--sh-1);overflow:hidden;margin-bottom:16px}
+.stat{padding:16px 8px;text-align:center;border-right:1px solid var(--line)}
+.stat:last-child{border-right:0}
+.stat b{display:block;font-family:var(--display);font-weight:600;font-size:32px;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat span{display:block;margin-top:6px;font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-2)}
+.stat.flag b{color:var(--amber-2)}
+.list{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-m);box-shadow:var(--sh-1);overflow:hidden}
+.srow{display:flex;align-items:center;gap:10px;padding:13px 14px;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:0}
+.srow .t{font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+.reason{display:inline-block;margin-top:5px;font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 7px;border-radius:6px;background:var(--lilac);color:var(--muted)}
+.reason.miss{background:var(--amber-wash);color:var(--amber-2)}
+.srow .link{margin-left:auto}
+.foot-card{position:relative;margin-top:16px;padding:14px;border-radius:var(--r-m);background:var(--lilac);border:1px solid var(--lilac-2)}
+.foot-card b{font-size:13.5px;font-weight:700}
+.foot-card p{font-size:12.5px;color:var(--muted);line-height:1.5;margin:5px 0 9px}
+.foot-card code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;background:rgba(22,21,51,.07);padding:2px 5px;border-radius:5px}
+
+/* ─── notes ─── */
+.notes{margin-top:22px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:18px 18px 8px}
+.notes h3{font-family:var(--display);font-size:18px;font-weight:600;color:#fff}
+.notes .sub{font-size:12px;color:#8E89AF;margin:3px 0 12px}
+.notes ul{list-style:none}
+.notes li{display:flex;gap:11px;padding:10px 0;border-top:1px solid rgba(255,255,255,.08);font-size:13.5px;line-height:1.45;color:#CFCADF}
+.notes li b{color:#fff;font-weight:700}
+.notes li .n{flex:0 0 auto;width:20px;height:20px;border-radius:6px;background:var(--amber);color:#301A05;font:800 11px/20px var(--ui);text-align:center;margin-top:1px}
+body:not(.notes-on) .notes{display:none}
+
+/* ─── spec footer ─── */
+.spec{max-width:1180px;margin:36px auto 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:26px}
+.card-dark{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:22px}
+.card-dark h3{font-family:var(--display);font-size:19px;font-weight:600;color:#fff;margin-bottom:12px}
+.swatches{display:flex;flex-wrap:wrap;gap:8px}
+.sw{width:60px}
+.sw i{display:block;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.14)}
+.sw b{display:block;font-size:10px;font-weight:700;margin-top:6px;color:#EDE9F5}
+.sw span{display:block;font-size:9.5px;color:#8E89AF;font-variant-numeric:tabular-nums}
+.scale li,.card-dark ul li{list-style:none;display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid rgba(255,255,255,.08);
+  font-size:13px;color:#CFCADF}
+.scale li:first-child,.card-dark ul li:first-child{border-top:0}
+.scale li span{color:#8E89AF;font-size:12px;font-variant-numeric:tabular-nums}
+.card-dark p{font-size:13.5px;color:#B6B1CE;line-height:1.55}
+.card-dark ul li{display:list-item;list-style:none;padding-left:16px;position:relative}
+.card-dark ul li::before{content:"";position:absolute;left:0;top:15px;width:5px;height:5px;border-radius:50%;background:var(--amber)}
+
+.card-dark pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:1.7;color:#D9D5E8;background:rgba(0,0,0,.28);
+  border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px 13px;overflow-x:auto;margin:0 0 12px;white-space:pre}
+.card-dark pre .c{color:#8A85AC}
+@media (max-width:900px){
+  body{padding:28px 14px 60px}
+  .deck{flex-direction:column;align-items:center;gap:24px;overflow-x:visible}
+  .stage{width:390px;max-width:100%}
+  .phone{transform:scale(.86);transform-origin:top center;margin-bottom:-112px}
+  .notes{transform:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body class="notes-on">
+
+<header class="page-head">
+  <div class="kicker">Tripto · screen redesign · v2</div>
+  <h1>Four screens, rebuilt around the trip — not the form</h1>
+  <p>Same brand (dusk indigo, warm amber, Fraunces + Sofia Sans), sharper structure. Home is now <b>one list</b> ordered by distance from now — shown twice, between trips and mid-trip, because a merged list finally has somewhere to put the trip you’re on. The signature is the <b>rail</b>: one timeline carrying time, timezone breaks and multi-night stays, with flights drawn as boarding passes. Every numbered pin maps to a note under the phone.</p>
+  <div class="head-row">
+    <button class="toggle" id="t"><span class="dot"></span> Design notes</button>
+    <span class="hint">Scroll inside each phone. Placeholder content where the screenshots didn't show it.</span>
+  </div>
+</header>
+
+<div class="deck">
+
+<!-- ══════════════════════ 1 · TRIPS ══════════════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>Your trips</b><span>Home · between trips</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen">
+      <div class="statusbar"><span class="num">7:13</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="below-status home-head">
+        <div class="brand"><span class="mark"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10.4 3.4a1.8 1.8 0 0 1 3.2 0v5.3l7.4 4.3v2.3l-7.4-2.1v4.3l2.4 1.8v1.7L12 20.1l-4 .9v-1.7l2.4-1.8v-4.3L3 15.3V13l7.4-4.3z"/></svg></span> tripto</div>
+        <div class="me">N</div>
+      </div>
+
+      <div class="pad">
+        <div class="greet">
+          <span class="pin">1</span>
+          <div class="eyebrow">Good evening, Naveen</div>
+          <h1 class="display home-h1">Your trips</h1>
+        </div>
+
+        <button class="trip hero cover-dusk grain">
+          <span class="pin tr">2</span>
+          <div class="inner">
+            <div class="trip-top">
+              <span class="count"><span class="ring"></span> in 8 days</span>
+              <div class="stack"><i class="av-a">N</i><i class="av-b">S</i><i class="av-c">C</i><i class="av-d">+1</i></div>
+            </div>
+            <h2 class="trip-name">Okinawa</h2>
+            <div class="trip-meta"><span>Japan</span> · <span class="num">22–26 Jul</span> · <span>5 days</span></div>
+            <div class="next-up">
+              <span style="color:#F6C48A;display:grid"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10.4 3.4a1.8 1.8 0 0 1 3.2 0v5.3l7.4 4.3v2.3l-7.4-2.1v4.3l2.4 1.8v1.7L12 20.1l-4 .9v-1.7l2.4-1.8v-4.3L3 15.3V13l7.4-4.3z"/></svg></span>
+              <div>
+                <div class="lbl">First up</div>
+                <div class="txt">JL901 · HND → OKA</div>
+              </div>
+              <div class="when num">Wed<br>09:40</div>
+            </div>
+          </div>
+        </button>
+
+        <button class="trip mini fused cover-ember grain">
+          <div class="inner">
+            <div class="trip-top">
+              <span class="count">in 8 days</span>
+              <div class="stack"><i class="av-b">S</i><i class="av-c">C</i><i class="av-d">+2</i></div>
+            </div>
+            <h2 class="trip-name">Okinawa</h2>
+            <div class="trip-meta"><span>Japan</span> · <span class="num">22–26 Jul</span> · <span>4 travellers</span></div>
+          </div>
+        </button>
+        <div class="dupe">
+          <span class="pin">3</span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6A2 2 0 0 0 13.5 4H6A2 2 0 0 0 4 6v7.5A2 2 0 0 0 6 15.5h2.5"/></svg>
+          Same dates as the trip above
+          <button class="btn-sm">Merge</button>
+        </div>
+
+        <button class="trip mini cover-teal grain">
+          <div class="inner">
+            <div class="trip-top">
+              <span class="count">in 60 days</span>
+              <div class="stack"><i class="av-a">N</i><i class="av-b">S</i></div>
+            </div>
+            <h2 class="trip-name">Singapore</h2>
+            <div class="trip-meta"><span>Singapore</span> · <span class="num">12–16 Sep</span> · <span>Draft</span></div>
+          </div>
+        </button>
+
+        <div class="arch">
+          <span class="pin">4</span>
+          <b>Been there</b>
+          <i></i>
+          <span class="cnt num">18 trips</span>
+          <button class="srch"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4 20 20"/></svg></button>
+        </div>
+
+        <span class="pin" style="position:relative;display:inline-block;left:0;top:8px;margin-bottom:-14px">5</span>
+        <div class="year"><span>2026</span><i></i></div>
+        <div class="past-list">
+          <div class="past">
+            <span class="pin" style="top:-9px;left:6px">6</span>
+            <button class="past-row">
+              <span class="past-thumb cover-teal grain"></span>
+              <span class="past-body"><span class="t">Hong Kong</span><span class="s">Feb · 4 days · 6 items</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="year"><span>2025</span><i></i></div>
+        <div class="past-list">
+          <div class="past">
+            <button class="past-row">
+              <span class="past-thumb cover-ember grain"></span>
+              <span class="past-body"><span class="t">Singapore</span><span class="s">Nov · 5 days · 9 items</span></span>
+            </button>
+          </div>
+          <div class="past">
+            <button class="past-row">
+              <span class="past-thumb cover-dusk grain"></span>
+              <span class="past-body"><span class="t">Kerala</span><span class="s">Apr · 8 days · 14 items</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="year"><span>2024</span><i></i></div>
+        <div class="past-list">
+          <div class="past swiped">
+            <span class="pin" style="top:-9px;left:6px">7</span>
+            <div class="past-action">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6A2 2 0 0 0 13.5 4H6A2 2 0 0 0 4 6v7.5A2 2 0 0 0 6 15.5h2.5"/></svg>
+              <span>Copy</span>
+            </div>
+            <button class="past-row">
+              <span class="past-thumb cover-dusk grain"></span>
+              <span class="past-body"><span class="t">Bangkok &amp; Khao Yai</span><span class="s">Jul · 7 days · 12 items</span></span>
+            </button>
+          </div>
+          <div class="past">
+            <button class="past-row">
+              <span class="past-thumb cover-ember grain"></span>
+              <span class="past-body"><span class="t">Patna &amp; Kolkata</span><span class="s">Jan · 9 days · 7 items</span></span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="spacer"></div>
+    </div>
+    <div class="dock">
+      <button class="btn-primary"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Plan a new trip</button>
+      <button class="btn-icon" title="Paste a booking email"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 3.6L17 8l-3.6 1.4L12 13l-1.4-3.6L7 8l3.6-1.4z"/><path d="M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z"/><path d="M6 15l.6 1.6L8.2 17l-1.6.6L6 19l-.6-1.4L3.8 17l1.6-.4z"/></svg></button>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>What changed</h3>
+    <div class="sub">Home · one list, ordered by distance from now</div>
+    <ul>
+      <li><span class="n">1</span><span>The tabs are gone. <b>One list</b>: everything with an end date in the future, nearest first; then everything behind you, most recent first. Upcoming and past want opposite sort directions — that's the whole reason a single chronological sort doesn't work.</span></li>
+      <li><span class="n">2</span><span><b>Register 1 — next.</b> Full card, countdown ring, first departure. Only the nearest trip earns this.</span></li>
+      <li><span class="n">3</span><span>The duplicate prompt moved <b>onto the offender</b> instead of sitting in a banner at the top. Identical dates means the pair is always adjacent, so the strip can fuse to the second card.</span></li>
+      <li><span class="n">4</span><span>I dropped the “Today” divider I suggested. A live trip <b>straddles</b> it, so the marker starts lying the moment you're travelling. The archive header does the job better — it names the direction change instead of dating it.</span></li>
+      <li><span class="n">5</span><span>Sticky year headers. Search sits in the archive header, where it's needed — not in the nav, where it would imply you search your next trip.</span></li>
+      <li><span class="n">6</span><span><b>Register 3 — been.</b> Rows, not cards. No countdown, no gradient, no avatars, muted thumbnail. Without this discipline a 2019 trip shouts as loudly as the live one.</span></li>
+      <li><span class="n">7</span><span>Swipe a past trip → <b>Copy to a new trip</b>. A family that returns to the same places is exactly where a 6-year archive earns its keep. (Shown mid-swipe.)</span></li>
+      <li><span class="n">8</span><span>Launch always opens at the top. <b>Never restore scroll position</b> on a list this long — the one thing you want is always the first thing.</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════════════ 1B · TRIPS, LIVE ══════════════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>Your trips</b><span>Home · day 3 of 5</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen">
+      <div class="statusbar"><span class="num">8:02</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="below-status home-head">
+        <div class="brand"><span class="mark"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10.4 3.4a1.8 1.8 0 0 1 3.2 0v5.3l7.4 4.3v2.3l-7.4-2.1v4.3l2.4 1.8v1.7L12 20.1l-4 .9v-1.7l2.4-1.8v-4.3L3 15.3V13l7.4-4.3z"/></svg></span> tripto</div>
+        <div class="me">N</div>
+      </div>
+
+      <div class="pad">
+        <div class="greet">
+          <div class="eyebrow">Good morning, Naveen</div>
+          <h1 class="display home-h1">Your trips</h1>
+        </div>
+
+        <button class="trip live cover-dusk grain">
+          <span class="pin tr">1</span>
+          <div class="inner">
+            <div class="trip-top">
+              <span class="count"><span class="live-dot"></span> Day 3 of 5</span>
+              <div class="stack"><i class="av-a">N</i><i class="av-b">S</i><i class="av-c">C</i><i class="av-d">C</i></div>
+            </div>
+            <h2 class="trip-name">Okinawa</h2>
+            <div class="trip-meta"><span>Japan</span> · <span class="num">22–26 Jul</span></div>
+            <div class="prog"><i class="done"></i><i class="done"></i><i class="now"></i><i></i><i></i></div>
+            <div class="today-panel">
+              <span class="pin" style="top:-9px;left:8px">2</span>
+              <div class="lbl">Today · Thu 24 Jul</div>
+              <div class="tp-row"><span class="t num">09:30</span> Churaumi Aquarium</div>
+              <div class="tp-row"><span class="t num">13:00</span> Lunch · Kishimoto Shokudo</div>
+              <div class="tp-row more">+ 2 more today</div>
+            </div>
+          </div>
+        </button>
+
+        <button class="trip mini cover-teal grain">
+          <span class="pin tr">3</span>
+          <div class="inner">
+            <div class="trip-top">
+              <span class="count">in 50 days</span>
+              <div class="stack"><i class="av-a">N</i><i class="av-b">S</i></div>
+            </div>
+            <h2 class="trip-name">Singapore</h2>
+            <div class="trip-meta"><span>Singapore</span> · <span class="num">12–16 Sep</span> · <span>Draft</span></div>
+          </div>
+        </button>
+
+        <div class="arch">
+          <b>Been there</b>
+          <i></i>
+          <span class="cnt num">18 trips</span>
+          <button class="srch"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4 20 20"/></svg></button>
+        </div>
+
+        <div class="year"><span>2026</span><i></i></div>
+        <div class="past-list">
+          <div class="past">
+            <button class="past-row">
+              <span class="past-thumb cover-teal grain"></span>
+              <span class="past-body"><span class="t">Hong Kong</span><span class="s">Feb · 4 days · 6 items</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="year"><span>2025</span><i></i></div>
+        <div class="past-list">
+          <div class="past">
+            <button class="past-row">
+              <span class="past-thumb cover-ember grain"></span>
+              <span class="past-body"><span class="t">Singapore</span><span class="s">Nov · 5 days · 9 items</span></span>
+            </button>
+          </div>
+          <div class="past">
+            <button class="past-row">
+              <span class="past-thumb cover-dusk grain"></span>
+              <span class="past-body"><span class="t">Kerala</span><span class="s">Apr · 8 days · 14 items</span></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="year"><span>2024</span><i></i></div>
+        <div class="past-list">
+          <div class="past swiped">
+            <div class="past-action">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6A2 2 0 0 0 13.5 4H6A2 2 0 0 0 4 6v7.5A2 2 0 0 0 6 15.5h2.5"/></svg>
+              <span>Copy</span>
+            </div>
+            <button class="past-row">
+              <span class="past-thumb cover-dusk grain"></span>
+              <span class="past-body"><span class="t">Bangkok &amp; Khao Yai</span><span class="s">Jul · 7 days · 12 items</span></span>
+            </button>
+          </div>
+          <div class="past">
+            <button class="past-row">
+              <span class="past-thumb cover-ember grain"></span>
+              <span class="past-body"><span class="t">Patna &amp; Kolkata</span><span class="s">Jan · 9 days · 7 items</span></span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="spacer"></div>
+    </div>
+    <div class="dock">
+      <button class="btn-primary"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Plan a new trip</button>
+      <button class="btn-icon" title="Paste a booking email"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 3.6L17 8l-3.6 1.4L12 13l-1.4-3.6L7 8l3.6-1.4z"/><path d="M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z"/><path d="M6 15l.6 1.6L8.2 17l-1.6.6L6 19l-.6-1.4L3.8 17l1.6-.4z"/></svg></button>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>Why the merge was worth it</h3>
+    <div class="sub">Home · while you're actually travelling</div>
+    <ul>
+      <li><span class="n">1</span><span><b>Register 2 — now.</b> Day 3 of 5 isn't upcoming and isn't past, so the old tabs had nowhere to put it. This is the app's best moment and it only exists once the list is one list.</span></li>
+      <li><span class="n">2</span><span>Today's plan is <b>inline on the card</b>. Two items and a count — the answer to “what am I doing in an hour” without opening anything. Tapping lands on today in the itinerary, not day 1.</span></li>
+      <li><span class="n">3</span><span>No special-casing in the sort: a live trip ends soonest, so it lands first for free. It just gets a richer card. Everything else keeps its place.</span></li>
+      <li><span class="n">4</span><span>Duplicate merged, so the second Okinawa is gone. This is the same screen as the frame on the left, four days later.</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════════════ 2 · ITINERARY ══════════════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>Itinerary</b><span>Trip detail</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen js-scroll" data-hero="1">
+      <div class="statusbar on-dark"><span class="num">7:14</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <header class="trip-hero cover-dusk grain">
+        <span class="pin tr" style="top:60px">1</span>
+        <div class="hero-bar">
+          <button class="round"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5 8 12l6.5 7"/></svg></button>
+          <div class="hero-tools">
+            <button class="round"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="M14 6l4 4"/></svg></button>
+            <button class="round"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M5 14v5h14v-5"/></svg></button>
+            <button class="round"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+          </div>
+        </div>
+        <div class="hero-copy">
+          <div class="hero-eyebrow">Thailand · 7 days</div>
+          <h1>Bangkok &amp; Khao Yai</h1>
+          <div class="hero-meta">
+            <span class="num">20–26 Jul 2024</span> ·
+            <span class="stack"><i class="av-a">N</i><i class="av-b">S</i><i class="av-c">C</i><i class="av-d">C</i></span>
+          </div>
+        </div>
+      </header>
+
+      <nav class="tabs-sticky">
+        <span class="pin" style="top:4px;left:14px">2</span>
+        <button class="on">Itinerary</button>
+        <button>Bookings</button>
+        <button>Packing</button>
+        <span class="tab-action"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 3.6L17 8l-3.6 1.4L12 13l-1.4-3.6L7 8l3.6-1.4z"/><path d="M18 15l.7 1.8L20.5 17.5l-1.8.7L18 20l-.7-1.8L15.5 17.5l1.8-.7z"/></svg> Paste</span>
+      </nav>
+
+      <div class="filter-row">
+        <span class="pin" style="top:2px;left:20px">3</span>
+        <button class="who on">Everyone</button>
+        <button class="who"><i class="av-a">N</i>You</button>
+        <button class="who"><i class="av-b">S</i>Spouse</button>
+        <button class="who"><i class="av-c">C</i>Child</button>
+        <button class="who"><i class="av-d">C</i>Child</button>
+      </div>
+
+      <div class="pad">
+        <div class="alert clay">
+          <span class="pin">4</span>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8v5"/><path d="M12 16.5h.01"/><path d="M10.3 3.9 2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+          <div style="flex:1">
+            <b>Two stays overlap all 6 nights</b>
+            <p>Mövenpick Khao Yai and Pullman Bangkok are both booked 20–26 Jul. One is probably a duplicate.</p>
+            <div class="acts"><button class="btn-sm">Review stays</button></div>
+          </div>
+        </div>
+      </div>
+
+      <section class="day">
+        <div class="day-head"><b>Day 1</b><span>Sat 20 Jul</span><em>Hong Kong → Bangkok</em></div>
+        <div class="rail">
+          <div class="ev is-key">
+            <span class="pin" style="left:66px;top:-2px">7</span>
+            <div class="ev-time num">12:20<small>HKT</small></div>
+            <div class="ev-node"></div>
+            <div class="ev-card card-flight">
+              <div class="bp-head">
+                <div class="bp-airline">
+                  <span class="bp-logo">TG</span>
+                  <div>
+                    <div class="ev-title">Thai Airways TG639</div>
+                    <div class="ev-sub">Economy · 4 seats</div>
+                  </div>
+                </div>
+                <span class="bp-pnr">QK7P2M</span>
+              </div>
+              <div class="bp-route">
+                <div class="port">
+                  <b>HKG</b>
+                  <div class="t num">12:20</div>
+                  <div class="z">GMT+8</div>
+                </div>
+                <div class="leg">
+                  <div class="ln"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M10.4 3.4a1.8 1.8 0 0 1 3.2 0v5.3l7.4 4.3v2.3l-7.4-2.1v4.3l2.4 1.8v1.7L12 20.1l-4 .9v-1.7l2.4-1.8v-4.3L3 15.3V13l7.4-4.3z"/></svg></div>
+                  <div class="dur num">2h 40m</div>
+                </div>
+                <div class="port r">
+                  <b>BKK</b>
+                  <div class="t num">14:00</div>
+                  <div class="z">GMT+7</div>
+                </div>
+              </div>
+              <div class="bp-foot">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>
+                Lands 14:00 the same day · clocks go back 1h
+              </div>
+            </div>
+          </div>
+
+          <div class="tz-marker">
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg> Bangkok time · GMT+7 · from here on</span>
+            <i></i>
+            <span class="pin" style="left:auto;right:0;top:-8px">6</span>
+          </div>
+
+          <div class="ev">
+            <div class="ev-time num">14:45</div>
+            <div class="ev-node"></div>
+            <div class="ev-card">
+              <div class="ev-head">
+                <span class="tile"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 10.5 6.7 6.2A2 2 0 0 1 8.6 5h6.8a2 2 0 0 1 1.9 1.2l1.7 4.3"/><rect x="2.8" y="10.5" width="18.4" height="6" rx="2"/><path d="M5.5 16.5V18M18.5 16.5V18"/><circle cx="7" cy="13.5" r="1"/><circle cx="17" cy="13.5" r="1"/></svg></span>
+                <div>
+                  <div class="ev-title">Rental car — Honda BR-V</div>
+                  <div class="ev-sub">Klook · pick-up Suvarnabhumi · 6 days</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ev">
+            <div class="ev-time num">18:00</div>
+            <div class="ev-node"></div>
+            <div class="ev-card">
+              <div class="ev-head">
+                <span class="tile"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7v11M3 13h18v5M21 18v-5a3 3 0 0 0-3-3h-6v3"/><circle cx="7.2" cy="10.6" r="1.9"/></svg></span>
+                <div>
+                  <div class="ev-title">Check in · Mövenpick Khao Yai</div>
+                  <div class="ev-sub">6 nights · confirmation QK7P2M</div>
+                </div>
+              </div>
+              <div class="chip-warn">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 8v5M12 16.5h.01"/><circle cx="12" cy="12" r="9"/></svg>
+                Overlaps Pullman Bangkok, same nights
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="day">
+        <div class="day-head"><b>Day 2</b><span>Sun 21 Jul</span><em>Khao Yai</em></div>
+        <div class="stay-strip">
+          <span class="pin" style="top:-9px;left:6px">5</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7v11M3 13h18v5M21 18v-5a3 3 0 0 0-3-3h-6v3"/><circle cx="7.2" cy="10.6" r="1.9"/></svg>
+          Mövenpick Khao Yai
+          <span class="n num">Night 2 of 6</span>
+        </div>
+        <div class="rail" style="padding-top:0">
+          <div class="ev">
+            <div class="ev-time"></div>
+            <div class="ev-node"></div>
+            <button class="ghost">
+              <span class="pin" style="top:-9px;left:6px">8</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Nothing planned yet — add something
+            </button>
+          </div>
+          <div class="ev">
+            <div class="ev-time"></div>
+            <div class="ev-node"></div>
+            <div class="ev-card suggest">
+              <div class="ev-head">
+                <span class="tile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 3.6L17 8l-3.6 1.4L12 13l-1.4-3.6L7 8l3.6-1.4z"/><path d="M18 15l.7 1.8 1.8.7-1.8.7L18 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg></span>
+                <div>
+                  <div class="ev-title">Khao Yai National Park</div>
+                  <div class="ev-sub">25 min from your hotel · opens 06:00</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="day">
+        <div class="day-head"><b>Day 3</b><span>Mon 22 Jul</span><em>Khao Yai</em></div>
+        <div class="stay-strip">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7v11M3 13h18v5M21 18v-5a3 3 0 0 0-3-3h-6v3"/><circle cx="7.2" cy="10.6" r="1.9"/></svg>
+          Mövenpick Khao Yai
+          <span class="n num">Night 3 of 6</span>
+        </div>
+        <div class="rail" style="padding-top:0">
+          <div class="ev">
+            <div class="ev-time"></div>
+            <div class="ev-node"></div>
+            <button class="ghost">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Nothing planned yet — add something
+            </button>
+          </div>
+        </div>
+      </section>
+      <div class="spacer"></div>
+    </div>
+    <div class="dock">
+      <span class="pin" style="top:2px;left:22px">9</span>
+      <button class="btn-primary amber"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> Add to Day 1</button>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>What changed</h3>
+    <div class="sub">Itinerary · the timeline was fighting the timezone and the hotels</div>
+    <ul>
+      <li><span class="n">1</span><span>Title split: eyebrow <b>Thailand</b>, headline <b>Bangkok &amp; Khao Yai</b>. No parenthetical, no two-line wrap, and Fraunces’ ampersand finally gets to be a feature.</span></li>
+      <li><span class="n">2</span><span>Tabs stick under the status bar; day headers stick under the tabs. On a 7-day trip you always know where you are.</span></li>
+      <li><span class="n">3</span><span>Traveller filter drops from ~90px to a 56px avatar row. The “Showing plans for” label was doing the job the chips already did.</span></li>
+      <li><span class="n">4</span><span>Both hotels are booked for all 6 nights — that’s a conflict, not content. <b>Say so once, at the top,</b> and flag the offending cards.</span></li>
+      <li><span class="n">5</span><span>The repeated “Staying at X — night 2 of 6” rows collapse into <b>one muted strip under the day header</b>. Lodging is context, not an event.</span></li>
+      <li><span class="n">6</span><span>Timezone changes become <b>rail markers</b> — a hairline break in the timeline — instead of floating chips with no anchor.</span></li>
+      <li><span class="n">7</span><span>Flights render as a <b>boarding pass</b>: both local times, duration, perforated footer for “lands 14:00 · clocks back 1h”. The arrival note belongs to the flight, not to the day. Day 1 now reads in true chronological order — the flight that brings you into Thailand comes before the car and hotel it precedes.</span></li>
+      <li><span class="n">8</span><span>Empty days get an invitation, plus an optional suggestion card (new idea — kill it if you don’t want a recommendations surface).</span></li>
+      <li><span class="n">9</span><span>The FAB was truncating hotel names. It becomes a <b>contextual dock</b> — “Add to Day 1” follows the day you’re looking at.</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════════════ 3 · ADD ITEM ══════════════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>Add a flight</b><span>Sheet</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen sheet-bg">
+      <div class="statusbar"><span class="num">7:14</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="sheet-head">
+        <div class="grabber"></div>
+        <button class="link">Cancel</button>
+        <div class="sheet-title"><b>Add a flight</b><span>Bangkok &amp; Khao Yai</span></div>
+        <button class="link strong">Save</button>
+      </div>
+
+      <div class="pad">
+        <button class="smart">
+          <span class="pin">1</span>
+          <span class="tile"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 3.6L17 8l-3.6 1.4L12 13l-1.4-3.6L7 8l3.6-1.4z"/><path d="M18 15l.7 1.8 1.8.7-1.8.7L18 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg></span>
+          <div>
+            <b>Paste a booking email</b>
+            <span>Fills every field below in one tap</span>
+          </div>
+        </button>
+
+        <div class="type-rail">
+          <span class="pin">2</span>
+          <button class="type on">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M10.4 3.4a1.8 1.8 0 0 1 3.2 0v5.3l7.4 4.3v2.3l-7.4-2.1v4.3l2.4 1.8v1.7L12 20.1l-4 .9v-1.7l2.4-1.8v-4.3L3 15.3V13l7.4-4.3z"/></svg>
+            <span>Flight</span>
+          </button>
+          <button class="type">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7v11M3 13h18v5M21 18v-5a3 3 0 0 0-3-3h-6v3"/><circle cx="7.2" cy="10.6" r="1.9"/></svg>
+            <span>Stay</span>
+          </button>
+          <button class="type">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.4"/><path d="M8.6 7 10 4.6h4L15.4 7"/></svg>
+            <span>Do</span>
+          </button>
+          <button class="type">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 3v6a2.4 2.4 0 0 0 4.8 0V3M8.4 11.4V21"/><path d="M17.4 3c-1.6 1.4-2.2 3.2-2.2 5.2s.7 3.2 2.2 3.2V21"/></svg>
+            <span>Eat</span>
+          </button>
+          <button class="type">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 10.5 6.7 6.2A2 2 0 0 1 8.6 5h6.8a2 2 0 0 1 1.9 1.2l1.7 4.3"/><rect x="2.8" y="10.5" width="18.4" height="6" rx="2"/><path d="M5.5 16.5V18M18.5 16.5V18"/></svg>
+            <span>Ride</span>
+          </button>
+        </div>
+
+        <div class="group">
+          <span class="mini-label">Flight</span>
+          <div class="field-card">
+            <div class="frow">
+              <span class="airline-logo">TG</span>
+              <input value="Thai Airways" placeholder="Airline">
+              <span class="val mono">TG639</span>
+            </div>
+            <div class="frow">
+              <label>Date</label>
+              <span class="val num">Fri 26 Jul 2024</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <span class="mini-label">Route</span>
+          <div class="bp-edit">
+            <span class="pin" style="top:-10px;left:8px">3</span>
+            <div class="bp-route">
+              <div class="port">
+                <input class="code" value="BKK">
+                <div class="city">Bangkok · Suvarnabhumi</div>
+                <div class="tline"><input class="time num" value="22:35"></div>
+                <button class="tzsel">
+                  GMT+7 · Bangkok
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <span class="pin" style="top:64px;left:-2px">4</span>
+              </div>
+              <div class="leg" style="padding-top:8px">
+                <div class="ln"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M10.4 3.4a1.8 1.8 0 0 1 3.2 0v5.3l7.4 4.3v2.3l-7.4-2.1v4.3l2.4 1.8v1.7L12 20.1l-4 .9v-1.7l2.4-1.8v-4.3L3 15.3V13l7.4-4.3z"/></svg></div>
+                <div class="dur num">2h 45m</div>
+              </div>
+              <div class="port r">
+                <input class="code" value="HKG">
+                <div class="city">Hong Kong Intl</div>
+                <div class="tline"><input class="time num" value="02:20"><span class="daybadge num">+1d</span></div>
+                <button class="tzsel">
+                  GMT+8 · Hong Kong
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <span class="pin" style="top:38px;right:-2px;left:auto">5</span>
+              </div>
+            </div>
+            <div class="bp-foot">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>
+              Lands Sat 27 Jul · clocks go forward 1h
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <details class="disc">
+            <span class="pin" style="top:-10px;left:8px">6</span>
+            <summary>
+              <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+              Seat, terminal, gate &amp; code
+              <span class="sum">14C · T1 · QK7P2M</span>
+            </summary>
+            <div class="triple">
+              <div><span class="mini-label">Seat</span><input value="14C"></div>
+              <div><span class="mini-label">Terminal</span><input value="1"></div>
+              <div><span class="mini-label">Gate</span><input placeholder="—"></div>
+            </div>
+            <div class="frow">
+              <label>Code</label>
+              <input class="mono" value="QK7P2M">
+            </div>
+          </details>
+        </div>
+
+        <div class="group">
+          <span class="mini-label">Who’s this for?</span>
+          <div class="who-grid">
+            <span class="pin" style="top:-24px;left:auto;right:0">7</span>
+            <button class="who-pick on"><i class="av-a">N</i>You</button>
+            <button class="who-pick on"><i class="av-b">S</i>Spouse</button>
+            <button class="who-pick"><i class="av-c">C</i>Child</button>
+            <button class="who-pick"><i class="av-d">C</i>Child</button>
+          </div>
+          <p class="helper">Nobody selected means it’s for the whole group.</p>
+        </div>
+      </div>
+      <div class="spacer"></div>
+    </div>
+    <div class="dock">
+      <span class="pin" style="top:2px;left:22px">8</span>
+      <button class="btn-primary amber">Save flight</button>
+      <button class="btn-icon" title="Save and add the return leg">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>
+      </button>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>What changed</h3>
+    <div class="sub">Add item · eleven stacked rows became one artifact</div>
+    <ul>
+      <li><span class="n">1</span><span><b>Paste first.</b> The data is already in a booking email — typing it twice is the actual pain. Manual entry stays as the fallback, not the default path.</span></li>
+      <li><span class="n">2</span><span>Type rail: equal tiles, one baseline (“Food” was sitting lower than its neighbours), verbs instead of nouns — <b>Do / Eat / Ride</b> reads as “what am I adding”.</span></li>
+      <li><span class="n">3</span><span>Route as a <b>boarding pass</b> instead of eight stacked fields. From/To sit side by side with the duration computed between them — the same object as the itinerary card, so the form previews its own output.</span></li>
+      <li><span class="n">4</span><span>Timezone lives <b>directly under the time it modifies</b>, not in a separate grey row whose association you had to infer.</span></li>
+      <li><span class="n">5</span><span>“+1 day” is anchored to the arrival time as a badge. It was floating unattached in the right margin.</span></li>
+      <li><span class="n">6</span><span>Seat, terminal, gate and code fold behind a disclosure with a summary line — optional most of the time, and it halves the scroll.</span></li>
+      <li><span class="n">7</span><span>Traveller chips get a real selected state. Helper text explains the empty-means-everyone rule once, below the control.</span></li>
+      <li><span class="n">8</span><span>Sticky save (disabled until valid) plus <b>save &amp; add the return leg</b> — flights come in pairs.</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════════════ 4 · IMPORT ══════════════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>Import complete</b><span>Result sheet</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen sheet-bg">
+      <div class="statusbar"><span class="num">7:12</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="sheet-head">
+        <div class="grabber"></div>
+        <span style="width:44px"></span>
+        <div class="sheet-title"><b>Gmail import</b><span>navbytes@gmail.com</span></div>
+        <button class="link strong">Done</button>
+      </div>
+
+      <div class="pad">
+        <div class="import-hero">
+          <span class="pin" style="top:10px;left:0">1</span>
+          <div class="tick"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17.5 19.5 7"/></svg></div>
+          <h1 class="display">Import complete</h1>
+          <p>Six years of booking emails, sorted into trips.</p>
+        </div>
+
+        <div class="stats">
+          <span class="pin">2</span>
+          <div class="stat"><b class="num">20</b><span>Trips</span></div>
+          <div class="stat"><b class="num">67</b><span>Items</span></div>
+          <div class="stat flag"><b class="num">43</b><span>Travellers</span></div>
+        </div>
+
+        <div class="alert" style="margin-bottom:22px">
+          <span class="pin">3</span>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 5.5a3 3 0 0 1 0 5"/><path d="M18 19a6 6 0 0 0-2-4.4"/></svg>
+          <div style="flex:1">
+            <b>43 travellers looks high</b>
+            <p>12 profiles share a name or email across trips — they’re probably the same people.</p>
+            <div class="acts"><button class="btn-sm">Review &amp; merge</button><button class="btn-ghost">Later</button></div>
+          </div>
+        </div>
+
+        <div class="sec-head" style="margin-top:0"><span class="mini-label">Skipped · 5</span><i></i></div>
+        <div class="list">
+          <span class="pin">4</span>
+          <div class="srow">
+            <div><div class="t">Parents’ visit to Hong Kong</div><span class="reason">Cancelled</span></div>
+            <button class="link sm">Import anyway</button>
+          </div>
+          <div class="srow">
+            <div><div class="t">Bangkok</div><span class="reason">Cancelled</span></div>
+            <button class="link sm">Import anyway</button>
+          </div>
+          <div class="srow">
+            <div><div class="t">Patna–Kolkata</div><span class="reason">Cancelled</span></div>
+            <button class="link sm">Import anyway</button>
+          </div>
+          <div class="srow">
+            <div><div class="t">Singapore</div><span class="reason">Cancelled</span></div>
+            <button class="link sm">Import anyway</button>
+          </div>
+          <div class="srow">
+            <div><div class="t">IndiGo booking</div><span class="reason miss">No dates</span></div>
+            <button class="link sm">Add dates</button>
+          </div>
+        </div>
+
+        <div class="foot-card">
+          <span class="pin">5</span>
+          <b>Trip notes stayed in Gmail</b>
+          <p>Tripto doesn’t store trip-level notes yet, so the 20 originals are untouched and labelled <code>Tripto/Imported</code>.</p>
+          <button class="link sm">Open the label in Gmail →</button>
+        </div>
+      </div>
+      <div class="spacer"></div>
+    </div>
+    <div class="dock">
+      <span class="pin" style="top:2px;left:22px">6</span>
+      <button class="btn-primary amber">See your 20 trips</button>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>What changed</h3>
+    <div class="sub">Import · a report that ends in a dead end becomes one that ends in an action</div>
+    <ul>
+      <li><span class="n">1</span><span>Branded sheet, not raw system UI. This is the payoff moment of the whole onboarding — <b>give it a headline and a heartbeat</b>.</span></li>
+      <li><span class="n">2</span><span>Stat tiles, not a settings list with right-aligned numbers. Fraunces numerals, tabular figures.</span></li>
+      <li><span class="n">3</span><span>43 travellers from 20 trips is a <b>smell</b>. The import knows it; say so and offer the merge before the person finds duplicate avatars scattered across their trips.</span></li>
+      <li><span class="n">4</span><span>Every skipped row gets a recourse — <b>Import anyway</b>, <b>Add dates</b>. A list of things you refused to do, with no way to override, is a wall.</span></li>
+      <li><span class="n">5</span><span>The notes limitation becomes a recovery path (a Gmail label) instead of an apology. Errors explain what happened and how to fix it.</span></li>
+      <li><span class="n">6</span><span>One primary action out, and it names the reward: <b>See your 20 trips</b>.</span></li>
+    </ul>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<section class="spec">
+  <div class="card-dark">
+    <h3>Palette</h3>
+    <div class="swatches">
+      <div class="sw"><i style="background:#161533"></i><b>Ink</b><span>#161533</span></div>
+      <div class="sw"><i style="background:#FBF7F1"></i><b>Ivory</b><span>#FBF7F1</span></div>
+      <div class="sw"><i style="background:#E58A3C"></i><b>Amber</b><span>#E58A3C</span></div>
+      <div class="sw"><i style="background:#6E6A92"></i><b>Muted</b><span>#6E6A92</span></div>
+      <div class="sw"><i style="background:#BE5138"></i><b>Clay</b><span>#BE5138</span></div>
+      <div class="sw"><i style="background:#4E7C6A"></i><b>Sage</b><span>#4E7C6A</span></div>
+    </div>
+    <p style="margin-top:14px">Amber is the only saturated colour and it means <b>“your attention is needed or rewarded”</b> — countdowns, the active tab, the primary action. Clay is conflict. Sage is done. Nothing else gets to be colourful.</p>
+  </div>
+
+  <div class="card-dark">
+    <h3>Type</h3>
+    <ul class="scale">
+      <li>Fraunces 600 · trip names, headlines <span>34 / 32 / 30</span></li>
+      <li>Fraunces 600 · airport codes, stat numerals <span>24–32</span></li>
+      <li>Sofia Sans 700 · titles, times <span>14.5 / 13</span></li>
+      <li>Sofia Sans 600 · body, subtitles <span>12.5</span></li>
+      <li>Sofia Sans 800 · eyebrows, all-caps <span>10–11 / .14em</span></li>
+    </ul>
+    <p style="margin-top:12px">Every clock, date, seat and count uses <b>tabular figures</b>. A timeline where the digits don't line up is a timeline you don't trust.</p>
+  </div>
+
+  <div class="card-dark">
+    <h3>Motion</h3>
+    <ul>
+      <li>Trip card → detail: the cover expands into the hero, the title travels. One shared element, nothing else moves.</li>
+      <li>Timezone marker draws its hairline left-to-right on first appearance in the viewport (140ms). Once. Never again.</li>
+      <li>Paste → fields populate top-to-bottom with a 30ms stagger, so you can see what it filled in.</li>
+      <li>Merge duplicates: the second card slides under the first and the stack settles. The undo toast lives for 6s.</li>
+    </ul>
+  </div>
+
+  <div class="card-dark">
+    <h3>Sort rule</h3>
+    <p style="margin-bottom:10px">One comparator, no special cases. A live trip falls out at position 0 on its own.</p>
+<pre>let ahead = trips
+  .filter { $0.endsOn &gt;= today }
+  .sorted { $0.startsOn &lt; $1.startsOn }   <span class="c">// nearest first</span>
+
+let been  = trips
+  .filter { $0.endsOn &lt; today }
+  .sorted { $0.endsOn &gt; $1.endsOn }       <span class="c">// most recent first</span>
+
+list = ahead + been                       <span class="c">// one section list</span></pre>
+    <p><b>today</b> is end-of-day in the <b>trip's</b> timezone, not the device's. Flying home on the 26th means the trip is still live at 23:00 in Naha even if your phone has already flipped over in Hong Kong.</p>
+  </div>
+
+  <div class="card-dark">
+    <h3>Open questions</h3>
+    <ul>
+      <li>Is a split stay (two hotels, one trip, different nights) real for you? If so, the stay strip needs a two-line variant and the conflict rule needs a date-overlap test, not a same-trip test.</li>
+      <li>Is <b>Bookings</b> a filtered view of itinerary items, or its own record type? If it's a view, the boarding-pass card is shared and this all gets cheaper.</li>
+      <li>Where do traveller names come from — Gmail, manual entry, or an invite? The “add a name” affordance depends on the answer.</li>
+      <li>Covers: destination-seeded mesh (works offline, no licensing) or photos (needs a source and a fetch). I've assumed mesh.</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  document.getElementById('t').addEventListener('click', function(){
+    document.body.classList.toggle('notes-on');
+  });
+  document.querySelectorAll('.js-scroll').forEach(function(el){
+    el.addEventListener('scroll', function(){
+      el.classList.toggle('scrolled', el.scrollTop > 150);
+    }, {passive:true});
+  });
+</script>
+</body>
+</html>

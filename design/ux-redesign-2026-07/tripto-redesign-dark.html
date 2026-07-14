@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tripto — dark screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Sofia+Sans:wght@300..800&display=swap" rel="stylesheet">
+<style>
+/* ─────────────────────────────────────────────
+   TOKENS — "Dusk Departure", night values
+   ───────────────────────────────────────────── */
+:root{
+  /* screen surfaces */
+  --night:#12122A;        /* canvas   (light: #FBF7F1 ivory) */
+  --surf:#1C1B3C;         /* card     (light: #FFFEFB paper) */
+  --surf-2:#272552;       /* input    (light: #EFEEF8 lilac) */
+  --edge:rgba(255,255,255,.09);
+  --edge-2:rgba(255,255,255,.18);
+  --txt:#EFECF8;          /* ink      (light: #161533) */
+  --dim:#A6A1C6;          /* muted    (light: #6E6A92) */
+  --dim-2:#8681A9;        /* muted-2  (light: #9B98B5) */
+
+  /* accents — identical hues, tuned for contrast on night */
+  --amber:#E58A3C;        /* fills */
+  --amber-t:#F2A45E;      /* text & icons on dark */
+  --amber-wash:rgba(229,138,60,.15);
+  --clay-t:#EA7C63;
+  --clay-wash:rgba(234,124,99,.13);
+  --sage-t:#6FB394;
+
+  --r-l:24px; --r-m:18px; --r-s:12px;
+  --sh:0 18px 40px -22px rgba(0,0,0,.7);
+
+  --display:'Fraunces','Iowan Old Style','Palatino Linotype',Georgia,serif;
+  --ui:'Sofia Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:var(--ui);color:#EDE9F5;
+  background:
+    radial-gradient(120% 80% at 15% 0%, #262452 0%, rgba(38,36,82,0) 55%),
+    radial-gradient(90% 70% at 92% 8%, #3C2B54 0%, rgba(60,43,84,0) 60%),
+    #08081A;
+  padding:44px 22px 90px;min-height:100vh;
+}
+::selection{background:var(--amber);color:#241304}
+
+/* page chrome */
+.page-head{max-width:1180px;margin:0 auto 34px}
+.kicker{font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#F6C48A}
+.page-head h1{font-family:var(--display);font-size:clamp(28px,5vw,44px);font-weight:600;letter-spacing:-.02em;margin:12px 0 10px;color:#fff}
+.page-head p{color:#A7A2C6;line-height:1.6;max-width:66ch;font-size:15px}
+.page-head p + p{margin-top:10px}
+.head-row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:20px}
+.toggle{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#EDE9F5;font:600 13px var(--ui);
+  padding:9px 16px;border-radius:999px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.toggle:hover{background:rgba(255,255,255,.12)}
+.toggle .dot{width:7px;height:7px;border-radius:50%;background:var(--amber)}
+body:not(.notes-on) .toggle .dot{background:rgba(255,255,255,.3)}
+.hint{font-size:12.5px;color:#8E89AF}
+
+/* deck */
+.deck{display:flex;gap:46px;overflow-x:auto;padding:10px 2px 30px;scroll-snap-type:x proximity;max-width:1180px;margin:0 auto}
+.deck::-webkit-scrollbar{height:8px}
+.deck::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:9px}
+.stage{flex:0 0 auto;width:390px;scroll-snap-align:center}
+.stage-cap{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.stage-cap b{font-family:var(--display);font-size:20px;font-weight:600;color:#fff}
+.stage-cap span{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#7E79A2;font-weight:600}
+
+/* device — needs a rim now that the screen is dark too */
+.phone{position:relative;width:390px;height:844px;padding:6px;border-radius:50px;background:#020209;
+  box-shadow:0 50px 100px -30px rgba(0,0,0,.9), inset 0 0 0 1px rgba(255,255,255,.16), 0 0 0 1px rgba(255,255,255,.05)}
+.island{position:absolute;top:16px;left:50%;transform:translateX(-50%);width:110px;height:32px;border-radius:20px;background:#020209;z-index:60}
+.hbar{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:rgba(255,255,255,.32);z-index:61}
+.screen{position:relative;width:100%;height:100%;border-radius:44px;overflow-y:auto;overflow-x:hidden;
+  background:var(--night);color:var(--txt);font-size:15px;line-height:1.35;scrollbar-width:none}
+.screen::-webkit-scrollbar{display:none}
+
+.statusbar{position:sticky;top:0;height:56px;margin-bottom:-56px;z-index:40;display:flex;align-items:flex-end;justify-content:space-between;
+  padding:0 26px 6px;font-weight:700;font-size:15px;color:var(--txt);
+  background:linear-gradient(var(--night) 62%, rgba(18,18,42,0))}
+.statusbar .sb-r{display:flex;gap:6px;align-items:center}
+.below-status{padding-top:56px}
+
+.grain::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.2;mix-blend-mode:overlay;border-radius:inherit;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='120' height='120' filter='url(%23n)' opacity='0.65'/></svg>");
+  background-size:170px 170px}
+.cover-dusk{background:
+  radial-gradient(120% 85% at 10% 6%, #6E5DA8 0%, rgba(110,93,168,0) 58%),
+  radial-gradient(95% 80% at 88% 16%, #2F5F7E 0%, rgba(47,95,126,0) 60%),
+  radial-gradient(130% 95% at 62% 104%, #E58A3C 0%, rgba(229,138,60,0) 52%),
+  linear-gradient(162deg,#2C2B58,#151530)}
+
+/* type */
+.display{font-family:var(--display);font-weight:600;letter-spacing:-.02em}
+.mini-label{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--dim-2)}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.pad{padding:0 20px}
+.helper{font-size:12px;color:var(--dim-2);margin-top:10px;line-height:1.5}
+
+/* pins */
+.pin{position:absolute;left:8px;top:-10px;width:21px;height:21px;border-radius:7px;background:var(--amber);color:#301A05;
+  font:800 11.5px/21px var(--ui);text-align:center;z-index:9;box-shadow:0 2px 8px rgba(0,0,0,.5);pointer-events:none}
+.pin.tr{left:auto;right:10px}
+body:not(.notes-on) .pin{display:none}
+
+/* primitives */
+.card{position:relative;background:var(--surf);border:1px solid var(--edge);border-radius:var(--r-m);overflow:hidden}
+.sec-head{display:flex;align-items:center;gap:10px;margin:24px 0 10px;position:relative}
+.sec-head i{flex:1;height:1px;background:var(--edge)}
+.btn-primary{flex:1;height:52px;border:0;border-radius:16px;background:var(--amber);color:#2B1706;font:700 15.5px var(--ui);
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;cursor:pointer}
+.btn-icon{width:52px;height:52px;border-radius:16px;border:1px solid var(--edge-2);background:var(--surf);color:var(--txt);display:grid;place-items:center;cursor:pointer}
+.btn-sm{border:0;background:var(--amber);color:#2B1706;font:700 12.5px var(--ui);padding:9px 14px;border-radius:10px;cursor:pointer;white-space:nowrap}
+.btn-ghost{border:1px solid var(--edge-2);background:transparent;color:var(--txt);font:600 12.5px var(--ui);padding:8px 13px;border-radius:10px;cursor:pointer;white-space:nowrap}
+.link{border:0;background:none;color:var(--dim);font:600 15px var(--ui);cursor:pointer;padding:0}
+.link.strong{color:var(--amber-t);font-weight:700}
+.link.sm{font-size:12.5px;color:var(--amber-t);font-weight:700}
+.link.danger{color:var(--clay-t);font-weight:700;font-size:13px}
+.dock{position:absolute;left:6px;right:6px;bottom:6px;z-index:50;display:flex;gap:10px;align-items:center;
+  padding:14px 20px 26px;border-radius:0 0 44px 44px;background:linear-gradient(rgba(18,18,42,0), var(--night) 34%);backdrop-filter:blur(8px)}
+.spacer{height:118px}
+.av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:800 11px var(--ui);color:#fff;font-style:normal;flex:0 0 auto}
+.av-a{background:#E58A3C} .av-b{background:#4E7C6A} .av-c{background:#5A57A8} .av-d{background:#BE5138} .av-e{background:#8A6BA8}
+
+.sheet-head{position:sticky;top:56px;z-index:22;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:8px 20px 12px;background:var(--night);border-bottom:1px solid var(--edge)}
+.sheet-title{text-align:center}
+.sheet-title b{display:block;font-size:15px;font-weight:700}
+.sheet-title span{font-size:11px;color:var(--dim-2);font-weight:600}
+.grabber{position:absolute;top:-4px;left:50%;transform:translateX(-50%);width:38px;height:5px;border-radius:3px;background:var(--edge-2)}
+
+/* rows */
+.row{display:flex;align-items:center;gap:11px;padding:14px;border-bottom:1px solid var(--edge);width:100%;background:none;border-left:0;border-right:0;border-top:0;
+  color:var(--txt);text-align:left;cursor:pointer}
+.row:last-child{border-bottom:0}
+.row .lbl{font-size:14.5px;font-weight:600}
+.row .val{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:var(--dim)}
+.row .chev{color:var(--dim-2);flex:0 0 auto}
+.row .tile{width:32px;height:32px;border-radius:10px;background:var(--surf-2);display:grid;place-items:center;color:var(--dim);flex:0 0 auto}
+
+/* ═════════ 1 · NEW TRIP ═════════ */
+.preview{position:relative;border-radius:var(--r-l);overflow:hidden;padding:16px;min-height:150px;display:flex;flex-direction:column;
+  justify-content:flex-end;box-shadow:var(--sh);margin-bottom:6px}
+.shuffle{position:absolute;top:12px;right:12px;z-index:3;width:32px;height:32px;border-radius:10px;border:1px solid rgba(255,255,255,.2);
+  background:rgba(10,9,26,.4);backdrop-filter:blur(6px);color:#fff;display:grid;place-items:center;cursor:pointer}
+.pv-inner{position:relative;z-index:2}
+.pv-title{width:100%;border:0;background:none;outline:none;color:#fff;font-family:var(--display);font-weight:600;font-size:30px;
+  letter-spacing:-.02em;padding:0 0 3px;border-bottom:1px dashed rgba(255,255,255,.4)}
+.pv-meta{margin-top:9px;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.78)}
+.pv-cap{font-size:11.5px;color:var(--dim-2);margin-bottom:20px;font-weight:600}
+
+.stops{position:relative;padding:4px 0}
+.stops::before{content:"";position:absolute;left:20px;top:26px;bottom:44px;width:1.5px;background:var(--edge-2)}
+.stop{display:flex;align-items:center;gap:12px;padding:11px 14px}
+.stop .dot{position:relative;z-index:2;width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3px var(--amber-wash);flex:0 0 auto;margin-left:2px}
+.stop .nm{font-size:15px;font-weight:700}
+.stop .nm em{font-style:normal;font-weight:500;color:var(--dim-2);font-size:12.5px;margin-left:6px}
+.stop .x{margin-left:auto;width:26px;height:26px;border-radius:8px;border:0;background:var(--surf-2);color:var(--dim);display:grid;place-items:center;cursor:pointer}
+.add-stop{display:flex;align-items:center;gap:12px;padding:11px 14px;width:100%;border:0;background:none;cursor:pointer;
+  color:var(--amber-t);font:700 14px var(--ui);text-align:left}
+.add-stop .dot{width:9px;height:9px;border-radius:50%;border:1.5px dashed var(--amber-t);margin-left:2px;flex:0 0 auto;background:var(--surf)}
+
+.chipbar{display:flex;gap:8px;margin-top:10px}
+.chip{border:1px solid var(--edge-2);background:transparent;color:var(--dim);font:600 12.5px var(--ui);padding:7px 13px;border-radius:999px;cursor:pointer}
+.chip.on{background:var(--amber-wash);border-color:var(--amber);color:var(--amber-t);font-weight:700}
+
+.who-grid{display:flex;flex-wrap:wrap;gap:8px}
+.who-pick{display:inline-flex;align-items:center;gap:7px;padding:7px 13px 7px 7px;border-radius:999px;border:1px solid var(--edge-2);
+  background:var(--surf);font:600 13px var(--ui);color:var(--dim);cursor:pointer}
+.who-pick.on{background:var(--amber-wash);border-color:var(--amber);color:var(--txt)}
+.who-pick i{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;font:800 10px var(--ui);font-style:normal}
+.who-pick.add{padding:7px 13px;color:var(--amber-t);font-weight:700;border-style:dashed}
+
+.alt-route{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:26px;padding:13px;border-radius:14px;
+  border:1px dashed var(--edge-2);background:none;color:var(--dim);font:600 13.5px var(--ui);cursor:pointer}
+.alt-route svg{color:var(--amber-t)}
+
+/* ═════════ 2 · SHARE ═════════ */
+.sc-h1{font-size:34px;line-height:1.05;margin-top:20px}
+.sc-sub{font-size:13px;color:var(--dim-2);font-weight:600;margin-top:5px}
+.back{width:36px;height:36px;border-radius:50%;border:1px solid var(--edge-2);background:var(--surf);color:var(--txt);display:grid;place-items:center;cursor:pointer}
+
+.prow{display:flex;align-items:center;gap:11px;padding:13px 14px;border-bottom:1px solid var(--edge)}
+.prow:last-child{border-bottom:0}
+.prow .av{width:32px;height:32px;font-size:12px}
+.pbody{min-width:0}
+.pbody .t{display:block;font-size:14.5px;font-weight:700;letter-spacing:-.01em}
+.pbody .t em{font-style:normal;font-weight:500;color:var(--dim-2)}
+.pbody .s{display:block;font-size:12px;color:var(--dim-2);margin-top:2px;font-weight:500}
+.pbody .s.wait{color:var(--amber-t);font-weight:700}
+.pbody .s.wait::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;vertical-align:1px}
+.rolechip{margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:6px 8px 6px 9px;border-radius:9px;border:1px solid var(--edge-2);
+  background:var(--surf-2);color:var(--dim);font:700 11.5px var(--ui);cursor:pointer;flex:0 0 auto}
+.rolechip svg{color:var(--dim-2)}
+.rolechip.you{background:var(--amber-wash);border-color:rgba(229,138,60,.4);color:var(--amber-t)}
+.rolechip.you svg{color:var(--amber-t)}
+
+details.disc{position:relative;background:var(--surf);border:1px solid var(--edge);border-radius:var(--r-m);overflow:hidden;margin-top:12px}
+details.disc summary{list-style:none;display:flex;align-items:center;gap:10px;padding:14px;cursor:pointer;font-size:14px;font-weight:600}
+details.disc summary::-webkit-details-marker{display:none}
+details.disc summary .chev{margin-left:auto;color:var(--dim-2);transition:transform .2s}
+details.disc[open] summary .chev{transform:rotate(90deg)}
+details.disc[open] summary{border-bottom:1px solid var(--edge)}
+.rl{display:flex;gap:11px;padding:12px 14px;border-bottom:1px solid var(--edge)}
+.rl:last-child{border-bottom:0}
+.rl .ic{width:28px;height:28px;border-radius:9px;background:var(--surf-2);display:grid;place-items:center;color:var(--dim);flex:0 0 auto}
+.rl b{display:block;font-size:13.5px;font-weight:700}
+.rl span{display:block;font-size:12px;color:var(--dim-2);margin-top:2px;line-height:1.4}
+
+.pubtop{display:flex;align-items:center;gap:11px;padding:14px}
+.switch{margin-left:auto;width:46px;height:27px;border-radius:999px;background:var(--surf-2);position:relative;flex:0 0 auto;border:1px solid var(--edge-2);cursor:pointer}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:50%;background:var(--dim-2);transition:.2s}
+.switch.on{background:var(--amber);border-color:var(--amber)}
+.switch.on::after{left:21px;background:#fff}
+.urlrow{display:flex;align-items:center;gap:10px;margin:0 14px;padding:11px 12px;border-radius:12px;background:var(--surf-2)}
+.urlrow .u{font-size:13px;font-weight:600;color:var(--txt);letter-spacing:.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.urlrow .btn-ghost{margin-left:auto;padding:6px 11px}
+.lockline{display:flex;align-items:center;gap:8px;padding:12px 14px 4px;font-size:12px;color:var(--sage-t);font-weight:600}
+.pubfoot{padding:8px 14px 14px}
+
+/* ═════════ 3 · SETTINGS ═════════ */
+.set-h1{font-size:34px;line-height:1.05;margin:20px 0 4px}
+.you{display:flex;align-items:center;gap:14px;padding:16px 14px}
+.you .big{width:56px;height:56px;border-radius:50%;background:var(--amber);color:#2B1706;display:grid;place-items:center;
+  font-family:var(--display);font-weight:600;font-size:24px;flex:0 0 auto}
+.name-field{flex:1;min-width:0}
+.name-field .mini-label{display:block;margin-bottom:4px}
+.name-field input{width:100%;border:0;background:none;outline:none;color:var(--txt);font:600 20px var(--ui);
+  padding:0 0 4px;border-bottom:1px dashed var(--edge-2)}
+.colors{display:flex;align-items:center;gap:10px;padding:14px;border-top:1px solid var(--edge)}
+.colors .mini-label{margin-right:auto}
+.sw-c{width:26px;height:26px;border-radius:50%;border:0;cursor:pointer;position:relative}
+.sw-c.on::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--txt)}
+
+.seg{margin-left:auto;display:flex;background:var(--surf-2);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:none;color:var(--dim);font:700 12px var(--ui);padding:6px 11px;border-radius:8px;cursor:pointer}
+.seg button.on{background:var(--amber);color:#2B1706}
+
+.feature{position:relative;display:flex;gap:12px;padding:15px 14px;border-radius:var(--r-m);
+  background:var(--amber-wash);border:1px solid rgba(229,138,60,.35)}
+.feature .tile{width:34px;height:34px;border-radius:11px;background:var(--amber);color:#2B1706;display:grid;place-items:center;flex:0 0 auto}
+.feature b{display:block;font-size:14px;font-weight:700}
+.feature p{font-size:12.5px;color:var(--dim);line-height:1.5;margin:4px 0 11px}
+
+.danger-zone{margin-top:30px;padding-top:18px;border-top:1px solid var(--edge)}
+.danger-zone p{font-size:12px;color:var(--dim-2);line-height:1.55;margin-top:7px;max-width:34ch}
+.about .row .val{color:var(--dim-2);font-weight:600}
+.fontline{padding:12px 14px;font-size:11.5px;color:var(--dim-2);line-height:1.5}
+
+/* notes */
+.notes{margin-top:22px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:18px 18px 8px}
+.notes h3{font-family:var(--display);font-size:18px;font-weight:600;color:#fff}
+.notes .sub{font-size:12px;color:#8E89AF;margin:3px 0 12px}
+.notes ul{list-style:none}
+.notes li{display:flex;gap:11px;padding:10px 0;border-top:1px solid rgba(255,255,255,.08);font-size:13.5px;line-height:1.45;color:#CFCADF}
+.notes li b{color:#fff;font-weight:700}
+.notes li .n{flex:0 0 auto;width:20px;height:20px;border-radius:6px;background:var(--amber);color:#301A05;font:800 11px/20px var(--ui);text-align:center;margin-top:1px}
+body:not(.notes-on) .notes{display:none}
+
+/* spec */
+.spec{max-width:1180px;margin:36px auto 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:26px}
+.card-dark{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:22px}
+.card-dark h3{font-family:var(--display);font-size:19px;font-weight:600;color:#fff;margin-bottom:12px}
+.card-dark p{font-size:13.5px;color:#B6B1CE;line-height:1.55}
+.card-dark ul{list-style:none;margin-top:4px}
+.card-dark ul li{padding:9px 0 9px 16px;position:relative;border-top:1px solid rgba(255,255,255,.08);font-size:13.5px;color:#CFCADF;line-height:1.5}
+.card-dark ul li:first-child{border-top:0}
+.card-dark ul li::before{content:"";position:absolute;left:0;top:16px;width:5px;height:5px;border-radius:50%;background:var(--amber)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#8E89AF;padding:0 8px 9px 0}
+td{padding:9px 8px 9px 0;border-top:1px solid rgba(255,255,255,.08);color:#CFCADF;vertical-align:middle}
+td b{color:#fff}
+td .sw2{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:7px;border:1px solid rgba(255,255,255,.14)}
+td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#A6A1C6}
+
+@media (max-width:900px){
+  body{padding:28px 14px 60px}
+  .deck{flex-direction:column;align-items:center;gap:24px;overflow-x:visible}
+  .stage{width:390px;max-width:100%}
+  .phone{transform:scale(.86);transform-origin:top center;margin-bottom:-112px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body class="notes-on">
+
+<header class="page-head">
+  <div class="kicker">Tripto · screen redesign · dark</div>
+  <h1>Dark mode isn't a colour scheme you inherit</h1>
+  <p>Right now light mode is Tripto — ivory, Fraunces, amber — and dark mode is iOS: black canvas, system blue links, system red destructive. Two products. These are the same components with the <b>night values of the same tokens</b>: amber is the only action colour, clay is the only destructive one, and Fraunces still shows up for anything you'd call a headline.</p>
+  <p>The other finding: Settings lets you choose an avatar <b>colour</b> but never lets you enter a <b>name</b>. That one missing field is why <span class="mono">pfn8wk7vfp</span> appears in your greeting, your traveller chips and your share sheet.</p>
+  <div class="head-row">
+    <button class="toggle" id="t"><span class="dot"></span> Design notes</button>
+    <span class="hint">Scroll inside each phone. Placeholder content where the screenshots didn't show it.</span>
+  </div>
+</header>
+
+<div class="deck">
+
+<!-- ══════════════ 1 · NEW TRIP ══════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>New trip</b><span>Sheet</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen">
+      <div class="statusbar"><span class="num">8:11</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="sheet-head">
+        <div class="grabber"></div>
+        <button class="link">Cancel</button>
+        <div class="sheet-title"><b>New trip</b></div>
+        <button class="link strong">Create</button>
+      </div>
+
+      <div class="pad" style="padding-top:18px">
+        <div class="preview cover-dusk grain">
+          <span class="pin tr" style="right:52px">1</span>
+          <button class="shuffle" title="Re-roll the cover">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h4l8 10h4"/><path d="M17 4l3 3-3 3"/><path d="M4 17h4l2-2.5"/><path d="M14 9.5 16 7"/><path d="M17 14l3 3-3 3"/></svg>
+          </button>
+          <div class="pv-inner">
+            <input class="pv-title" value="Bangkok &amp; Khao Yai">
+            <div class="pv-meta">Thailand · 20–26 Jul · 7 days · 4 travellers</div>
+          </div>
+        </div>
+        <div class="pv-cap">Your trip card, live. Tap the title to rename it.</div>
+
+        <div class="sec-head"><span class="mini-label">Where</span><i></i></div>
+        <div class="card stops">
+          <span class="pin">2</span>
+          <div class="stop">
+            <span class="dot"></span>
+            <span class="nm">Bangkok <em>Thailand</em></span>
+            <button class="x"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+          <div class="stop">
+            <span class="dot"></span>
+            <span class="nm">Khao Yai <em>Thailand</em></span>
+            <button class="x"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+          <button class="add-stop"><span class="dot"></span> Add a stop</button>
+        </div>
+
+        <div class="sec-head"><span class="mini-label">When</span><i></i></div>
+        <div class="card">
+          <span class="pin">3</span>
+          <button class="row">
+            <span class="tile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></span>
+            <span class="lbl">Dates</span>
+            <span class="val num">20 – 26 Jul <em style="font-style:normal;color:var(--dim-2)">· 6 nights</em></span>
+            <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+        <div class="chipbar"><button class="chip">Not sure yet</button></div>
+
+        <div class="sec-head"><span class="mini-label">Who's coming</span><i></i></div>
+        <div class="who-grid">
+          <span class="pin" style="top:-34px;left:auto;right:0">4</span>
+          <button class="who-pick on"><i class="av-a">N</i>You</button>
+          <button class="who-pick on"><i class="av-b">S</i>Spouse</button>
+          <button class="who-pick on"><i class="av-c">C</i>Child</button>
+          <button class="who-pick on"><i class="av-d">C</i>Child</button>
+          <button class="who-pick"><i class="av-e">F</i>Father</button>
+          <button class="who-pick add">+ Someone new</button>
+        </div>
+        <p class="helper">Anyone here can have plans assigned to them. You can invite them to edit once the trip exists.</p>
+
+        <button class="alt-route">
+          <span class="pin" style="top:-10px;left:8px">5</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 3.6L17 8l-3.6 1.4L12 13l-1.4-3.6L7 8l3.6-1.4z"/><path d="M18 15l.7 1.8 1.8.7-1.8.7L18 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg>
+          Start from a booking email instead
+        </button>
+      </div>
+      <div class="spacer"></div>
+    </div>
+    <div class="dock">
+      <span class="pin" style="top:2px;left:22px">6</span>
+      <button class="btn-primary">Create trip</button>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>What changed</h3>
+    <div class="sub">New trip · a form that shows you what it's making</div>
+    <ul>
+      <li><span class="n">1</span><span><b>The preview is the name field.</b> No “Trip name” input, no helper explaining that it's “the big title on your trip card” — the card is right there. Same principle as the boarding pass: the form previews its own output.</span></li>
+      <li><span class="n">2</span><span><b>Destination first, name second.</b> Your own data names trips after their stops — “Bangkok &amp; Khao Yai” — so pick the stops and the name composes itself. Editable, never blocking. Multi-stop is central to the itinerary and was missing from creation entirely.</span></li>
+      <li><span class="n">3</span><span>One date row instead of two, plus <b>Not sure yet</b>. Your importer already produces undated trips (the IndiGo booking), so the model allows it — the form should too. Defaulting to “today → today+6” is a guess that's wrong nearly every time.</span></li>
+      <li><span class="n">4</span><span><b>Trip type is cut.</b> Its own helper admitted it: “Tripto tailors its defaults as more features arrive.” Who's coming answers family-vs-solo <i>and</i> does real work — it pre-fills the traveller filter on the itinerary from minute one.</span></li>
+      <li><span class="n">5</span><span>Booking email as an alternate entry point. Half the time the reason you're creating a trip is that a confirmation just landed.</span></li>
+      <li><span class="n">6</span><span><b>Create is live from the start.</b> A sheet that opens with a dead button and “Enter a trip name to create the trip” is a form telling you off before you've done anything. An empty trip is a perfectly good trip.</span></li>
+      <li><span class="n">7</span><span>Cover derives from the destination, with a shuffle to re-roll — rather than three unexplained circles.</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════ 2 · SHARE ══════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>Share</b><span>Trip · people</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen">
+      <div class="statusbar"><span class="num">8:11</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="pad below-status">
+        <button class="back"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5 8 12l6.5 7"/></svg></button>
+        <h1 class="display sc-h1">Share</h1>
+        <div class="sc-sub">Bangkok &amp; Khao Yai</div>
+
+        <div class="sec-head"><span class="mini-label">On this trip · 5</span><i></i></div>
+        <div class="card">
+          <span class="pin">1</span>
+          <div class="prow">
+            <i class="av av-a">N</i>
+            <div class="pbody"><span class="t">Naveen <em>· you</em></span><span class="s">Created the trip</span></div>
+            <button class="rolechip you">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7.5 6.5 11 12 4.5 17.5 11 21 7.5V18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/></svg>
+              Organizer
+            </button>
+          </div>
+          <div class="prow">
+            <i class="av av-b">S</i>
+            <div class="pbody"><span class="t">Spouse</span><span class="s">Accepted · 2 Jul</span></div>
+            <button class="rolechip">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16z"/></svg>
+              Companion
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div class="prow">
+            <i class="av av-e">F</i>
+            <div class="pbody"><span class="t">Father</span><span class="s wait">Invited as Viewer · waiting</span></div>
+            <button class="rolechip">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>
+              Viewer
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div class="prow">
+            <span class="pin" style="top:-9px;left:6px">2</span>
+            <i class="av av-c">C</i>
+            <div class="pbody"><span class="t">Child</span><span class="s">Plans only · no account</span></div>
+            <button class="rolechip">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg>
+              Traveller
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div class="prow">
+            <i class="av av-d">C</i>
+            <div class="pbody"><span class="t">Child</span><span class="s">Plans only · no account</span></div>
+            <button class="rolechip">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg>
+              Traveller
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <details class="disc">
+          <span class="pin" style="top:-10px;left:8px">3</span>
+          <summary>
+            Who can do what
+            <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+          </summary>
+          <div class="rl">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7.5 6.5 11 12 4.5 17.5 11 21 7.5V18a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18z"/></svg></span>
+            <div><b>Organizer</b><span>Edits everything, manages people, deletes the trip.</span></div>
+          </div>
+          <div class="rl">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16z"/></svg></span>
+            <div><b>Companion</b><span>Adds and edits their own plans. Can't touch anyone else's.</span></div>
+          </div>
+          <div class="rl">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg></span>
+            <div><b>Viewer</b><span>Sees everything, changes nothing.</span></div>
+          </div>
+          <div class="rl">
+            <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg></span>
+            <div><b>Traveller</b><span>A name on the trip. Plans can be assigned to them. No access, no app, nothing to accept.</span></div>
+          </div>
+        </details>
+
+        <div class="sec-head"><span class="mini-label">Public page</span><i></i></div>
+        <div class="card">
+          <span class="pin">4</span>
+          <div class="pubtop">
+            <span class="tile" style="width:32px;height:32px;border-radius:10px;background:var(--surf-2);display:grid;place-items:center;color:var(--dim)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M14 10.5a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.3-1.3"/></svg>
+            </span>
+            <div class="pbody"><span class="t">Anyone with the link can view</span><span class="s">Opens in any browser. No app, no account.</span></div>
+            <span class="switch on"></span>
+          </div>
+          <div class="urlrow">
+            <span class="u mono">tripto.app/t/9f2kq</span>
+            <button class="btn-ghost">Copy</button>
+          </div>
+          <div class="lockline">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+            Booking codes and notes never appear here.
+          </div>
+          <div class="pubfoot"><button class="link danger">Turn off and revoke the link</button></div>
+        </div>
+      </div>
+      <div class="spacer"></div>
+    </div>
+    <div class="dock">
+      <span class="pin" style="top:2px;left:22px">5</span>
+      <button class="btn-primary">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        Invite someone
+      </button>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>What changed</h3>
+    <div class="sub">Share · three link products became one question</div>
+    <ul>
+      <li><span class="n">1</span><span><b>People first.</b> The screen's job is “who's on this trip and what can they do”. A link is the <i>mechanism</i>, not the feature — so the list leads and the invite is the primary action.</span></li>
+      <li><span class="n">2</span><span>“Father — No account yet — Can be assigned plans · no app needed” was three fragments explaining one thing. It's a role: <b>Traveller</b>. A name on the trip, plans can be assigned, no access. Say it once, in the same control as every other role.</span></li>
+      <li><span class="n">3</span><span>Four roles, <b>one control</b>. The chip <i>is</i> the picker — changing it to Companion or Viewer is what sends the invite. No separate invite button per row. Roles differ by icon and label, not by four new colours (amber stays reserved for attention — here, the waiting invite).</span></li>
+      <li><span class="n">4</span><span>The public page was the loudest thing on screen, but inviting your spouse is the common case. Flip the weight. It becomes a switch with a URL, a copy, and — new — a <b>revoke</b>. You could create that link but never take it back.</span></li>
+      <li><span class="n">5</span><span>“Your role: Organizer” card cut. It's a chip on your own row, which the list already had.</span></li>
+      <li><span class="n">6</span><span><b>Email import moved off this screen.</b> Getting <i>data</i> in and getting <i>people</i> in are different jobs — it's here only because both involve an address. It belongs beside “Paste a booking email” on the Add sheet: same feature, two input methods. The AI disclosure travels with it, and gets plainer: <i>forwarded mail is read by an AI service to find bookings, then deleted.</i></span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════ 3 · SETTINGS ══════════════ -->
+<div class="stage">
+  <div class="stage-cap"><b>Settings</b><span>Profile &amp; data</span></div>
+  <div class="phone">
+    <div class="island"></div>
+    <div class="screen">
+      <div class="statusbar"><span class="num">8:10</span><span class="sb-r">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4.2a10 10 0 0 1 14 0"/><path d="M3.6 6.9a6.4 6.4 0 0 1 8.8 0"/><path d="M6.2 9.5a2.7 2.7 0 0 1 3.6 0"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12"><rect x=".6" y=".6" width="20" height="10.8" rx="3.4" fill="none" stroke="currentColor" stroke-opacity=".4"/><rect x="2.2" y="2.2" width="15" height="7.6" rx="2" fill="currentColor"/><path d="M22.4 4v4c1-.4 1.4-1 1.4-2s-.4-1.6-1.4-2z" fill="currentColor" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="pad below-status">
+        <button class="back"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5 8 12l6.5 7"/></svg></button>
+        <h1 class="display set-h1">Settings</h1>
+
+        <div class="sec-head"><span class="mini-label">You</span><i></i></div>
+        <div class="card">
+          <span class="pin">1</span>
+          <div class="you">
+            <span class="big">N</span>
+            <span class="name-field">
+              <span class="mini-label">Your name</span>
+              <input value="Naveen">
+            </span>
+          </div>
+          <div class="colors">
+            <span class="mini-label">Avatar colour</span>
+            <button class="sw-c on" style="background:#E58A3C"></button>
+            <button class="sw-c" style="background:#4E7C6A"></button>
+            <button class="sw-c" style="background:#5A57A8"></button>
+            <button class="sw-c" style="background:#8A6BA8"></button>
+          </div>
+        </div>
+        <p class="helper">This is the name your family sees on shared trips — and the one Tripto greets you with.</p>
+
+        <div class="sec-head"><span class="mini-label">Travel</span><i></i></div>
+        <div class="card">
+          <span class="pin">2</span>
+          <button class="row">
+            <span class="tile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 6.5V12l3.5 2"/></svg></span>
+            <span class="lbl">Home timezone</span>
+            <span class="val">Hong Kong · GMT+8</span>
+            <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div class="row" style="cursor:default">
+            <span class="tile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></span>
+            <span class="lbl">Time format</span>
+            <span class="seg"><button class="on">24h</button><button>12h</button></span>
+          </div>
+        </div>
+        <p class="helper">Your itinerary does real timezone maths — “clocks go back 1h”, what counts as today. It needs to know where you normally are.</p>
+
+        <div class="sec-head"><span class="mini-label">Your trips</span><i></i></div>
+        <div class="feature">
+          <span class="pin">3</span>
+          <span class="tile"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 3.6L17 8l-3.6 1.4L12 13l-1.4-3.6L7 8l3.6-1.4z"/><path d="M18 15l.7 1.8 1.8.7-1.8.7L18 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg></span>
+          <div>
+            <b>Coming from another app?</b>
+            <p>Copy a prompt, paste it into any AI assistant along with your old trip data, and import whatever it gives back.</p>
+            <button class="btn-sm">Copy the prompt</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <span class="pin">4</span>
+          <button class="row">
+            <span class="tile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 11l4 4 4-4"/><path d="M5 15v4h14v-4"/></svg></span>
+            <span class="lbl">Import an archive</span>
+            <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <button class="row">
+            <span class="tile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="M8 8l4-4 4 4"/><path d="M5 15v4h14v-4"/></svg></span>
+            <span class="lbl">Export everything</span>
+            <span class="val num">20 trips · 67 items</span>
+            <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+
+        <div class="sec-head"><span class="mini-label">Account</span><i></i></div>
+        <div class="card">
+          <span class="pin">5</span>
+          <div class="row" style="cursor:default">
+            <span class="tile"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg></span>
+            <div>
+              <div class="lbl">Signed in with Apple</div>
+              <div style="font-size:11.5px;color:var(--dim-2);margin-top:2px" class="mono">pfn8wk7vfp@privaterelay.appleid.com</div>
+            </div>
+          </div>
+          <button class="row"><span class="lbl" style="color:var(--amber-t);font-weight:700">Sign out</span></button>
+        </div>
+
+        <div class="sec-head"><span class="mini-label">About</span><i></i></div>
+        <div class="card about">
+          <div class="row" style="cursor:default"><span class="lbl">Version</span><span class="val num">1.0 (2)</span></div>
+          <button class="row">
+            <span class="lbl">Privacy</span>
+            <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" style="margin-left:auto"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div class="fontline">Fraunces and Sofia Sans, under the SIL Open Font License 1.1.</div>
+        </div>
+
+        <div class="danger-zone">
+          <span class="pin" style="top:8px;left:0">6</span>
+          <button class="link danger" style="font-size:15px">Delete account</button>
+          <p>Deletes your account and the 20 trips you created. Trips other people are on stay with them. This can't be undone.</p>
+        </div>
+      </div>
+      <div class="spacer" style="height:40px"></div>
+    </div>
+    <div class="hbar"></div>
+  </div>
+
+  <div class="notes">
+    <h3>What changed</h3>
+    <div class="sub">Settings · the missing field, and a theme that forgot it had a brand</div>
+    <ul>
+      <li><span class="n">1</span><span><b>Your name.</b> The app lets you pick an avatar <i>colour</i> but never asks what you're called — so it falls back to the Apple relay ID. One text field kills <span class="mono">pfn8wk7vfp</span> in the greeting, the traveller chips and the share sheet at once.</span></li>
+      <li><span class="n">2</span><span><b>Home timezone belongs here.</b> The itinerary does real timezone work — “clocks go back 1h”, what counts as today — and every bit of it needs a baseline. Plus 12/24h, since the whole app is a timetable.</span></li>
+      <li><span class="n">3</span><span>“Copy conversion prompt” was the <i>third blue link</i> under a four-line paragraph. Bring your history from any other app via an LLM is the most distinctive idea in this build — it gets to be a feature, with a name a person would say out loud.</span></li>
+      <li><span class="n">4</span><span>Export says what it exports. “20 trips · 67 items” is the difference between trusting a backup and hoping.</span></li>
+      <li><span class="n">5</span><span>Account demoted below your data. <span class="mono">pfn8wk7vfp@privaterelay.appleid.com</span> is a credential, not an identity — it shouldn't be the second thing the app tells you about yourself.</span></li>
+      <li><span class="n">6</span><span>Delete is <b>below a rule, with no card fill</b> — a filled row reads as an invitation. And it answers the question people actually have: what happens to the trips other people are on?</span></li>
+      <li><span class="n">7</span><span>No system blue, no system red. Amber is the only action colour and clay the only destructive one, in both themes.</span></li>
+    </ul>
+  </div>
+</div>
+
+</div><!-- /deck -->
+
+<section class="spec">
+  <div class="card-dark">
+    <h3>One token set, two values</h3>
+    <table>
+      <tr><th>Token</th><th>Light</th><th>Night</th></tr>
+      <tr><td><b>canvas</b></td><td class="mono"><span class="sw2" style="background:#FBF7F1"></span>FBF7F1</td><td class="mono"><span class="sw2" style="background:#12122A"></span>12122A</td></tr>
+      <tr><td><b>surface</b></td><td class="mono"><span class="sw2" style="background:#FFFEFB"></span>FFFEFB</td><td class="mono"><span class="sw2" style="background:#1C1B3C"></span>1C1B3C</td></tr>
+      <tr><td><b>inset</b></td><td class="mono"><span class="sw2" style="background:#EFEEF8"></span>EFEEF8</td><td class="mono"><span class="sw2" style="background:#272552"></span>272552</td></tr>
+      <tr><td><b>text</b></td><td class="mono"><span class="sw2" style="background:#161533"></span>161533</td><td class="mono"><span class="sw2" style="background:#EFECF8"></span>EFECF8</td></tr>
+      <tr><td><b>muted</b></td><td class="mono"><span class="sw2" style="background:#6E6A92"></span>6E6A92</td><td class="mono"><span class="sw2" style="background:#A6A1C6"></span>A6A1C6</td></tr>
+      <tr><td><b>action</b></td><td class="mono"><span class="sw2" style="background:#C96F27"></span>C96F27</td><td class="mono"><span class="sw2" style="background:#F2A45E"></span>F2A45E</td></tr>
+      <tr><td><b>fill</b></td><td class="mono"><span class="sw2" style="background:#E58A3C"></span>E58A3C</td><td class="mono"><span class="sw2" style="background:#E58A3C"></span>E58A3C</td></tr>
+      <tr><td><b>danger</b></td><td class="mono"><span class="sw2" style="background:#BE5138"></span>BE5138</td><td class="mono"><span class="sw2" style="background:#EA7C63"></span>EA7C63</td></tr>
+    </table>
+    <p style="margin-top:12px">The <b>fill</b> amber is the same hue in both themes — it always carries dark ink on top, so it never needs to shift. Only the <i>text</i> amber brightens for contrast on night.</p>
+  </div>
+
+  <div class="card-dark">
+    <h3>The role model</h3>
+    <table>
+      <tr><th>Role</th><th>Access</th><th>Can</th></tr>
+      <tr><td><b>Organizer</b></td><td>Account</td><td>Everything, incl. people &amp; delete</td></tr>
+      <tr><td><b>Companion</b></td><td>Account</td><td>Add &amp; edit their own plans</td></tr>
+      <tr><td><b>Viewer</b></td><td>Account</td><td>Read</td></tr>
+      <tr><td><b>Traveller</b></td><td>None</td><td>Be assigned plans</td></tr>
+      <tr><td><b>Public page</b></td><td>Link</td><td>Read, minus codes &amp; notes</td></tr>
+    </table>
+    <p style="margin-top:12px">The first four are one dropdown on a person's row. The fifth is a property of the trip, not of a person — which is why it's a switch, not a role.</p>
+  </div>
+
+  <div class="card-dark">
+    <h3>Open questions</h3>
+    <ul>
+      <li><b>Delete account.</b> The copy promises “trips other people are on stay with them”. Is that true? If you're the Organizer and your spouse is a Companion, does the trip transfer, orphan, or vanish? Decide before that sentence ships.</li>
+      <li><b>Public link expiry.</b> A read-only family itinerary that lives forever is a slow leak. Auto-expire it, say, 30 days after the trip ends — with a nudge if someone's still opening it.</li>
+      <li><b>Traveller → Companion.</b> When a name on the trip finally gets an account, do the plans already assigned to them follow?</li>
+      <li><b>Theme.</b> Does the app follow the system, or should there be an in-app switch? Worth deciding now, because right now light and dark are two different products.</li>
+      <li><b>Trip type.</b> I cut it. If you're keeping it for analytics, infer it from who's on the trip rather than asking.</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  document.getElementById('t').addEventListener('click', function(){
+    document.body.classList.toggle('notes-on');
+  });
+</script>
+</body>
+</html>
