@@ -561,6 +561,13 @@ struct TZShiftChipRow: View, Equatable {
     let model: TZShiftModel
     /// See `TimelineCardRow.typeSize`'s doc comment.
     var typeSize: DynamicTypeSize = .large
+    /// UX-review N2: a `LazyVStack` row can be torn down and recreated on
+    /// scroll re-entry, resetting a plain private `@State` — "drawn
+    /// already" is hoisted to `ItineraryTabView.drawnMarkerIds` (keyed by
+    /// `model.id`) instead, which survives recycling. Neither participates
+    /// in `==` below, same as every other non-model/typeSize field here.
+    var hasDrawnBefore: Bool = false
+    var onDrawn: () -> Void = {}
 
     /// See `TimelineCardRow.ticketIconSize`'s doc comment.
     @ScaledMetric(relativeTo: .body) private var shiftIconSize: CGFloat = 10
@@ -571,7 +578,7 @@ struct TZShiftChipRow: View, Equatable {
     @State private var isDrawn = false
 
     private var isAXSize: Bool { typeSize.isAccessibilitySize }
-    private var isRevealed: Bool { reduceMotion || isDrawn }
+    private var isRevealed: Bool { reduceMotion || hasDrawnBefore || isDrawn }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
@@ -597,8 +604,9 @@ struct TZShiftChipRow: View, Equatable {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(model.text)
         .onAppear {
-            guard !reduceMotion, !isDrawn else { return }
+            guard !reduceMotion, !hasDrawnBefore, !isDrawn else { return }
             withAnimation(Motion.snappy) { isDrawn = true }
+            onDrawn()
         }
     }
 

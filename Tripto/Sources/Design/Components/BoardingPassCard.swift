@@ -21,7 +21,12 @@ struct BoardingPassCard: View {
         /// the mockup) — the a11y sentence prefers a real place name over
         /// spelling out a 3-letter code.
         let name: String?
-        let date: Date
+        /// UX-review D2: `nil` when this endpoint's own instant isn't known
+        /// yet (a flight with no `endsAt` — `startsAt` is never nil, so this
+        /// only ever affects `destination` in practice). The card then shows
+        /// only the code for that endpoint, with no time/zone/duration/day-
+        /// badge computed from a substitute instant that isn't real.
+        let date: Date?
         let timeZone: TimeZone
     }
 
@@ -37,8 +42,9 @@ struct BoardingPassCard: View {
     let model: Model
     /// D4 ("now" presence) parity: `CategoryIconTile`/`RailNode`'s dimmed
     /// pattern, applied here to the pass's own accent surfaces (shadow, the
-    /// leg/footer glyph, the "+Nd" badge) — never to the time/code text
-    /// itself, which AA requires stays untouched.
+    /// leg/footer glyph, the "+Nd" badge) and the airport codes themselves;
+    /// the time and GMT-offset labels stay `Palette.ink`/`Palette.slate`
+    /// regardless, matching every other card's untouched body text.
     var isPast: Bool = false
     /// See `TimelineCardRow.typeSize`'s doc comment — threaded through so a
     /// live Dynamic Type change is never missed by an ancestor's
@@ -57,9 +63,10 @@ struct BoardingPassCard: View {
     private var accentInk: Color { isPast ? Palette.slate : Palette.amberInk }
 
     private var dayBadgeText: String? {
-        BoardingPassMath.dayBadgeText(
-            departure: model.origin.date, departureTz: model.origin.timeZone,
-            arrival: model.destination.date, arrivalTz: model.destination.timeZone
+        guard let originDate = model.origin.date, let destinationDate = model.destination.date else { return nil }
+        return BoardingPassMath.dayBadgeText(
+            departure: originDate, departureTz: model.origin.timeZone,
+            arrival: destinationDate, arrivalTz: model.destination.timeZone
         )
     }
 
@@ -118,41 +125,52 @@ struct BoardingPassCard: View {
                 .foregroundStyle(isPast ? Palette.slate : Palette.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            HStack(spacing: 4) {
-                Text(ItineraryTimeZone.timeString(endpoint.date, in: endpoint.timeZone))
-                    .font(Typo.body(15, weight: .bold).monospacedDigit())
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-                // Phase 3 (docs/UX_REDESIGN_ROADMAP.md): "+1d badge anchored
-                // to the arrival time when it crosses midnight" — the same
-                // pure `BoardingPassMath.dayBadgeText` backs both.
-                if isDestination, let dayBadgeText {
-                    Text(dayBadgeText)
-                        .font(Typo.body(9.5, weight: .heavy))
-                        .foregroundStyle(accentInk)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(isPast ? Palette.mist : Palette.amberSoft, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            // UX-review D2: an endpoint with no known instant (a flight
+            // with no `endsAt`) shows only its code above — no time, no
+            // GMT-offset, no day badge computed from a substitute instant
+            // that was never real.
+            if let date = endpoint.date {
+                HStack(spacing: 4) {
+                    Text(ItineraryTimeZone.timeString(date, in: endpoint.timeZone))
+                        .font(Typo.body(15, weight: .bold).monospacedDigit())
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    // Phase 3 (docs/UX_REDESIGN_ROADMAP.md): "+1d badge
+                    // anchored to the arrival time when it crosses
+                    // midnight" — the same pure `BoardingPassMath
+                    // .dayBadgeText` backs both. UX-review D1: no filled
+                    // capsule — `amberInk`/`slate` directly on the card
+                    // surface (light-mode amberInk-on-amberSoft measured
+                    // 4.45:1, slate-on-mist 4.25:1, both under the 4.5:1 AA
+                    // small-text bar; the same inks on `Palette.elevated`
+                    // clear it).
+                    if isDestination, let dayBadgeText {
+                        Text(dayBadgeText)
+                            .font(Typo.body(9.5, weight: .heavy))
+                            .foregroundStyle(accentInk)
+                    }
                 }
+                // "each with its local time + GMT offset label beneath" — a
+                // universally-readable numeric offset, deliberately not
+                // `ItineraryTimeZone.zoneLabel`'s abbreviation (a boarding
+                // pass reads to any traveler, not just one who already
+                // knows what "ICT" means).
+                Text(BoardingPassMath.gmtOffsetLabel(for: endpoint.timeZone, at: date).uppercased())
+                    .font(Typo.body(9.5, weight: .bold))
+                    .tracking(0.4)
+                    .foregroundStyle(Palette.slate)
+                    .lineLimit(isAXSize ? 2 : 1)
+                    .minimumScaleFactor(isAXSize ? 0.85 : 1)
             }
-            // "each with its local time + GMT offset label beneath" — a
-            // universally-readable numeric offset, deliberately not
-            // `ItineraryTimeZone.zoneLabel`'s abbreviation (a boarding pass
-            // reads to any traveler, not just one who already knows what
-            // "ICT" means).
-            Text(BoardingPassMath.gmtOffsetLabel(for: endpoint.timeZone, at: endpoint.date).uppercased())
-                .font(Typo.body(9.5, weight: .bold))
-                .tracking(0.4)
-                .foregroundStyle(Palette.slate)
-                .lineLimit(isAXSize ? 2 : 1)
-                .minimumScaleFactor(isAXSize ? 0.85 : 1)
         }
         .frame(maxWidth: isAXSize ? .infinity : nil, alignment: alignment == .leading ? .leading : .trailing)
     }
 
     /// The dashed "leg" between the two airport codes, with the computed
     /// duration centered beneath it — decorative connector, spoken instead
-    /// as part of the pass's own combined `accessibilityLabel`.
+    /// as part of the pass's own combined `accessibilityLabel`. The route
+    /// line/glyph always render; the duration text needs both endpoints'
+    /// instants (UX-review D2: omitted, not "0m", when either is unknown).
     private var durationBlock: some View {
         VStack(spacing: 4) {
             ZStack {
@@ -164,11 +182,13 @@ struct BoardingPassCard: View {
                     .padding(.horizontal, 3)
                     .background(Palette.elevated)
             }
-            Text(BoardingPassMath.durationText(from: model.origin.date, to: model.destination.date))
-                .font(Typo.body(10.5, weight: .bold).monospacedDigit())
-                .foregroundStyle(Palette.slate)
-                .lineLimit(1)
-                .fixedSize()
+            if let originDate = model.origin.date, let destinationDate = model.destination.date {
+                Text(BoardingPassMath.durationText(from: originDate, to: destinationDate))
+                    .font(Typo.body(10.5, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Palette.slate)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
         }
         .frame(width: isAXSize ? nil : 64)
         .accessibilityHidden(true)
@@ -229,30 +249,39 @@ struct BoardingPassCard: View {
     /// `.accessibilityElement(children: .ignore)` already collapses the
     /// whole row to one VoiceOver stop.
     static func accessibilityParts(for model: Model) -> [String] {
-        var parts = [model.carrierLine]
-        parts.append("departs \(endpointSentence(model.origin))")
-        let offset = BoardingPassMath.dayOffset(
-            departure: model.origin.date, departureTz: model.origin.timeZone,
-            arrival: model.destination.date, arrivalTz: model.destination.timeZone
-        )
-        let dayNote: String
-        if offset > 0 {
-            dayNote = ", \(offset) day\(offset == 1 ? "" : "s") later"
-        } else if offset < 0 {
-            dayNote = ", \(abs(offset)) day\(abs(offset) == 1 ? "" : "s") earlier"
+        var parts = [model.carrierLine, "departs \(endpointSentence(model.origin))"]
+        // UX-review D2: the day-note/duration parts both need a real
+        // arrival instant — `endpointSentence` itself already degrades to
+        // just the place name when `date` is `nil`.
+        if let originDate = model.origin.date, let destinationDate = model.destination.date {
+            let offset = BoardingPassMath.dayOffset(
+                departure: originDate, departureTz: model.origin.timeZone,
+                arrival: destinationDate, arrivalTz: model.destination.timeZone
+            )
+            let dayNote: String
+            if offset > 0 {
+                dayNote = ", \(offset) day\(offset == 1 ? "" : "s") later"
+            } else if offset < 0 {
+                dayNote = ", \(abs(offset)) day\(abs(offset) == 1 ? "" : "s") earlier"
+            } else {
+                dayNote = ""
+            }
+            parts.append("arrives \(endpointSentence(model.destination))\(dayNote)")
+            parts.append("duration \(BoardingPassMath.spokenDuration(from: originDate, to: destinationDate))")
         } else {
-            dayNote = ""
+            parts.append("arrives \(endpointSentence(model.destination))")
         }
-        parts.append("arrives \(endpointSentence(model.destination))\(dayNote)")
-        parts.append("duration \(BoardingPassMath.spokenDuration(from: model.origin.date, to: model.destination.date))")
         if let footerText = model.footerText { parts.append(footerText) }
         return parts
     }
 
+    /// "Bangkok 14:00 GMT+7", or just "Bangkok" when `endpoint.date` isn't
+    /// known yet (UX-review D2).
     private static func endpointSentence(_ endpoint: Endpoint) -> String {
         let place = endpoint.name ?? endpoint.code
-        let time = ItineraryTimeZone.timeString(endpoint.date, in: endpoint.timeZone)
-        let zone = BoardingPassMath.gmtOffsetLabel(for: endpoint.timeZone, at: endpoint.date)
+        guard let date = endpoint.date else { return place }
+        let time = ItineraryTimeZone.timeString(date, in: endpoint.timeZone)
+        let zone = BoardingPassMath.gmtOffsetLabel(for: endpoint.timeZone, at: date)
         return "\(place) \(time) \(zone)"
     }
 }

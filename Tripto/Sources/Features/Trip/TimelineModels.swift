@@ -424,7 +424,13 @@ enum BoardingPassContent {
             destination: BoardingPassCard.Endpoint(
                 code: code(details.toIATA),
                 name: details.toIATA.flatMap(AirportTimeZones.cityName(for:)),
-                date: item.endsAt ?? item.startsAt,
+                // UX-review D2: `item.endsAt` straight through, not `??
+                // item.startsAt` — that fallback rendered a fake arrival
+                // instant (0m duration, a spurious day badge) for a flight
+                // with an arrival zone but no known arrival time yet.
+                // `BoardingPassCard.Endpoint.date` being `Date?` lets the
+                // card just omit the arrival time/duration/badge instead.
+                date: item.endsAt,
                 timeZone: item.effectiveTz
             ),
             footerText: TZShiftChip.landingText(for: item)

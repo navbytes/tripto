@@ -101,6 +101,10 @@ struct ItineraryTabView: View {
     /// One-shot: only auto-scroll to "today" the first time this view's
     /// `.task` fires, not on every subsequent data refresh.
     @State private var hasAutoScrolledToToday = false
+    /// UX-review N2: `TZShiftChipRow.id`s that have already drawn in once —
+    /// lives here (survives the row's own view recycling in the
+    /// `LazyVStack` below) rather than as that row's private `@State`.
+    @State private var drawnMarkerIds: Set<String> = []
 
     private var tripStartDay: DayDate { DayDate.from(trip.startDate, calendar: .current) }
     private var tripEndDay: DayDate { DayDate.from(trip.endDate, calendar: .current) }
@@ -373,7 +377,11 @@ struct ItineraryTabView: View {
             if model.kind == .landing {
                 EmptyView()
             } else {
-                TZShiftChipRow(model: model, typeSize: dynamicTypeSize).equatable()
+                TZShiftChipRow(
+                    model: model, typeSize: dynamicTypeSize,
+                    hasDrawnBefore: drawnMarkerIds.contains(model.id)
+                ) { drawnMarkerIds.insert(model.id) }
+                .equatable()
             }
         case .nowLine: NowLineRow(typeSize: dynamicTypeSize).equatable()
         }

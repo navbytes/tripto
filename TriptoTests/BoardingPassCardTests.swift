@@ -231,6 +231,23 @@ final class BoardingPassContentTests: XCTestCase {
         XCTAssertEqual(model?.destination.code, "\u{2014}")
     }
 
+    /// UX-review D2: a flight with a known arrival zone but no `endsAt` yet
+    /// must not synthesize a fake arrival instant from `item.startsAt` —
+    /// that used to render a spurious "0m" duration and could show a wrong
+    /// day badge. `destination.date` is `nil`, full stop; the departure
+    /// side's own instant is always known (`startsAt` is never nil).
+    func testDestinationDateIsNilWhenEndsAtIsNotYetKnown() {
+        var details = ItemDetails.empty
+        details.fromIATA = "HKG"; details.toIATA = "BKK"; details.arrivalTz = "Asia/Bangkok"
+        let flight = TestFixtures.makeItineraryItem(
+            category: .flight, startsAt: utcInstant(2026, 7, 20, 4, 20), endsAt: nil,
+            tz: "Asia/Hong_Kong", details: details
+        )
+        let model = BoardingPassContent.make(for: flight)
+        XCTAssertNil(model?.destination.date)
+        XCTAssertNotNil(model?.origin.date)
+    }
+
     func testCarrierLineFallsBackToItemTitleWhenAirlineAndFlightNoAreMissing() {
         let flight = TestFixtures.makeItineraryItem(
             category: .flight, title: "Mystery flight", startsAt: utcInstant(2026, 6, 1, 8, 0)
