@@ -47,8 +47,11 @@ struct AddItemSheet: View {
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.dismiss) private var dismiss
     /// Finding 2: `categorySelector`'s AX-size horizontal-scroll branch,
-    /// same `isAccessibilitySize` convention as `TripView.tabBar()`.
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// same `isAccessibilitySize` convention as `TripView.tabBar()`. Not
+    /// `private` (Phase 3) — `AddItemFormSections.flightSection`'s live
+    /// preview reads it too, so the embedded `BoardingPassCard` restacks at
+    /// the same accessibility sizes as everything else in the sheet.
+    @Environment(\.dynamicTypeSize) var dynamicTypeSize
 
     @State var category: ItemCategory
 
@@ -75,6 +78,12 @@ struct AddItemSheet: View {
     @State var seat = ""
     @State var terminal = ""
     @State var gate = ""
+    /// Phase 3 (P3.3): the seat/terminal/gate/confirmation `DisclosureGroup`'s
+    /// own expand state (`AddItemFormSections.flightSection`) — seeded once
+    /// in `init` below (collapsed on a blank form, expanded if editing an
+    /// item that already has any of the four filled in), a plain toggle
+    /// from then on. Not `private` — that file's extension binds to it.
+    @State var isFlightDetailsExpanded = false
 
     // Stay
     @State var stayName = ""
@@ -144,6 +153,9 @@ struct AddItemSheet: View {
     @State private var isDismissingSuggestion = false
     @State private var dismissError: String?
 
+    /// Phase 3 (P3.5): `pasteFirstBanner`'s own sub-sheet — opens the exact
+    /// same `PasteImportSheet` every other entry point uses, untouched.
+    @State private var isPresentingPasteImport = false
     /// Finding 3: gates the "Discard changes?" confirmation on cancel/swipe-
     /// dismiss, same as `TripFormView`.
     @State private var showDiscardConfirm = false
@@ -159,6 +171,11 @@ struct AddItemSheet: View {
     /// that file's `extension AddItemSheet` can read it; Swift extensions
     /// can't declare their own stored properties.
     @ScaledMetric(relativeTo: .body) var tagIconSize: CGFloat = 10
+    /// `pasteFirstBanner`'s trailing chevron — same recipe as `ZonePicker`'s.
+    @ScaledMetric(relativeTo: .caption) private var pasteBannerChevronSize: CGFloat = 12
+    /// `footerBar`'s "Save & add the return leg" icon, next to its own
+    /// label — same shared `@ScaledMetric` recipe.
+    @ScaledMetric(relativeTo: .body) private var returnLegIconSize: CGFloat = 14
 
     private static let lastDepartureTZKey = "lastDepartureTZ"
     private static func lastArrivalTZKey(_ tripId: UUID) -> String { "lastArrivalTZ.\(tripId.uuidString)" }
@@ -348,6 +365,17 @@ struct AddItemSheet: View {
             _checkOutDate = State(initialValue: Calendar.current.date(byAdding: .day, value: 1, to: dateDefault) ?? dateDefault)
         }
 
+        // Phase 3 (P3.3): collapsed by default on a blank form; expanded
+        // from the start when editing an item that already has any of the
+        // four filled in, so opening "Edit flight" never hides data the
+        // item actually has. Reads the just-set `_seat`/`_terminal`/`_gate`/
+        // `_confirmation` wrapped values (same legal-inside-`init` trick
+        // `initialSnapshot` below uses) since either branch above has
+        // already populated them by this point.
+        let hasFlightDetails = [_seat.wrappedValue, _terminal.wrappedValue, _gate.wrappedValue, _confirmation.wrappedValue]
+            .contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        _isFlightDetailsExpanded = State(initialValue: hasFlightDetails)
+
         // Captured last, after either branch above has set every field —
         // reading the underscored `@State` wrappers' `wrappedValue` here
         // (rather than the plain properties) is what makes this legal inside
@@ -395,6 +423,16 @@ struct AddItemSheet: View {
     /// still reads `editing` via `?`, not a force-unwrap.
     private var isReviewingUnverifiedSuggestion: Bool {
         isReviewingSuggestion && editing?.isFromUnverifiedSender == true
+    }
+
+    /// P3.6: "Save & add the return leg" is add-mode only — `editing` is an
+    /// immutable `let`, so the only way a second `save()` call from THIS
+    /// sheet is guaranteed to create a new item (never re-save over the
+    /// flight just added) is if `editing` was `nil` the whole time. Also
+    /// hidden while reviewing a suggestion, whose primary CTA is "Confirm
+    /// booking", not "Save" — there's no "leg on screen" to have just saved.
+    private var showsReturnLegAction: Bool {
+        category == .flight && !isEditing && !isReviewingSuggestion
     }
 
     /// Finding 3: the live counterpart to `initialSnapshot` — diffed against
@@ -450,7 +488,12 @@ struct AddItemSheet: View {
                             unverifiedSenderCallout
                         }
 
+                        // Phase 3 (P3.5): paste-first, then the type rail —
+                        // both add-mode only (an edit already has its own
+                        // booking's data; re-pasting would create a second,
+                        // unrelated item, not fill this one in).
                         if !isEditing {
+                            pasteFirstBanner
                             categorySelector
                         }
 
@@ -465,13 +508,15 @@ struct AddItemSheet: View {
                         }
 
                         familySection
-
-                        saveButton
-                            .padding(.top, Spacing.xs)
                     }
                     .padding(Spacing.xl)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // Phase 3 (P3.6): sticky — a fixed sibling below the
+                // `ScrollView`, not that view's last scrollable item any
+                // more, so Save (and the return-leg action) stay reachable
+                // without scrolling.
+                footerBar
             }
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
@@ -485,6 +530,30 @@ struct AddItemSheet: View {
                 category = .transport
             }
             #endif
+        }
+        // Phase 3 (P3.5): `pasteFirstBanner`'s door into the existing paste-
+        // import flow — wired identically to `TripView.pasteImportPill`'s
+        // own `.sheet` (same callbacks, same packing-item insert loop) so
+        // this new entry point behaves exactly like every other one.
+        .sheet(isPresented: $isPresentingPasteImport) {
+            PasteImportSheet(
+                tripId: tripId,
+                onItineraryItemsImported: { created in
+                    onToast("\(created) item\(created == 1 ? "" : "s") added to review")
+                },
+                onPackingConfirmed: { candidates in
+                    guard let creatorId = authManager.userId ?? tripCreatedBy else { return }
+                    for candidate in candidates {
+                        PackingItem.insert(
+                            label: candidate.label, groupKey: candidate.groupKey, assigneeProfileId: nil,
+                            tripId: tripId, createdBy: creatorId,
+                            modelContext: modelContext, syncEngine: syncEngine
+                        )
+                    }
+                    onToast("\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list")
+                },
+                tripCreatedBy: tripCreatedBy
+            )
         }
         .background(
             // Finding 3: surfaces the same "Discard changes?" dialog Cancel
@@ -541,7 +610,10 @@ struct AddItemSheet: View {
                     .font(.system(size: categoryIconSize, weight: .medium))
                     // Decorative — the label right below already names the category.
                     .accessibilityHidden(true)
-                Text(cat.displayName)
+                // Phase 3 (P3.1): verbs ("what am I adding"), not
+                // `displayName`'s nouns — see `addSheetVerbLabel`'s doc
+                // comment for why that property stays untouched.
+                Text(cat.addSheetVerbLabel)
                     .font(Typo.body(11.5, weight: .semibold))
             }
             .foregroundStyle(isOn ? cat.colorPair.fg : Palette.slate)
@@ -587,11 +659,65 @@ struct AddItemSheet: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Phase 3 (P3.5): the fast path — the data's already in the booking
+    /// email, typing it twice is the actual pain. Opens the exact same
+    /// `PasteImportSheet` every other entry point uses
+    /// (`TripView.pasteImportPill`/`ShareTripView.pasteImportSecondaryAction`)
+    /// — untouched, this is just one more door into it (see `body`'s
+    /// `.sheet` for the wiring). Manual fields below stay the fallback, not
+    /// the default path.
+    private var pasteFirstBanner: some View {
+        Button {
+            isPresentingPasteImport = true
+        } label: {
+            HStack(spacing: Spacing.md) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Palette.amberSoft)
+                    .frame(width: 40, height: 40)
+                    .overlay {
+                        // Same icon `TripView.pasteImportPill` uses — one
+                        // consistent paste-import visual across every door.
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .foregroundStyle(Palette.amberInk)
+                    }
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Paste a booking email")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Text("Fills every field below in one tap")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: Spacing.sm)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: pasteBannerChevronSize, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                    .accessibilityHidden(true)
+            }
+            .padding(Spacing.md)
+            .frame(minHeight: 44)
+            .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                    .stroke(Palette.mist, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+    }
+
     /// Findings 2 & 7: the CTA-adjacent guidance line, mirroring
     /// `TripFormView.ctaSection` — a save failure (freshest, most specific
     /// problem) takes priority over the advisory "what's missing" hint, and
     /// either replaces the old fully-silent disabled state.
-    private var saveButton: some View {
+    ///
+    /// Phase 3 (P3.6): sticky — `body` places this outside the `ScrollView`
+    /// now, not that view's last scrollable item, and flights gain the
+    /// secondary "Save & add the return leg" action alongside Save.
+    private var footerBar: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             if let saveError {
                 Text(saveError.message)
@@ -622,6 +748,31 @@ struct AddItemSheet: View {
             .buttonStyle(.plain)
             .disabled(!isValid || isDismissingSuggestion)
 
+            // P3.6: flights come in pairs — saves the leg on screen, then
+            // resets the form in place for the reversed return leg (see
+            // `saveAndAddReturnLeg`'s doc comment). Same validation gate as
+            // Save itself; it runs the identical save path.
+            if showsReturnLegAction {
+                Button {
+                    saveAndAddReturnLeg()
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: returnLegIconSize, weight: .semibold))
+                            // Decorative — the label says the same thing.
+                            .accessibilityHidden(true)
+                        Text("Save & add the return leg")
+                            .font(Typo.body(weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(isValid ? Palette.amberInk : Palette.slate)
+                    .padding(.vertical, Spacing.md)
+                    .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!isValid || isDismissingSuggestion)
+            }
+
             // EI-2: a shared triage queue (`docs/EMAIL_IMPORT_PLAN.md`
             // decisions: "any companion or organizer" can dismiss, not just
             // whoever forwarded the email) — visible only while reviewing an
@@ -645,6 +796,13 @@ struct AddItemSheet: View {
                 .buttonStyle(.plain)
                 .disabled(isDismissingSuggestion)
             }
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.top, Spacing.md)
+        .padding(.bottom, Spacing.lg)
+        .background(Palette.paper)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Palette.mist).frame(height: 1)
         }
     }
 
@@ -706,7 +864,12 @@ struct AddItemSheet: View {
     /// creator's own uid) when `authManager.userId` is `nil`, matching
     /// `TripView.canAddItems`'s "signed out ⇒ legitimately-permitted local
     /// creator" rule.
-    private func save() {
+    ///
+    /// P3.6: `andDismiss` defaults `true` for the ordinary Save button —
+    /// `saveAndAddReturnLeg()` is the one caller that passes `false`, so it
+    /// can keep this same sheet open and reset it for the return leg
+    /// instead of closing right after the outbound leg lands.
+    private func save(andDismiss: Bool = true) {
         guard isValid else { return }
         saveError = nil
         dismissError = nil
@@ -785,7 +948,88 @@ struct AddItemSheet: View {
         // ever reaching here, so this can't fire on a save that didn't land.
         didSave.toggle()
         persistZoneDefaults()
-        dismiss()
+        if andDismiss { dismiss() }
+    }
+
+    /// "Save & add the return leg" (docs/UX_REDESIGN_ROADMAP.md P3.6):
+    /// saves the leg on screen exactly like the primary Save button
+    /// (`andDismiss: false` only changes whether the sheet closes
+    /// afterward), then — only once that write actually landed
+    /// (`saveError == nil`) — resets the form in place to
+    /// `Self.returnLegFields`'s reversed/cleared values, ready for the
+    /// return leg's own Save. `editing` stays `nil` for the whole life of an
+    /// add-mode sheet (the only mode `showsReturnLegAction` allows this CTA
+    /// in), so that second Save always takes `save()`'s "create a new item"
+    /// branch — never re-editing the leg just saved.
+    private func saveAndAddReturnLeg() {
+        guard isValid else { return }
+        save(andDismiss: false)
+        guard saveError == nil else { return }
+        let next = Self.returnLegFields(
+            fromIATA: fromIATA, toIATA: toIATA,
+            departureZone: departureZone, arrivalZone: arrivalZone,
+            flightDate: flightDate
+        )
+        fromIATA = next.fromIATA
+        toIATA = next.toIATA
+        departureZone = next.departureZone
+        arrivalZone = next.arrivalZone
+        flightDate = next.flightDate
+        departsTime = next.departsTime
+        arrivesTime = next.arrivesTime
+        arrivalDayOffsetOverride = next.arrivalDayOffsetOverride
+        seat = next.seat
+        terminal = next.terminal
+        gate = next.gate
+        confirmation = next.confirmation
+    }
+
+    /// The pure transform behind `saveAndAddReturnLeg()` above — a plain
+    /// value type (not a direct `@State` mutation) so
+    /// `AddItemSheetReturnLegTests` can pin every field without standing up
+    /// the view itself, mirroring `flightInstants`/`transportInstants`'s
+    /// existing "pure function computes, the view applies it" split.
+    struct ReturnLegFields: Equatable {
+        var fromIATA: String
+        var toIATA: String
+        var departureZone: TimeZone
+        var arrivalZone: TimeZone
+        var flightDate: Date
+        var departsTime: Date
+        var arrivesTime: Date
+        var arrivalDayOffsetOverride: Bool?
+        var seat: String
+        var terminal: String
+        var gate: String
+        var confirmation: String
+    }
+
+    /// Reverses the route, swaps the zones, advances the date a day, and
+    /// clears everything specific to ONE leg's own schedule. Airline/flight
+    /// number are deliberately NOT part of this transform — most return
+    /// legs fly the same carrier, so `saveAndAddReturnLeg()` leaves those
+    /// two fields untouched rather than clearing them here. `departsTime`/
+    /// `arrivesTime` reset to the exact same "blank new flight" defaults
+    /// `init()` uses for a brand-new item (`Date()` / `now + 2h`), not the
+    /// outbound leg's own clock times — a return leg is a different day, so
+    /// carrying over the same times would rarely be right.
+    /// `readingCalendar` mirrors `flightInstants`/`transportInstants`'s own
+    /// injectable-calendar parameter (deterministic in tests regardless of
+    /// the machine's own calendar).
+    static func returnLegFields(
+        fromIATA: String, toIATA: String,
+        departureZone: TimeZone, arrivalZone: TimeZone,
+        flightDate: Date,
+        readingCalendar: Calendar = .current
+    ) -> ReturnLegFields {
+        ReturnLegFields(
+            fromIATA: toIATA, toIATA: fromIATA,
+            departureZone: arrivalZone, arrivalZone: departureZone,
+            flightDate: readingCalendar.date(byAdding: .day, value: 1, to: flightDate) ?? flightDate,
+            departsTime: Date(), arrivesTime: Date().addingTimeInterval(2 * 3600),
+            arrivalDayOffsetOverride: nil,
+            seat: "", terminal: "", gate: "", confirmation: ""
+        )
     }
 
     /// "Flight added", "Flight added — will sync when you're back" when
@@ -1088,6 +1332,31 @@ struct AddItemSheet: View {
         )
     }
 
+    /// Phase 3 (P3.2): the flight route section's own live preview — reuses
+    /// `BoardingPassContent.make(for:)`, the exact same `ItineraryItem ->
+    /// BoardingPassCard.Model` adapter the itinerary timeline calls, over a
+    /// transient `ItineraryItem` (built from this sheet's own
+    /// `flightFields()`, never inserted into `modelContext`) so the preview
+    /// can never disagree with what saving would actually produce. Force-
+    /// unwrapped: the transient item is always stamped `.flight`, the one
+    /// category `BoardingPassContent.make` ever returns `nil` for. Not
+    /// `private` — `AddItemFormSections.flightSection` (a different file,
+    /// same type) reads it; see `tagIconSize`'s doc comment for the
+    /// identical reasoning.
+    var flightPreviewModel: BoardingPassCard.Model {
+        let fields = flightFields()
+        let transient = ItineraryItem(
+            id: UUID(), tripId: tripId, categoryRaw: ItemCategory.flight.rawValue, title: fields.title,
+            startsAt: fields.startsAt, endsAt: fields.endsAt, tz: fields.tz,
+            locationName: fields.locationName, locationLat: fields.locationLat, locationLng: fields.locationLng,
+            confirmation: fields.confirmation, notes: nil, detailsJSON: "{}",
+            statusRaw: ItemStatus.confirmed.rawValue, createdBy: nil,
+            createdAt: .now, updatedAt: .now, updatedBy: nil
+        )
+        transient.details = fields.details
+        return BoardingPassContent.make(for: transient)!
+    }
+
     private func stayFields() -> ComposedFields {
         let start = ItemTimeCombining.combine(date: checkInDate, timeOfDay: checkInTime, targetTz: stayZone)
         let end = ItemTimeCombining.combine(date: checkOutDate, timeOfDay: checkOutTime, targetTz: stayZone)
@@ -1141,6 +1410,22 @@ struct AddItemSheet: View {
         )
     }
 
+    /// Phase 3 (P3.3): the seat/terminal/gate/confirmation `DisclosureGroup`'s
+    /// one-line collapsed summary — "14C · 1 · 22 · QK7P2M", each empty
+    /// field simply dropped (not its own em-dash placeholder) rather than
+    /// padding the string with filler, and a single em-dash for the whole
+    /// summary when all four are blank. Mirrors `BookingDetailView
+    /// .terminalGateText`'s existing "join what's set, dash when nothing
+    /// is" convention rather than inventing a second one. Pure/static so
+    /// `AddItemSheetFlightDetailsSummaryTests` can exercise every
+    /// combination without standing up the sheet.
+    static func flightDetailsSummary(seat: String, terminal: String, gate: String, confirmation: String) -> String {
+        let parts = [seat, terminal, gate, confirmation]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? "\u{2014}" : parts.joined(separator: " \u{00B7} ")
+    }
+
     static func trimmedOrNil(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -1172,4 +1457,24 @@ struct AddItemSheet: View {
 /// doc comment above.
 private struct DismissEmailImportItemParams: Encodable {
     let pItemId: UUID
+}
+
+/// Phase 3 (docs/UX_REDESIGN_ROADMAP.md P3.1): the type-tile's own copy —
+/// verbs ("what am I adding") instead of `ItemCategory.displayName`'s
+/// nouns. Not folded into `displayName` itself: that property also feeds
+/// `BookingsTabView`'s section headers, `TimelineCardRow`/
+/// `SuggestedItemsSheet`'s VoiceOver category word, and this sheet's own
+/// title/toast/save-button copy — none of which this milestone's brief
+/// touches. Not `private` only so `AddItemSheetVerbLabelTests` can pin the
+/// mapping directly; `categoryTile` is still its one real call site.
+extension ItemCategory {
+    var addSheetVerbLabel: String {
+        switch self {
+        case .flight: "Flight"
+        case .hotel: "Stay"
+        case .activity: "Do"
+        case .food: "Eat"
+        case .transport: "Ride"
+        }
+    }
 }

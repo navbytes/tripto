@@ -12,72 +12,131 @@ extension AddItemSheet {
                 FormTextField(label: "Airline", text: $airline, placeholder: "TAP Air Portugal")
                 FormTextField(label: "Flight no.", text: $flightNo, placeholder: "TP1234", autocapitalization: .characters)
             }
-            HStack(spacing: Spacing.md) {
-                FormTextField(label: "From", text: $fromIATA, placeholder: "e.g. JFK", autocapitalization: .characters)
-                    .onChange(of: fromIATA) { _, newValue in
-                        let filtered = String(newValue.uppercased().prefix(3))
-                        if filtered != fromIATA { fromIATA = filtered }
-                        if let id = AirportTimeZones.tzIdentifier(for: filtered), let zone = TimeZone(identifier: id) {
-                            departureZone = zone
-                        }
-                    }
-                FormTextField(label: "To", text: $toIATA, placeholder: "e.g. LIS", autocapitalization: .characters)
-                    .onChange(of: toIATA) { _, newValue in
-                        let filtered = String(newValue.uppercased().prefix(3))
-                        if filtered != toIATA { toIATA = filtered }
-                        if let id = AirportTimeZones.tzIdentifier(for: filtered), let zone = TimeZone(identifier: id) {
-                            arrivalZone = zone
-                        }
-                    }
-            }
-
             LabeledDatePicker(label: "Date", date: $flightDate, displayedComponents: .date)
 
-            LabeledDatePicker(label: "Departs", date: $departsTime, displayedComponents: .hourAndMinute)
-            ZonePicker(
-                title: "Departure time zone", selection: $departureZone, referenceDate: departsTime,
-                hint: isDepartureZoneAutoSet ? "Set by departure airport" : nil
-            )
-            if isDepartureAirportUnknown {
-                // Finding 6: advisory (slate), not an error — the zone
-                // default is still usable, this just flags that it wasn't
-                // actually detected from the code typed.
-                Text("We couldn\u{2019}t detect this airport \u{2014} double-check the time zone.")
-                    .font(Typo.body(Typo.Size.caption))
+            // Phase 3 (P3.2): the route as a live boarding-pass preview —
+            // the exact `BoardingPassCard` the itinerary timeline renders,
+            // reflecting every field below as it's typed (docs/
+            // UX_REDESIGN_ROADMAP.md: "the form previews its own output").
+            // `.accessibilityHidden` — the fields underneath (and their own
+            // labels/zone captions) stay the single source of truth, so
+            // this never becomes a second, competing VoiceOver stop for
+            // the same data.
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text("Route")
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(Palette.slate)
+                BoardingPassCard(model: flightPreviewModel, typeSize: dynamicTypeSize)
+                    .accessibilityHidden(true)
+
+                HStack(spacing: Spacing.md) {
+                    FormTextField(label: "From", text: $fromIATA, placeholder: "e.g. JFK", autocapitalization: .characters)
+                        .onChange(of: fromIATA) { _, newValue in
+                            let filtered = String(newValue.uppercased().prefix(3))
+                            if filtered != fromIATA { fromIATA = filtered }
+                            if let id = AirportTimeZones.tzIdentifier(for: filtered), let zone = TimeZone(identifier: id) {
+                                departureZone = zone
+                            }
+                        }
+                    FormTextField(label: "To", text: $toIATA, placeholder: "e.g. LIS", autocapitalization: .characters)
+                        .onChange(of: toIATA) { _, newValue in
+                            let filtered = String(newValue.uppercased().prefix(3))
+                            if filtered != toIATA { toIATA = filtered }
+                            if let id = AirportTimeZones.tzIdentifier(for: filtered), let zone = TimeZone(identifier: id) {
+                                arrivalZone = zone
+                            }
+                        }
+                }
+
+                // Timezone sits directly under the time it modifies (this
+                // milestone's brief) — unchanged from before, just grouped
+                // under "Route" now, alongside the preview it drives.
+                LabeledDatePicker(label: "Departs", date: $departsTime, displayedComponents: .hourAndMinute)
+                ZonePicker(
+                    title: "Departure time zone", selection: $departureZone, referenceDate: departsTime,
+                    hint: isDepartureZoneAutoSet ? "Set by departure airport" : nil
+                )
+                if isDepartureAirportUnknown {
+                    // Finding 6: advisory (slate), not an error — the zone
+                    // default is still usable, this just flags that it wasn't
+                    // actually detected from the code typed.
+                    Text("We couldn\u{2019}t detect this airport \u{2014} double-check the time zone.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                }
+
+                LabeledDatePicker(label: "Arrives", date: $arrivesTime, displayedComponents: .hourAndMinute)
+                HStack {
+                    Spacer(minLength: 0)
+                    nextDayChip
+                }
+                if !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
+                    && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
+                    && !flightEndAfterStart {
+                    Text("Arrival must be after departure.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.rose)
+                }
+                ZonePicker(
+                    title: "Arrival time zone", selection: $arrivalZone, referenceDate: arrivesTime,
+                    hint: isArrivalZoneAutoSet ? "Set by arrival airport" : nil
+                )
+                if isArrivalAirportUnknown {
+                    Text("We couldn\u{2019}t detect this airport \u{2014} double-check the time zone.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                }
             }
 
-            LabeledDatePicker(label: "Arrives", date: $arrivesTime, displayedComponents: .hourAndMinute)
-            HStack {
-                Spacer(minLength: 0)
-                nextDayChip
+            // Phase 3 (P3.3): seat/terminal/gate/confirmation fold behind a
+            // disclosure — collapsed by default on a blank form, expanded
+            // from the start when editing an item that already has any of
+            // the four (`isFlightDetailsExpanded`'s seed in `init`), never
+            // force-collapsed on top of an editing session with real data.
+            DisclosureGroup(isExpanded: $isFlightDetailsExpanded) {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    HStack(spacing: Spacing.md) {
+                        FormTextField(label: "Seat", text: $seat, placeholder: "14C", autocapitalization: .characters)
+                        FormTextField(label: "Terminal", text: $terminal, placeholder: "1")
+                        FormTextField(label: "Gate", text: $gate, placeholder: "22")
+                    }
+                    FormTextField(
+                        label: "Confirmation code", text: $confirmation, placeholder: "QK7P2M",
+                        autocapitalization: .characters
+                    )
+                }
+                .padding(.top, Spacing.sm)
+            } label: {
+                disclosureLabel
             }
-            if !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
-                && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
-                && !flightEndAfterStart {
-                Text("Arrival must be after departure.")
-                    .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(Palette.rose)
-            }
-            ZonePicker(
-                title: "Arrival time zone", selection: $arrivalZone, referenceDate: arrivesTime,
-                hint: isArrivalZoneAutoSet ? "Set by arrival airport" : nil
-            )
-            if isArrivalAirportUnknown {
-                Text("We couldn\u{2019}t detect this airport \u{2014} double-check the time zone.")
-                    .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(Palette.slate)
-            }
-
-            HStack(spacing: Spacing.md) {
-                FormTextField(label: "Seat", text: $seat, placeholder: "14C", autocapitalization: .characters)
-                FormTextField(label: "Terminal", text: $terminal, placeholder: "1")
-                FormTextField(label: "Gate", text: $gate, placeholder: "22")
-            }
-            FormTextField(
-                label: "Confirmation code", text: $confirmation, placeholder: "QK7P2M", autocapitalization: .characters
-            )
+            .tint(Palette.amber)
         }
+    }
+
+    /// The seat/terminal/gate/confirmation `DisclosureGroup`'s own label —
+    /// restacks vertically at accessibility Dynamic Type sizes, same
+    /// `AnyLayout` recipe `LabeledDatePicker` already uses in this file, so
+    /// a long summary ("14C · 1 · 22 · QK7P2M") gets room to wrap onto its
+    /// own line instead of squeezing against the caption on one row.
+    private var disclosureLabel: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.xxs))
+            : AnyLayout(HStackLayout())
+        return layout {
+            Text("Seat, terminal, gate & confirmation")
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.slate)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: Spacing.sm)
+            }
+            Text(AddItemSheet.flightDetailsSummary(seat: seat, terminal: terminal, gate: gate, confirmation: confirmation))
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     var staySection: some View {
@@ -228,7 +287,11 @@ extension AddItemSheet {
                                 }
                             }
                         }
-                        Text("Leave everyone unselected if it\u{2019}s for the whole group.")
+                        // Phase 3 (P3.4): verbatim copy from the design
+                        // mockup — the chips themselves already carry a
+                        // real selected state (filled vs. outline, just
+                        // below).
+                        Text("Nobody selected means it\u{2019}s for the whole group.")
                             .helperTextStyle()
                     }
                 }
