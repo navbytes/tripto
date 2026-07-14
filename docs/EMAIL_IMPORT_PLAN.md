@@ -6,7 +6,7 @@ waitlist stub) and universal links (currently deferred pending an Apple
 capability). Same status keys: ✅ done · 🔄 in progress · ⏳ queued (I can do
 it) · 🔑 **owner-only**.
 
-Last updated: 2026-07-12 (EI-0 through EI-3 code-complete + audited; all owner-action blockers identified; ready for go-live gate).
+Last updated: 2026-07-14 (EI-0 through EI-3 complete and live; go-live gate items 3–6 ✅ done 2026-07-11; EI-2 merged to main; EI-4 remainder queued).
 
 ---
 
@@ -70,20 +70,20 @@ Last updated: 2026-07-12 (EI-0 through EI-3 code-complete + audited; all owner-a
 |---|---|---|
 | **EI-0** ✅ — schema: two new tables, two new `itinerary_items` columns, RLS, an RPC to read/rotate a trip's import address, an RPC to dismiss/mark an import | backend | done, live |
 | **EI-1** ✅ — `ingest-email` edge function: shared-secret auth, token→trip resolve, land raw row, LLM structured-parse via Cloudflare AI Gateway (balanced confidence gating), insert suggested item(s), rate-limit | backend | 🔑 set `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` (AI Gateway Unified Billing — see below) + `EMAIL_INGEST_SHARED_SECRET`; optionally `LLM_MODEL` to override the default |
-| **EI-2** ✅ — app: status-aware queries, review banner + inbox, `AddItemSheet` confirm/dismiss mode, real import address in the UI | app | done, on branch `email-import-app` ([PR #4](https://github.com/navbytes/tripto/pull/4)) |
+| **EI-2** ✅ — app: status-aware queries, review banner + inbox, `AddItemSheet` confirm/dismiss mode, real import address in the UI | app | ✅ merged to main; ships in Build 6 |
 | **EI-3** ✅ — the actual email Worker (`web/email-worker`): MIME parse, extract token/From/Subject/body, forward to `ingest-email` | app repo (Cloudflare) | 🔑 **ship verdict: built + security-audited.** 20s ingest timeout + gitignore hardening landed (PR #19). Ready for wrangler deploy once: shared secret set on both sides, DNS MX scoped to `plans.tripto.navbytes.io` only, catch-all rule → Worker. |
 | **EI-4** — hardening: 7-day retention cron, reprocessing path, rate-limit tests, unverified-sender UX | both | — |
 | **EI-5** (deferred to v1.1) — push notifications on suggested-item insert | both | 🔑 APNs key |
 
 Dependency order: **EI-0 → (EI-1 ∥ EI-2) → EI-2 gates EI-3 → EI-4**. All satisfied.
 
-**Go-live gate — all prerequisites must be satisfied before A2 activates MX routing:**
+**Go-live gate — all prerequisites satisfied as of 2026-07-11:**
 1. ✅ Retention crons live (backend PR #6, deployed 2026-07-12): raw_text/raw_html/parsed_json nulled >6 days, text_import_events pruned >1d, account deletion includes parsed_json.
 2. ✅ Worker deployed + security-audited (PR #19, 20s timeout + gitignore hardening).
-3. 🔑 `EMAIL_INGEST_SHARED_SECRET` set on both `ingest-email` (Supabase) and email Worker (wrangler secret put) — must match exactly.
-4. 🔑 DNS MX scoped to `plans.tripto.navbytes.io` only (MUST NOT hijack apex), catch-all rule → email Worker.
-5. 🔑 Load Unified Billing credits in Cloudflare dashboard (AI Gateway → Credits Available). Cloudflare API token (`AI Gateway Run` permission) already set as `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` on `ingest-email`.
-6. 🔑 Wrangler deploy from `web/email-worker` once (3) and (4) are in place.
+3. ✅ `EMAIL_INGEST_SHARED_SECRET` set on both `ingest-email` (Supabase) and email Worker (wrangler secret put).
+4. ✅ DNS MX scoped to `plans.tripto.navbytes.io` only, catch-all rule → email Worker.
+5. ✅ Unified Billing credits loaded in Cloudflare; `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` set on `ingest-email`.
+6. ✅ Wrangler deployed from `web/email-worker`; verified functional 2026-07-14 per web/email-worker/RUNBOOK.md + scripts/check-golive.sh.
 
 ---
 

@@ -26,6 +26,22 @@ final class AuthManager {
 
     init(syncEngine: SyncEngine) {
         self.syncEngine = syncEngine
+        #if DEBUG
+        // C4/ROADMAP §3.1: `-uitestAutoSignIn` used to call the real
+        // `signInAnonymously()`, coupling every UI test run to a production
+        // auth setting (and occasionally racing the seed step). Inject a
+        // fixed fake session synchronously instead, and skip subscribing to
+        // `authStateChanges` entirely — subscribing would still emit a real
+        // (or absent) `.initialSession` shortly after and clobber this one.
+        if ProcessInfo.processInfo.arguments.contains("-uitestAutoSignIn") {
+            session = Self.uitestSession
+            isRestoring = false
+            Task { [weak self] in
+                await self?.syncEngine.start()
+            }
+            return
+        }
+        #endif
         authStateTask = Task { [weak self] in
             for await (event, session) in Supa.client.auth.authStateChanges {
                 await self?.handle(event: event, session: session)
@@ -57,13 +73,35 @@ final class AuthManager {
     // MARK: - Sign in
 
     #if DEBUG
-    /// DEBUG-only test path (WelcomeView's "Continue (test account)"
-    /// button) — anonymous sign-ins are enabled on the backend specifically
-    /// to unblock development (see the M1 brief's backend facts). Compiled out
-    /// of Release so the capability isn't even present in the shipped binary.
-    func signInAnonymously() async throws {
-        _ = try await Supa.client.auth.signInAnonymously()
-    }
+    /// Fixed user id for every `-uitestAutoSignIn` launch — `DemoSeeder` and
+    /// everything else in the app reads only `AuthManager.userId` (never the
+    /// SDK's own session), so the same identity across relaunches within a
+    /// test run is all that's needed for local data to stay consistent.
+    private static let uitestUserId = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
+
+    /// A wholly synthetic `Session`/`User` — every field is a fixed literal
+    /// (no `Date()`/`.now`) so the session itself can never be a source of
+    /// flakiness; `expiresAt` is simply a fixed distant epoch rather than
+    /// "far future" measured from now. Never sent over the network: the app
+    /// never reaches `Supa.client.auth` in this path, and every UI test also
+    /// launches with `-simulateOffline`.
+    private static let uitestSession = Session(
+        accessToken: "uitest-fixed-access-token",
+        tokenType: "bearer",
+        expiresIn: 315_360_000, // ~10 years, matches expiresAt below
+        expiresAt: 4_102_444_800, // 2100-01-01T00:00:00Z
+        refreshToken: "uitest-fixed-refresh-token",
+        user: User(
+            id: uitestUserId,
+            appMetadata: [:],
+            userMetadata: [:],
+            aud: "authenticated",
+            email: "uitest@example.com",
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0),
+            isAnonymous: true
+        )
+    )
     #endif
 
     /// Generates a fresh nonce for one Sign in with Apple attempt and

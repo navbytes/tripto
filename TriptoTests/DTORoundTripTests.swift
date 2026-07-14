@@ -197,4 +197,138 @@ final class DTORoundTripTests: XCTestCase {
         let redecoded = try JSONCoding.decoder.decode(ItineraryItemDTO.self, from: reencoded)
         XCTAssertEqual(redecoded.source, "text_import")
     }
+
+    /// EI-4 (`itinerary_items.sender_verified`): a payload from a server
+    /// that hasn't shipped this column yet must still decode — the exact
+    /// scenario this additive/nullable field exists to survive. `Bool?`'s
+    /// synthesized `decodeIfPresent` handles a wholly absent key the same
+    /// way it handles an explicit `null`, so no custom decoding is needed.
+    /// Also pins that `nil` never trips the review-UI badge/callout
+    /// predicate (`isFromUnverifiedSender`).
+    func testItineraryItemDTODecodesAbsentSenderVerifiedAsNilAndDoesNotBadge() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "category": "activity",
+          "title": "City walk",
+          "starts_at": "2026-05-14T12:20:00.000+00:00",
+          "ends_at": null,
+          "tz": "America/New_York",
+          "location_name": "",
+          "location_lat": null,
+          "location_lng": null,
+          "confirmation": null,
+          "notes": null,
+          "details": {},
+          "status": "confirmed",
+          "source": "manual",
+          "created_by": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_by": null
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ItineraryItemDTO.self, from: Data(json.utf8))
+        XCTAssertNil(dto.senderVerified)
+
+        let model = ItineraryItem(dto: dto)
+        XCTAssertNil(model.senderVerified)
+        XCTAssertFalse(model.isFromUnverifiedSender)
+        XCTAssertEqual(model.toDTO(), dto)
+    }
+
+    /// EI-4: `sender_verified: false` — the forwarder isn't a trip member —
+    /// round-trips through both `init(dto:)` and `apply(_:)` (the pull-path
+    /// mutation `SyncStore.applyItineraryItems` actually calls), and is the
+    /// one case that must flip the review-UI predicate to `true`.
+    func testItineraryItemDTORoundTripsSenderVerifiedFalseAndBadges() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "category": "flight",
+          "title": "TAP TP1234",
+          "starts_at": "2026-05-14T12:20:00.000+00:00",
+          "ends_at": null,
+          "tz": "America/New_York",
+          "location_name": "",
+          "location_lat": null,
+          "location_lng": null,
+          "confirmation": null,
+          "notes": null,
+          "details": {},
+          "status": "suggested",
+          "source": "email_import",
+          "sender_verified": false,
+          "created_by": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_by": null
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ItineraryItemDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.senderVerified, false)
+
+        let model = ItineraryItem(dto: dto)
+        XCTAssertEqual(model.senderVerified, false)
+        XCTAssertTrue(model.isFromUnverifiedSender)
+        XCTAssertEqual(model.toDTO(), dto)
+
+        // The pull-path mutation of an already-existing local row, not just
+        // first insert via `init(dto:)` — `SyncStore.applyItineraryItems`
+        // calls this on every row it already has a local copy of.
+        let existing = TestFixtures.makeItineraryItem(startsAt: .now)
+        existing.senderVerified = true
+        existing.apply(dto)
+        XCTAssertEqual(existing.senderVerified, false)
+        XCTAssertTrue(existing.isFromUnverifiedSender)
+    }
+
+    /// EI-4: `sender_verified: true` — the forwarder IS a trip member —
+    /// must decode and round-trip like any other value, but must NOT badge;
+    /// only an explicit `false` does (see `isFromUnverifiedSender`'s doc
+    /// comment on `ItineraryItem`).
+    func testItineraryItemDTORoundTripsSenderVerifiedTrueAndDoesNotBadge() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "category": "flight",
+          "title": "TAP TP1234",
+          "starts_at": "2026-05-14T12:20:00.000+00:00",
+          "ends_at": null,
+          "tz": "America/New_York",
+          "location_name": "",
+          "location_lat": null,
+          "location_lng": null,
+          "confirmation": null,
+          "notes": null,
+          "details": {},
+          "status": "suggested",
+          "source": "email_import",
+          "sender_verified": true,
+          "created_by": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_by": null
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ItineraryItemDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.senderVerified, true)
+
+        let model = ItineraryItem(dto: dto)
+        XCTAssertEqual(model.senderVerified, true)
+        XCTAssertFalse(model.isFromUnverifiedSender)
+        XCTAssertEqual(model.toDTO(), dto)
+    }
 }
