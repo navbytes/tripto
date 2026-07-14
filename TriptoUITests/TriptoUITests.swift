@@ -96,23 +96,18 @@ final class TriptoUITests: XCTestCase {
 
     // MARK: - Double-tap Save: exactly one item, not one per tap
     //
-    // `AddItemSheet.save()` has no in-flight guard between its synchronous
-    // SwiftData insert and the `dismiss()` call it ends with — no
-    // `isSaving`-style disable, no debounce (unlike `dismissSuggestion()`'s
-    // own `isDismissingSuggestion` guard a few lines away in the same
-    // footer). A fast double-tap can land both taps before the sheet's
-    // dismiss animation removes the button from the hittable hierarchy,
-    // each one independently passing `guard isValid` and inserting its own
-    // `ItineraryItem`.
-    //
-    // CONFIRMED LIVE (not hypothetical): running this without the
-    // `XCTExpectFailure` wrapper below reproducibly creates *two* "ZZ999"
-    // flights from one double-tap — a real defect, reported to the CTO
-    // (Tester's brief: app-code fixes aren't this role's to make). Wrapped
-    // so the suite stays green until a guard lands; `XCTExpectFailure`
-    // defaults to `strict: true`, so the moment a fix makes this pass for
-    // real, THIS test starts failing on the "unexpected pass" until the
-    // wrapper is removed — a built-in tripwire that the fix landed.
+    // Fix-round D2: `AddItemSheet.save()` used to have no in-flight guard
+    // between its synchronous SwiftData insert and the `dismiss()` call it
+    // ends with — a fast double-tap could land both taps before the sheet's
+    // dismiss animation removed the button from the hittable hierarchy, each
+    // one independently passing `guard isValid` and inserting its own
+    // `ItineraryItem` (confirmed live pre-fix: reproducibly created two
+    // "ZZ..." flights from one double-tap). `save()` now guards on a
+    // synchronous `isSaving` flag (same shape as `dismissSuggestion()`'s own
+    // `isDismissingSuggestion`), which also disables both footer Save
+    // buttons. This test used to wrap its final assertion in
+    // `XCTExpectFailure` as a tripwire for that fix landing; now unwrapped —
+    // it asserts the real, fixed behavior directly.
 
     /// `.doubleTap()` (one XCUITest call synthesizing two touches back to
     /// back) reproduces a real fast double-tap far more reliably than two
@@ -146,23 +141,24 @@ final class TriptoUITests: XCTestCase {
             app.staticTexts["Lisbon"].waitForExistence(timeout: 10), "sheet didn't dismiss back to the trip"
         )
 
-        // `BookingRow` folds title/date/pending into one combined
-        // accessibility element (`.accessibilityElement(children: .ignore)`),
-        // so the saved item isn't its own bare static text — match on any
-        // element whose label contains this run's unique flight number
-        // instead. Flight is the first category group (`BookingsTabView
+        // `BookingRow` is a `NavigationLink` (bridges to a `.button`-type
+        // element outside a `List`) wrapping `.accessibilityElement(children:
+        // .ignore)` + a combined label — VoiceOver hears one stop per row.
+        // But `.ignore` only governs what VoiceOver announces; it does NOT
+        // remove the row's inner `Text(item.title)` from XCUITest's own
+        // element tree, so a broad `descendants(matching: .any)` query
+        // double-counts a single real row: once for the row's own combined
+        // `.button` element, again for that inner static text — both
+        // independently contain the flight number substring. Scoping to
+        // `.buttons` only (the row's own bridged type; a plain `Text` is
+        // `.staticText`, never `.button`) counts real rows, not incidental
+        // sub-elements. Flight is the first category group (`BookingsTabView
         // .groups` iterates `ItemCategory.allCases`) and this is the only
         // "current" (not "past") flight in the seed, so it's on-screen with
         // no scrolling.
-        let matches = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", flightNo))
+        let matches = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", flightNo))
         XCTAssertGreaterThan(matches.count, 0, "the new flight never appeared on the Bookings tab")
-        XCTExpectFailure(
-            "Known defect: AddItemSheet.save() has no in-flight guard, so a fast double-tap on "
-                + "\"Add flight to itinerary\" creates two ItineraryItems instead of one. Remove this "
-                + "wrapper once a guard (e.g. an isSaving flag disabling the button) lands."
-        ) {
-            XCTAssertEqual(matches.count, 1, "double-tapping Save should create exactly one flight, not one per tap")
-        }
+        XCTAssertEqual(matches.count, 1, "double-tapping Save should create exactly one flight, not one per tap")
     }
 
     // MARK: - Packing: add an item, then check it off

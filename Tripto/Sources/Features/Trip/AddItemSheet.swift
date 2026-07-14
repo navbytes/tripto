@@ -153,6 +153,17 @@ struct AddItemSheet: View {
     @State private var isDismissingSuggestion = false
     @State private var dismissError: String?
 
+    /// Fix-round D2: `save()` has no `await` (a fully synchronous SwiftData
+    /// insert + `dismiss()`), so a fast double-tap can land a second Button
+    /// action before either SwiftUI re-renders the `.disabled` footer or the
+    /// dismiss animation removes it — confirmed live to insert two
+    /// `ItineraryItem`s from one double-tap. Same guard shape as
+    /// `isDismissingSuggestion` above: set synchronously as `save()`'s first
+    /// statement (so a second, still-synchronous call sees it immediately,
+    /// no render pass required) and gates both footer Save buttons'
+    /// `.disabled`.
+    @State private var isSaving = false
+
     /// Phase 3 (P3.5): `pasteFirstBanner`'s own sub-sheet — opens the exact
     /// same `PasteImportSheet` every other entry point uses, untouched.
     @State private var isPresentingPasteImport = false
@@ -746,7 +757,7 @@ struct AddItemSheet: View {
                     .shadow(color: isValid ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
-            .disabled(!isValid || isDismissingSuggestion)
+            .disabled(!isValid || isDismissingSuggestion || isSaving)
 
             // P3.6: flights come in pairs — saves the leg on screen, then
             // resets the form in place for the reversed return leg (see
@@ -765,12 +776,17 @@ struct AddItemSheet: View {
                             .font(Typo.body(weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
-                    .foregroundStyle(isValid ? Palette.amberInk : Palette.slate)
+                    // Fix-round D3: `Palette.ink` (~14.4:1 light, ~10.9:1
+                    // dark on this fill), not `amberInk` — that pairing on
+                    // `amberSoft` measures ~4.45:1 in light mode, under the
+                    // 4.5:1 AA bar (the exact pairing `BoardingPassCard
+                    // .swift`'s own day-badge comment already flags/avoids).
+                    .foregroundStyle(isValid ? Palette.ink : Palette.slate)
                     .padding(.vertical, Spacing.md)
                     .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(!isValid || isDismissingSuggestion)
+                .disabled(!isValid || isDismissingSuggestion || isSaving)
             }
 
             // EI-2: a shared triage queue (`docs/EMAIL_IMPORT_PLAN.md`
@@ -869,8 +885,16 @@ struct AddItemSheet: View {
     /// `saveAndAddReturnLeg()` is the one caller that passes `false`, so it
     /// can keep this same sheet open and reset it for the return leg
     /// instead of closing right after the outbound leg lands.
+    ///
+    /// Fix-round D2: `guard !isSaving` (set `true` immediately below, before
+    /// any other work) is what actually closes the double-tap window — see
+    /// `isSaving`'s own doc comment for why the footer's `.disabled` alone
+    /// isn't enough. Every exit below resets `isSaving` back to `false`
+    /// EXCEPT the final dismissing one: that path tears the view down
+    /// anyway, so there's nothing left to re-enable.
     private func save(andDismiss: Bool = true) {
-        guard isValid else { return }
+        guard isValid, !isSaving else { return }
+        isSaving = true
         saveError = nil
         dismissError = nil
         let now = Date()
@@ -910,6 +934,7 @@ struct AddItemSheet: View {
                 // sync, reconciling assignees, toasting, or dismissing, so a
                 // failed save never reads to the user as a successful one.
                 saveError = .writeFailed
+                isSaving = false
                 return
             }
             let dto = editing.toDTO()
@@ -918,7 +943,10 @@ struct AddItemSheet: View {
             reconcileAssignees(itemId: rowId)
             onToast(toastMessage(wasReviewingSuggestion ? "confirmed" : "updated"))
         } else {
-            guard let creatorId = authManager.userId ?? tripCreatedBy else { return }
+            guard let creatorId = authManager.userId ?? tripCreatedBy else {
+                isSaving = false
+                return
+            }
             let item = ItineraryItem(
                 id: UUID(), tripId: tripId, categoryRaw: category.rawValue, title: fields.title,
                 startsAt: fields.startsAt, endsAt: fields.endsAt, tz: fields.tz,
@@ -933,6 +961,7 @@ struct AddItemSheet: View {
                 try modelContext.save()
             } catch {
                 saveError = .writeFailed
+                isSaving = false
                 return
             }
             let dto = item.toDTO()
@@ -948,7 +977,14 @@ struct AddItemSheet: View {
         // ever reaching here, so this can't fire on a save that didn't land.
         didSave.toggle()
         persistZoneDefaults()
-        if andDismiss { dismiss() }
+        if andDismiss {
+            dismiss()
+        } else {
+            // Return-leg path: the sheet stays open and reusable, so the
+            // guard must release — otherwise the return leg's own Save
+            // would stay permanently disabled.
+            isSaving = false
+        }
     }
 
     /// "Save & add the return leg" (docs/UX_REDESIGN_ROADMAP.md P3.6):
@@ -961,10 +997,22 @@ struct AddItemSheet: View {
     /// add-mode sheet (the only mode `showsReturnLegAction` allows this CTA
     /// in), so that second Save always takes `save()`'s "create a new item"
     /// branch — never re-editing the leg just saved.
+    ///
+    /// Fix-round D1 (data loss): `save()`'s own `reconcileAssignees(itemId:)`
+    /// ends by setting `originalAssigneeProfileIds = selectedAssigneeProfileIds`
+    /// — correct for editing one persistent item over time, but leg 2 is a
+    /// *different* item with zero real `ItemAssignee` rows of its own. Left
+    /// alone, leg 2's `reconcileAssignees` would then diff the still-selected
+    /// people against that stale "already applied" snapshot, compute
+    /// `toAdd = ∅`, and silently persist no assignees at all while the UI
+    /// keeps showing them selected. Resetting to `[]` here — after leg 1's
+    /// save, before the reset below — makes leg 2's reconcile see every
+    /// selected person as new, exactly like a fresh item should.
     private func saveAndAddReturnLeg() {
         guard isValid else { return }
         save(andDismiss: false)
         guard saveError == nil else { return }
+        originalAssigneeProfileIds = []
         let next = Self.returnLegFields(
             fromIATA: fromIATA, toIATA: toIATA,
             departureZone: departureZone, arrivalZone: arrivalZone,
@@ -1109,13 +1157,28 @@ struct AddItemSheet: View {
         originalAssigneeProfileIds = ids
     }
 
+    /// The pure diff behind `reconcileAssignees` below — which profile ids
+    /// need an `ItemAssignee` insert/delete to bring the persisted set in
+    /// line with what's currently selected. Factored out (mirroring
+    /// `flightInstants`/`returnLegFields`'s "pure function computes, the
+    /// view applies it" split) so `AddItemSheetAssigneeReconciliationTests`
+    /// can pin fix-round D1's exact regression — `original` reset to `[]`
+    /// between two saves of two *different* items — without a live
+    /// `ModelContext`.
+    static func assigneeReconciliation(
+        selected: Set<UUID>, original: Set<UUID>
+    ) -> (toAdd: Set<UUID>, toRemove: Set<UUID>) {
+        (selected.subtracting(original), original.subtracting(selected))
+    }
+
     /// Diffs `selectedAssigneeProfileIds` against the snapshot captured at
     /// seed time and applies exactly the additions/removals — not a
     /// wholesale delete-then-reinsert, so an unrelated field save doesn't
     /// churn rows nobody actually changed.
     private func reconcileAssignees(itemId: UUID) {
-        let toAdd = selectedAssigneeProfileIds.subtracting(originalAssigneeProfileIds)
-        let toRemove = originalAssigneeProfileIds.subtracting(selectedAssigneeProfileIds)
+        let (toAdd, toRemove) = Self.assigneeReconciliation(
+            selected: selectedAssigneeProfileIds, original: originalAssigneeProfileIds
+        )
 
         for profileId in toAdd {
             let assignee = ItemAssignee(itemId: itemId, profileId: profileId)

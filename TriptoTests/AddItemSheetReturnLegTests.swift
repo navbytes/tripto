@@ -126,3 +126,46 @@ final class AddItemSheetReturnLegTests: XCTestCase {
         XCTAssertEqual(comps.day, 1)
     }
 }
+
+/// Fix-round D1 (data loss): leg 2 is a *different* `ItineraryItem`, so its
+/// assignee reconciliation must start from an empty baseline, not leg 1's
+/// already-applied one — `saveAndAddReturnLeg()` resets
+/// `originalAssigneeProfileIds = []` right after leg 1's save to guarantee
+/// that. Exercises the same pure `AddItemSheet.assigneeReconciliation`
+/// `reconcileAssignees` itself calls, so this pins the production diff
+/// logic directly rather than re-deriving it.
+final class AddItemSheetAssigneeReconciliationTests: XCTestCase {
+    /// The regression itself: without the D1 reset, leg 2 would diff the
+    /// still-selected people against the *same* set `reconcileAssignees`
+    /// already recorded as "applied" for leg 1 — `toAdd` comes back empty,
+    /// silently persisting zero `ItemAssignee` rows for leg 2's brand-new
+    /// item even though the UI still shows everyone selected.
+    func testUnresetOriginalAfterLeg1SaveWouldDropAllAssigneesForLeg2() {
+        let grandma = UUID()
+        let meera = UUID()
+        let selectedForBothLegs: Set<UUID> = [grandma, meera]
+        // Mirrors what `reconcileAssignees` leaves `originalAssigneeProfileIds`
+        // as after leg 1's save: equal to whatever was selected.
+        let staleOriginalFromLeg1 = selectedForBothLegs
+
+        let (toAdd, _) = AddItemSheet.assigneeReconciliation(
+            selected: selectedForBothLegs, original: staleOriginalFromLeg1
+        )
+        XCTAssertTrue(toAdd.isEmpty, "documents the bug: an un-reset baseline hides every assignee from leg 2")
+    }
+
+    /// The fix: resetting `original` to `[]` between the two saves (same
+    /// people still selected) makes leg 2's diff see everyone as new —
+    /// exactly the "leg 2 persists the same assignee set" the CTO asked for.
+    func testResetOriginalToEmptyAfterLeg1SaveAddsEveryAssigneeForLeg2() {
+        let grandma = UUID()
+        let meera = UUID()
+        let selectedForBothLegs: Set<UUID> = [grandma, meera]
+
+        let (toAdd, toRemove) = AddItemSheet.assigneeReconciliation(
+            selected: selectedForBothLegs, original: []
+        )
+        XCTAssertEqual(toAdd, selectedForBothLegs, "leg 2 must persist the exact same assignees leg 1 had")
+        XCTAssertTrue(toRemove.isEmpty)
+    }
+}
