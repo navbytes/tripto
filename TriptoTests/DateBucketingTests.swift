@@ -231,4 +231,38 @@ final class DateBucketingTests: XCTestCase {
 
         XCTAssertEqual(DayDate.from(now, calendar: tripCalendar), DayDate.from(now, calendar: deviceCalendar))
     }
+
+    /// `liveTimeZone` picks "whichever item ends latest" via `Sequence
+    /// .max(by:)`, which on a true tie keeps the FIRST tied element in
+    /// iteration order (Swift's own stdlib behavior — verified directly
+    /// against this exact comparator, not assumed), not the last. Not a
+    /// contract `liveTimeZone`'s own doc comment states explicitly, so
+    /// pinned here as characterization: a real trip with two items ending
+    /// at the exact same instant in different zones is vanishingly rare,
+    /// and either zone is an equally defensible "today" once that happens
+    /// — but a later refactor (e.g. swapping to `.sorted().last`) must not
+    /// silently flip which zone wins without a test noticing.
+    func testLiveTimeZoneTieBreakPicksWhicheverTiedItemComesFirstInTheArray() {
+        let sharedEnd = instant(2026, 7, 20, 12, 0, tz: "UTC")
+        let tokyoCheckout = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Tokyo checkout",
+            startsAt: instant(2026, 7, 18, 12, 0, tz: "UTC"), endsAt: sharedEnd, tz: "Asia/Tokyo"
+        )
+        var arrivalDetails = ItemDetails.empty
+        arrivalDetails.arrivalTz = "Pacific/Auckland"
+        let flightToAuckland = TestFixtures.makeItineraryItem(
+            category: .flight, title: "Flight to Auckland",
+            startsAt: instant(2026, 7, 20, 3, 0, tz: "UTC"), endsAt: sharedEnd,
+            tz: "America/Los_Angeles", details: arrivalDetails
+        )
+
+        XCTAssertEqual(
+            TripDateBucketing.liveTimeZone(items: [tokyoCheckout, flightToAuckland]).identifier, "Asia/Tokyo",
+            "tied end instants: the FIRST array element wins"
+        )
+        XCTAssertEqual(
+            TripDateBucketing.liveTimeZone(items: [flightToAuckland, tokyoCheckout]).identifier, "Pacific/Auckland",
+            "same tie, opposite array order: the first element now flips which zone wins"
+        )
+    }
 }

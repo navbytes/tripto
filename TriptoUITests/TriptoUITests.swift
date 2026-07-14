@@ -189,4 +189,45 @@ final class TriptoUITests: XCTestCase {
             "Tapping the pill did not present PasteImportSheet"
         )
     }
+
+    // MARK: - P1+P2 milestone screenshots (docs/UX_REDESIGN_ROADMAP.md Phase
+    // 2's own "Verify wave: tester, reviewer, ux-expert (timeline milestone:
+    // P1+P2 screenshots)") — light/dark appearance and Dynamic Type size are
+    // simulator-level settings this test can't flip mid-run, so they're
+    // driven from OUTSIDE (`xcrun simctl ui <device> appearance|content_size`
+    // against the same booted device, host-side, between three separate
+    // invocations of `testCaptureItineraryScreen` — see the Tester report
+    // for the exact commands). Each method here is config-agnostic: it just
+    // navigates and attaches a full-screen `XCTAttachment`, whatever the
+    // device's current appearance/type size happens to be.
+
+    func testCaptureHomeScreen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 30), "Home never showed the seeded trip")
+        attachScreenshot(named: "home", of: app)
+    }
+
+    /// `.itinerary` is `TripView`'s own default tab (`selectedTab: Tab =
+    /// .itinerary`), so no extra tap is needed once the trip opens. The
+    /// seeded trip (as of this milestone) carries a tz-crossing flight with
+    /// its landing note, an overlapping hotel pair (`DemoSeeder`'s
+    /// `hotel1`/`hotel1Duplicate`) so the conflict banner + per-card flag
+    /// both render, and several multi-night stay strips.
+    func testCaptureItineraryScreen() {
+        let app = launch()
+        XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 30), "trip never opened")
+        // Let the hero's one-shot layout measurement + the conflict/today
+        // auto-scroll `.task` settle before capturing.
+        Thread.sleep(forTimeInterval: 1.5)
+        attachScreenshot(named: "itinerary", of: app)
+    }
+
+    private func attachScreenshot(named name: String, of app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
 }

@@ -361,7 +361,23 @@ enum DemoSeeder {
             details: room4, userId: userId, now: now
         )
 
-        return [hotel1, hotel2, hotel3, hotel4]
+        // UX P2 milestone (docs/UX_REDESIGN_ROADMAP.md Phase 2, P2.1): an
+        // accidental duplicate booking for the exact same nights as
+        // `hotel1` — the seed's own instance of `StayConflicts`' "Two stays
+        // overlap all N nights" scenario, so the conflict banner + per-card
+        // flag have something to show in the P1+P2 milestone screenshots
+        // (Tester, verify wave). Purely additive: every other seeded item
+        // above is unchanged.
+        var room1Duplicate = ItemDetails.empty; room1Duplicate.room = "12"
+        let hotel1Duplicate = makeItem(
+            tripId: tripId, category: .hotel, title: "Alfama Guesthouse",
+            startsAt: instant(2026, 5, 14, 16, 0, calendar: lisbonCalendar),
+            endsAt: instant(2026, 5, 17, 11, 0, calendar: lisbonCalendar),
+            tz: lisbonTz.identifier, locationName: "Alfama, Lisbon", confirmation: "AG-30071",
+            details: room1Duplicate, userId: userId, now: now
+        )
+
+        return [hotel1, hotel2, hotel3, hotel4, hotel1Duplicate]
     }
 
     // MARK: - Filler activities/food (spread across the trip's remaining days)
