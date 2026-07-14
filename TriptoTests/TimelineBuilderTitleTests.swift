@@ -233,3 +233,81 @@ final class TimelineBuilderNowLineTests: XCTestCase {
         XCTAssertFalse(model.isPast, "now == startsAt must not count as past yet")
     }
 }
+
+/// docs/UX_REDESIGN_ROADMAP.md Phase 1: `TZShiftChipRow`'s visual restyle
+/// must not change what `TimelineBuilder.build` itself emits — this pins
+/// the existing row order/content plus the new `TZShiftModel.kind` tag that
+/// lets `ItineraryTabView` skip a landing row now shown in its flight's own
+/// `BoardingPassCard` footer instead of a second rail marker.
+final class TimelineBuilderTZShiftKindTests: XCTestCase {
+    private func day(_ year: Int, _ month: Int, _ day: Int) -> DayDate { DayDate(year: year, month: month, day: day) }
+
+    private func instant(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int, tz: String) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: tz)!
+        var components = DateComponents()
+        components.year = year; components.month = month; components.day = day
+        components.hour = hour; components.minute = minute
+        return calendar.date(from: components)!
+    }
+
+    /// The exact HKG->BKK scenario the design mockup illustrates: a flight
+    /// lands in a new zone, and the very next item (already booked in the
+    /// arrival zone) triggers no *separate* zone-change chip — only the
+    /// flight's own landing row, which must be tagged `.landing` so the
+    /// view knows not to render a second marker for it. Row order/ids are
+    /// unchanged from before this milestone.
+    func testLandingRowIsTaggedAndOrderedRightAfterItsFlightCard() {
+        var details = ItemDetails.empty
+        details.arrivalTz = "Asia/Bangkok"
+        let flight = TestFixtures.makeItineraryItem(
+            category: .flight,
+            startsAt: instant(2026, 7, 20, 12, 20, tz: "Asia/Hong_Kong"),
+            endsAt: instant(2026, 7, 20, 14, 0, tz: "Asia/Bangkok"),
+            tz: "Asia/Hong_Kong", details: details
+        )
+        let rentalCar = TestFixtures.makeItineraryItem(
+            category: .transport, startsAt: instant(2026, 7, 20, 14, 45, tz: "Asia/Bangkok"), tz: "Asia/Bangkok"
+        )
+        let sections = [
+            ItineraryDayBucketing.Section(day: day(2026, 7, 20), dayNumber: 1, rows: [.item(flight), .item(rentalCar)])
+        ]
+
+        let models = TimelineBuilder.build(sections: sections, pendingRowIds: [], myUserId: nil, namesById: [:])
+
+        XCTAssertEqual(
+            models[0].rows.map(\.id),
+            ["card-\(flight.id.uuidString)", "landing-\(flight.id.uuidString)", "card-\(rentalCar.id.uuidString)"]
+        )
+        guard case .tzShift(let landingModel) = models[0].rows[1] else { return XCTFail("expected a tzShift row") }
+        XCTAssertEqual(landingModel.kind, .landing)
+    }
+
+    /// A genuine non-flight zone crossing is still tagged `.zoneChange` —
+    /// the kind that keeps rendering as the rail's hairline marker.
+    func testNonFlightZoneCrossingIsTaggedZoneChange() {
+        let lisbonActivity = TestFixtures.makeItineraryItem(
+            category: .activity, startsAt: instant(2026, 5, 21, 8, 0, tz: "Europe/Lisbon"), tz: "Europe/Lisbon"
+        )
+        let madridActivity = TestFixtures.makeItineraryItem(
+            category: .activity, startsAt: instant(2026, 5, 21, 12, 0, tz: "Europe/Madrid"), tz: "Europe/Madrid"
+        )
+        let sections = [
+            ItineraryDayBucketing.Section(
+                day: day(2026, 5, 21), dayNumber: 1, rows: [.item(lisbonActivity), .item(madridActivity)]
+            )
+        ]
+
+        let models = TimelineBuilder.build(sections: sections, pendingRowIds: [], myUserId: nil, namesById: [:])
+
+        XCTAssertEqual(
+            models[0].rows.map(\.id),
+            [
+                "card-\(lisbonActivity.id.uuidString)", "shift-to-\(madridActivity.id.uuidString)",
+                "card-\(madridActivity.id.uuidString)"
+            ]
+        )
+        guard case .tzShift(let shiftModel) = models[0].rows[1] else { return XCTFail("expected a tzShift row") }
+        XCTAssertEqual(shiftModel.kind, .zoneChange)
+    }
+}

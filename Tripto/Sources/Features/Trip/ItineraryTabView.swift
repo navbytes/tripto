@@ -361,7 +361,20 @@ struct ItineraryTabView: View {
         case .card(let model): TimelineCardRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .staying(let model): StayingStripRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .checkOut(let model): CheckOutRow(model: model, typeSize: dynamicTypeSize).equatable()
-        case .tzShift(let model): TZShiftChipRow(model: model, typeSize: dynamicTypeSize).equatable()
+        case .tzShift(let model):
+            // docs/UX_REDESIGN_ROADMAP.md Phase 1, note 7: a flight's
+            // landing note now lives in its own `BoardingPassCard` footer
+            // (`TimelineCardModel.boardingPass`). This row is still emitted
+            // — `TimelineBuilder.build`'s emission logic/ordering is
+            // untouched — so rendering nothing for it here is a view-only
+            // skip, not a data change; rendering `TZShiftChipRow` again
+            // right underneath the pass would just repeat the same
+            // sentence a second time.
+            if model.kind == .landing {
+                EmptyView()
+            } else {
+                TZShiftChipRow(model: model, typeSize: dynamicTypeSize).equatable()
+            }
         case .nowLine: NowLineRow(typeSize: dynamicTypeSize).equatable()
         }
     }
