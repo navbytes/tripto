@@ -136,17 +136,29 @@ struct TimelineCardRow: View, Equatable {
     private var categoryWord: String { model.category.displayName }
 
     private var a11yLabel: String {
-        var parts = [categoryWord, model.title]
-        // UX audit finding 5: several categories' subtitle falls back to
-        // their bare category word ("Flight"/"Activity"/"Food"/"Transport"
-        // — `TimelineBuilder.subtitle`'s empty-details fallback), which
-        // VoiceOver then read twice back to back. Skipping the subtitle
-        // when it's just a repeat of `categoryWord` leaves the visual card
-        // (which still wants a non-empty second line) untouched.
-        if model.subtitle != categoryWord {
-            parts.append(model.subtitle)
+        var parts: [String]
+        if let pass = model.boardingPass {
+            // docs/UX_REDESIGN_ROADMAP.md Phase 1's AX bullet: "VoiceOver
+            // reads one coherent sentence per pass (departure, arrival,
+            // duration, landing note)." This row's own outer
+            // `.accessibilityElement(children: .ignore)` (see `body`) means
+            // `BoardingPassCard`'s own internal accessibility content would
+            // otherwise be silently discarded — folding its parts in here
+            // instead is what actually makes them reach VoiceOver.
+            parts = [categoryWord] + BoardingPassCard.accessibilityParts(for: pass)
+        } else {
+            parts = [categoryWord, model.title]
+            // UX audit finding 5: several categories' subtitle falls back to
+            // their bare category word ("Flight"/"Activity"/"Food"/"Transport"
+            // — `TimelineBuilder.subtitle`'s empty-details fallback), which
+            // VoiceOver then read twice back to back. Skipping the subtitle
+            // when it's just a repeat of `categoryWord` leaves the visual card
+            // (which still wants a non-empty second line) untouched.
+            if model.subtitle != categoryWord {
+                parts.append(model.subtitle)
+            }
+            parts.append("at \(model.timeText)\(model.zoneLabel.map { " \($0)" } ?? "")")
         }
-        parts.append("at \(model.timeText)\(model.zoneLabel.map { " \($0)" } ?? "")")
         if !model.assignees.isEmpty {
             parts.append(Self.assigneesPhrase(for: model.assignees))
         }
@@ -219,7 +231,35 @@ struct TimelineCardRow: View, Equatable {
         .frame(width: TimelineLayout.railWidth)
     }
 
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 1: for a flight (`model.boardingPass`
+    /// set), the whole card body becomes the boarding pass instead of the
+    /// icon-tile/title/subtitle layout below — the time gutter/rail node
+    /// above are untouched either way. `BoardingPassCard` is fully
+    /// self-contained (own background/shape/shadow, since Phase 3 re-embeds
+    /// it with no surrounding card chrome at all), so this branch only adds
+    /// the same pending-sync dashed border and rail gap every other card
+    /// gets, not a second background/shadow.
+    @ViewBuilder
     private var card: some View {
+        if let pass = model.boardingPass {
+            BoardingPassCard(model: pass, isPast: model.isPast, typeSize: typeSize)
+                .overlay {
+                    RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                        .strokeBorder(
+                            model.isPending ? Palette.slate.opacity(0.35) : Color.clear,
+                            style: StrokeStyle(lineWidth: 1.25, dash: model.isPending ? [5, 4] : [])
+                        )
+                }
+                .padding(.leading, Spacing.sm)
+        } else {
+            legacyCard
+        }
+    }
+
+    /// transport/hotel/activity/food rows — unchanged from before this
+    /// milestone (docs/UX_REDESIGN_ROADMAP.md Phase 1: "transport/hotel/
+    /// activity/food rows unchanged").
+    private var legacyCard: some View {
         HStack(spacing: Spacing.md) {
             CategoryIconTile(category: model.category, dimmed: model.isPast)
                 // D2 defect 2: capped, not left to keep growing — shared
@@ -499,8 +539,8 @@ struct TagChip: View {
         .font(Typo.body(10, weight: .bold))
         // Finding 6: `CategoryColor.activity.fg` (moss-on-moss-soft) was
         // under AA contrast at this chip's 10pt size — `Palette.ink` is the
-        // same ink-on-soft-tint pairing `TZShiftChipRow`/`PersonFilterBanner`
-        // already use, and it adapts light/dark like every other label.
+        // same ink-on-soft-tint pairing `PersonFilterBanner` already uses,
+        // and it adapts light/dark like every other label.
         .foregroundStyle(Palette.ink)
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, 3)
@@ -509,41 +549,93 @@ struct TagChip: View {
     }
 }
 
-/// The rail's tz-shift pill (ACCEPTANCE.md "(a)" point 3) — indents to the
-/// same column as the staying strip so it reads as part of the rail, not a
-/// card.
+/// The rail's tz-shift marker (ACCEPTANCE.md "(a)" point 3) — indents to
+/// the same column as the staying strip so it reads as part of the rail,
+/// not a card. docs/UX_REDESIGN_ROADMAP.md Phase 1: restyled from a
+/// floating amber pill to a quiet hairline break with an all-caps eyebrow —
+/// visual change only, `model.text` is unchanged from before
+/// (`TimelineModels.swift`'s emission logic stays the source of truth for
+/// what fires and in what order). Draws in once, left-to-right, the first
+/// time it enters the viewport; fully static under Reduce Motion.
 struct TZShiftChipRow: View, Equatable {
     let model: TZShiftModel
     /// See `TimelineCardRow.typeSize`'s doc comment.
     var typeSize: DynamicTypeSize = .large
+    /// UX-review N2: a `LazyVStack` row can be torn down and recreated on
+    /// scroll re-entry, resetting a plain private `@State` — "drawn
+    /// already" is hoisted to `ItineraryTabView.drawnMarkerIds` (keyed by
+    /// `model.id`) instead, which survives recycling. Neither participates
+    /// in `==` below, same as every other non-model/typeSize field here.
+    var hasDrawnBefore: Bool = false
+    var onDrawn: () -> Void = {}
 
     /// See `TimelineCardRow.ticketIconSize`'s doc comment.
     @ScaledMetric(relativeTo: .body) private var shiftIconSize: CGFloat = 10
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One-time draw-in state — see `isRevealed`. Never flipped under RM, so
+    /// `isRevealed` stays permanently `true` there with no animation ever
+    /// triggered (not merely skipped mid-flight).
+    @State private var isDrawn = false
+
+    private var isAXSize: Bool { typeSize.isAccessibilitySize }
+    private var isRevealed: Bool { reduceMotion || hasDrawnBefore || isDrawn }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.model == rhs.model && lhs.typeSize == rhs.typeSize }
 
     var body: some View {
+        Group {
+            if isAXSize {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    eyebrow
+                    hairline
+                }
+            } else {
+                HStack(spacing: Spacing.sm) {
+                    eyebrow
+                    hairline
+                }
+            }
+        }
+        .padding(.leading, TimelineLayout.indentedLeading(for: typeSize))
+        .padding(.trailing, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+        // Finding F9's precedent: the arrow glyph is decorative — without
+        // this, it's a second VoiceOver stop with nothing to say.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.text)
+        .onAppear {
+            guard !reduceMotion, !hasDrawnBefore, !isDrawn else { return }
+            withAnimation(Motion.snappy) { isDrawn = true }
+            onDrawn()
+        }
+    }
+
+    private var eyebrow: some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: "arrow.left.arrow.right")
                 .font(.system(size: shiftIconSize, weight: .semibold))
-            Text(model.text)
-                .font(Typo.body(11, weight: .semibold))
+            Text(model.text.uppercased())
+                .font(Typo.body(10, weight: .bold))
+                .tracking(0.8)
+                .lineLimit(isAXSize ? nil : 1)
         }
-        // `.ink` (not `.indigo`, which is a fixed dark navy in both color
-        // schemes and nearly unreadable against this chip's dark-mode
-        // background) — `.ink` adapts light/dark like every other label.
-        .foregroundStyle(Palette.ink)
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.xs)
-        .background(Palette.amberSoft, in: Capsule())
-        .padding(.leading, TimelineLayout.indentedLeading(for: typeSize))
-        .padding(.vertical, Spacing.xxs)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // Finding F9: the arrow glyph is decorative — without this, it's a
-        // second VoiceOver stop with nothing to say.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(model.text)
+        // `.slate` (not the old `.ink`-on-`.amberSoft` pairing) — this no
+        // longer sits on a filled capsule, just the bare paper background,
+        // so it reads as a quiet rail aside rather than a competing card.
+        .foregroundStyle(Palette.slate)
+        .fixedSize(horizontal: !isAXSize, vertical: true)
+        .opacity(isRevealed ? 1 : 0)
+    }
+
+    /// The rail's own hairline break — draws in left-to-right by scaling
+    /// from its leading edge, the standard SwiftUI reveal for exactly this
+    /// shape (an animated `.frame(width:)` from 0 to a fill-parent width
+    /// doesn't interpolate cleanly the way a concrete `scaleEffect` does).
+    private var hairline: some View {
+        Rectangle()
+            .fill(Palette.mist)
+            .frame(height: 1)
+            .scaleEffect(x: isRevealed ? 1 : 0, y: 1, anchor: .leading)
     }
 }
 

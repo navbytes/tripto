@@ -101,6 +101,10 @@ struct ItineraryTabView: View {
     /// One-shot: only auto-scroll to "today" the first time this view's
     /// `.task` fires, not on every subsequent data refresh.
     @State private var hasAutoScrolledToToday = false
+    /// UX-review N2: `TZShiftChipRow.id`s that have already drawn in once —
+    /// lives here (survives the row's own view recycling in the
+    /// `LazyVStack` below) rather than as that row's private `@State`.
+    @State private var drawnMarkerIds: Set<String> = []
 
     private var tripStartDay: DayDate { DayDate.from(trip.startDate, calendar: .current) }
     private var tripEndDay: DayDate { DayDate.from(trip.endDate, calendar: .current) }
@@ -361,7 +365,24 @@ struct ItineraryTabView: View {
         case .card(let model): TimelineCardRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .staying(let model): StayingStripRow(model: model, typeSize: dynamicTypeSize).equatable()
         case .checkOut(let model): CheckOutRow(model: model, typeSize: dynamicTypeSize).equatable()
-        case .tzShift(let model): TZShiftChipRow(model: model, typeSize: dynamicTypeSize).equatable()
+        case .tzShift(let model):
+            // docs/UX_REDESIGN_ROADMAP.md Phase 1, note 7: a flight's
+            // landing note now lives in its own `BoardingPassCard` footer
+            // (`TimelineCardModel.boardingPass`). This row is still emitted
+            // — `TimelineBuilder.build`'s emission logic/ordering is
+            // untouched — so rendering nothing for it here is a view-only
+            // skip, not a data change; rendering `TZShiftChipRow` again
+            // right underneath the pass would just repeat the same
+            // sentence a second time.
+            if model.kind == .landing {
+                EmptyView()
+            } else {
+                TZShiftChipRow(
+                    model: model, typeSize: dynamicTypeSize,
+                    hasDrawnBefore: drawnMarkerIds.contains(model.id)
+                ) { drawnMarkerIds.insert(model.id) }
+                .equatable()
+            }
         case .nowLine: NowLineRow(typeSize: dynamicTypeSize).equatable()
         }
     }

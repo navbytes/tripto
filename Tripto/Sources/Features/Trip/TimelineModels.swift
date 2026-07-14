@@ -78,6 +78,16 @@ struct TimelineCardModel: Identifiable, Equatable {
     /// `RailNode` in slate) — never text color, which AA requires stays
     /// untouched (see `TimelineBuilder.build`'s doc comment).
     let isPast: Bool
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 1: non-nil only for `.flight` —
+    /// `TimelineCardRow` replaces the whole card body with `BoardingPassCard`
+    /// when set, resolved once here via `BoardingPassContent.make(for:)` so
+    /// the row view itself never touches `ItineraryItem`. `var`, not `let` —
+    /// Swift's synthesized memberwise init excludes a defaulted `let` from
+    /// its parameter list entirely (no way to override it), but still gives
+    /// an Optional `var` like this one an implicit `nil` default, so this
+    /// purely-additive field never breaks an existing preview/call site
+    /// that predates it.
+    var boardingPass: BoardingPassCard.Model?
 }
 
 struct StayingStripModel: Identifiable, Equatable {
@@ -100,8 +110,26 @@ struct CheckOutRowModel: Identifiable, Equatable {
 }
 
 struct TZShiftModel: Identifiable, Equatable {
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 1: the two triggers `TZShiftChip`
+    /// distinguishes (see its own doc comment) now render differently.
+    enum Kind: Equatable {
+        /// A non-flight zone crossing, or a residual mismatch a landing
+        /// chip didn't already cover — renders as the rail's hairline break
+        /// (`TZShiftChipRow`).
+        case zoneChange
+        /// A flight's own arrival note (`TZShiftChip.landingText`) — still
+        /// emitted here unchanged (`TimelineBuilder.build`'s own emission
+        /// logic/ordering is the untouched source of truth), but no longer
+        /// given a separate rail row now that `BoardingPassCard` shows the
+        /// same note in its own perforated footer (note 7: "the arrival
+        /// note belongs to the flight, not to the day") — `ItineraryTabView`
+        /// skips rendering a view for this kind instead.
+        case landing
+    }
+
     let id: String
     let text: String
+    var kind: Kind = .zoneChange
 }
 
 enum TimelineBuilder {
@@ -187,7 +215,7 @@ enum TimelineBuilder {
                     // even when the next item is already in the arrival
                     // zone (ACCEPTANCE A1.3), and even when nothing follows.
                     if let landing = TZShiftChip.landingText(for: item) {
-                        rows.append(.tzShift(TZShiftModel(id: "landing-\(item.id.uuidString)", text: landing)))
+                        rows.append(.tzShift(TZShiftModel(id: "landing-\(item.id.uuidString)", text: landing, kind: .landing)))
                     }
                     previous = item
 
@@ -284,7 +312,8 @@ enum TimelineBuilder {
             editedBy: editedByText(for: item, myUserId: myUserId, namesById: namesById, now: now),
             assignees: assignees,
             tags: item.details.tags,
-            isPast: isPast
+            isPast: isPast,
+            boardingPass: BoardingPassContent.make(for: item)
         )
     }
 
@@ -367,5 +396,52 @@ enum TimelineBuilder {
         formatter.timeZone = utc.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: day.asDate(calendar: utc))
+    }
+}
+
+/// `ItineraryItem` -> `BoardingPassCard.Model` (docs/UX_REDESIGN_ROADMAP.md
+/// Phase 1: "no ItineraryItem coupling inside the card itself" — this is
+/// the one small adapter that bridges the two). `TimelineBuilder.cardModel`
+/// is the only caller; reuses the same `AirportTimeZones`/`TZShiftChip`
+/// helpers `BookingDetailView.flightHeader` and the rail's landing chip
+/// already rely on, so the pass never disagrees with either.
+enum BoardingPassContent {
+    static func make(for item: ItineraryItem) -> BoardingPassCard.Model? {
+        guard item.category == .flight else { return nil }
+        let details = item.details
+        let carrier = [details.airline, details.flightNo]
+            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return BoardingPassCard.Model(
+            carrierLine: carrier.isEmpty ? item.title : carrier,
+            origin: BoardingPassCard.Endpoint(
+                code: code(details.fromIATA),
+                name: details.fromIATA.flatMap(AirportTimeZones.cityName(for:)),
+                date: item.startsAt,
+                timeZone: item.primaryTz
+            ),
+            destination: BoardingPassCard.Endpoint(
+                code: code(details.toIATA),
+                name: details.toIATA.flatMap(AirportTimeZones.cityName(for:)),
+                // UX-review D2: `item.endsAt` straight through, not `??
+                // item.startsAt` — that fallback rendered a fake arrival
+                // instant (0m duration, a spurious day badge) for a flight
+                // with an arrival zone but no known arrival time yet.
+                // `BoardingPassCard.Endpoint.date` being `Date?` lets the
+                // card just omit the arrival time/duration/badge instead.
+                date: item.endsAt,
+                timeZone: item.effectiveTz
+            ),
+            footerText: TZShiftChip.landingText(for: item)
+        )
+    }
+
+    /// A missing/blank IATA code falls back to the same em-dash
+    /// `BookingDetailView.flightHeader` already uses for its own from/to
+    /// codes, rather than rendering an empty airport code.
+    private static func code(_ raw: String?) -> String {
+        let trimmed = raw?.trimmingCharacters(in: .whitespaces) ?? ""
+        return trimmed.isEmpty ? "—" : trimmed.uppercased()
     }
 }
