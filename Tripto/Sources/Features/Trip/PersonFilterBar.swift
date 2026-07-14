@@ -1,10 +1,12 @@
 import SwiftUI
 
 /// The "Just mine" person filter atop the itinerary (BUILD_PLAN.md §5.4;
-/// docs/TripAppFamily.jsx's `JustMine` screen is the visual reference):
-/// "Everyone" + one chip per `TripProfile`, horizontal scroll. `TripView`
-/// owns the actual filtering (`PersonFilter.filteredItems`) and the
-/// selection state (`nil` = Everyone) — this is a pure renderer.
+/// docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.3) / design/ux-redesign-2026-07/
+/// tripto-redesign.html is the current visual reference): "Everyone" + one
+/// chip per `TripProfile`, horizontal scroll, no standing label — the row
+/// of avatar chips already says what it's for. `TripView` owns the actual
+/// filtering (`PersonFilter.filteredItems`) and the selection state (`nil`
+/// = Everyone) — this is a pure renderer.
 struct PersonFilterBar: View {
     struct Chip: Identifiable {
         let id: UUID
@@ -23,8 +25,7 @@ struct PersonFilterBar: View {
     @State private var contentWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
     /// See the shared `@ScaledMetric` recipe used throughout Features/Trip
-    /// — both icons below sit next to this bar's own scaling label text.
-    @ScaledMetric(relativeTo: .body) private var filterIconSize: CGFloat = 10
+    /// — sits next to the "Everyone" chip's own scaling label text.
     @ScaledMetric(relativeTo: .body) private var everyoneIconSize: CGFloat = 12
 
     private var hasOverflow: Bool {
@@ -32,62 +33,49 @@ struct PersonFilterBar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: filterIconSize, weight: .bold))
-                    // Finding F3: decorative — the "Showing plans for" text
-                    // right next to it already says the same thing, same
-                    // pattern as this bar's `person.2.fill` chip icon and
-                    // `PersonFilterBanner`'s sparkles.
-                    .accessibilityHidden(true)
-                Text("Showing plans for")
-                    .font(Typo.body(11, weight: .bold))
-                    .tracking(0.4)
-            }
-            .foregroundStyle(Palette.slate)
-            .textCase(.uppercase)
-            .padding(.horizontal, Spacing.xl)
-
-            // Finding 1: horizontal padding used to live inside the
-            // ScrollView (on the chip HStack), so a mid-scroll chip clipped
-            // ~22pt short of the true screen edge — a paper-colored gutter
-            // sighted users could easily mistake for "that's the end of the
-            // list." Padding now lives outside as `.contentMargins`, so the
-            // ScrollView itself spans the full width and chips clip flush
-            // with the edge while scrolling, only inset at rest.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Spacing.sm) {
-                    everyoneChip
-                    ForEach(chips) { chip in
-                        personChip(chip)
-                    }
+        // P2.3: the old standing "Showing plans for" label is gone — the
+        // chip row is the whole bar now, one 56pt-tall row instead of a
+        // label row plus a separate chip row. `minHeight` (not a fixed
+        // `height`): at accessibility Dynamic Type sizes a chip's own
+        // content can outgrow 56pt (its label text scales too), and this
+        // must never clip that — it only floors the row at 56pt when
+        // content is shorter, same "floor, not ceiling" reasoning as every
+        // `minHeight: 44` hit-target below.
+        //
+        // Finding 1: horizontal padding used to live inside the ScrollView
+        // (on the chip HStack), so a mid-scroll chip clipped ~22pt short of
+        // the true screen edge — a paper-colored gutter sighted users could
+        // easily mistake for "that's the end of the list." Padding now
+        // lives outside as `.contentMargins`, so the ScrollView itself
+        // spans the full width and chips clip flush with the edge while
+        // scrolling, only inset at rest.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Spacing.sm) {
+                everyoneChip
+                ForEach(chips) { chip in
+                    personChip(chip)
                 }
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { contentWidth = $0 }
             }
-            .contentMargins(.horizontal, Spacing.xl, for: .scrollContent)
-            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { containerWidth = $0 }
-            .overlay(alignment: .trailing) {
-                // Sighted-only overflow cue (VoiceOver already reaches every
-                // chip by swiping) — same paper-to-clear scrim pattern as
-                // `ItineraryTabView.dayHeaderBackground`, using `Palette
-                // .paper` since that's this bar's own background below.
-                if hasOverflow {
-                    LinearGradient(
-                        colors: [Palette.paper.opacity(0), Palette.paper],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .frame(width: Spacing.xl)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                }
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { contentWidth = $0 }
+        }
+        .frame(minHeight: 56)
+        .contentMargins(.horizontal, Spacing.xl, for: .scrollContent)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { containerWidth = $0 }
+        .overlay(alignment: .trailing) {
+            // Sighted-only overflow cue (VoiceOver already reaches every
+            // chip by swiping) — same paper-to-clear scrim pattern as
+            // `ItineraryTabView.dayHeaderBackground`, using `Palette
+            // .paper` since that's this bar's own background below.
+            if hasOverflow {
+                LinearGradient(
+                    colors: [Palette.paper.opacity(0), Palette.paper],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: Spacing.xl)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
         }
-        .padding(.top, Spacing.md)
-        // Finding 1b: the row grows ~14pt now that each chip's hit area
-        // is 44pt tall; trimming the bottom padding keeps the bar's total
-        // height within a couple points of before.
-        .padding(.bottom, Spacing.xs)
         .background(Palette.paper)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Palette.mist).frame(height: 1)

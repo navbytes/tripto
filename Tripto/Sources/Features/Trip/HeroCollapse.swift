@@ -266,15 +266,47 @@ struct TripHeroView: View {
 
             Spacer(minLength: Spacing.sm)
 
+            // docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.2): destination
+            // context now lives in its own eyebrow line, above the title,
+            // instead of the old parenthetical-in-the-title approach the
+            // title's own `lineLimit` below used to have to make room for.
+            // Same eyebrow recipe `TZShiftChipRow.eyebrow` already
+            // established (Sofia Sans, 10pt bold, 0.8 tracking,
+            // `.textCase(.uppercase)` rather than baking the uppercase into
+            // the string itself, so VoiceOver still reads it as words, not
+            // spelled out). Full white, not the meta row's dimmed
+            // `.opacity(0.92)`: this eyebrow sits higher in the hero, where
+            // `CoverGradient.textScrim` (PaletteExtras.swift) is thinner
+            // than at the title/meta's own depth — full opacity keeps its
+            // contrast headroom where the scrim gives it less help. Fades
+            // with `metaRow` on collapse (same `1 - min(1, p * 1.6)` curve)
+            // so a fully-collapsed hero shows just the compact title, as
+            // before.
+            Text(heroEyebrowText)
+                .font(Typo.body(10, weight: .bold))
+                .tracking(0.8)
+                .textCase(.uppercase)
+                .foregroundStyle(.white)
+                // Same single-line-but-shrink-first safety net as the
+                // title below: `destinationLabel` can be as long as a
+                // user's own free-text destination, not just a short
+                // country name.
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .opacity(1 - min(1, p * 1.6))
+
             Text(trip.title)
                 .font(Typo.display(Typo.Size.display - 10 * p))
                 .foregroundStyle(.white)
-                // Nit from the collapse review: only clamp to one line once
-                // fully collapsed (`p >= 1`, hit at the reduce-motion snap
-                // threshold too), instead of switching mid-scroll at `p >
-                // 0.5` — that hard switch visibly reflowed the title while
-                // scrolling with reduce-motion off.
-                .lineLimit(p >= 1 ? 1 : 2)
+                // docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.2): "no two-line
+                // wrap" — the eyebrow above now carries destination
+                // context, so the title no longer needs the old `p >= 1 ?
+                // 1 : 2` collapse-conditional (itself only there to avoid a
+                // reflow-mid-scroll bug — see the collapse review nit this
+                // replaces). Pinning to 1 line unconditionally removes that
+                // whole class of bug rather than just avoiding it: there's
+                // nothing left to reflow between.
+                .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -515,5 +547,23 @@ struct TripHeroView: View {
     /// instead of split across an `HStack` (see `metaRow`'s doc comment).
     private var durationText: String {
         "\(trip.durationInDays()) day\(trip.durationInDays() == 1 ? "" : "s")"
+    }
+
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 2 (P2.2): "{DESTINATION} · {N}
+    /// DAYS" — reuses `durationText` above rather than re-deriving the same
+    /// day count a second way.
+    private var heroEyebrowText: String {
+        "\(destinationLabel) \u{00B7} \(durationText)"
+    }
+
+    /// `TripCard.locationText`'s own "localized country name, falling back
+    /// to the raw destination string" rule (`Features/Home/TripCard.swift`)
+    /// — reused rather than re-deriving a second country/destination label
+    /// convention; this is exactly what already renders on Home's own trip
+    /// cards. Falls back to `trip.destination` outright on the `nil` case
+    /// (blank destination and no usable country code) so the eyebrow is
+    /// never empty.
+    private var destinationLabel: String {
+        TripCard.locationText(countryCode: trip.countryCode, destination: trip.destination) ?? trip.destination
     }
 }
