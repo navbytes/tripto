@@ -41,6 +41,35 @@ final class HomeRegistersTests: XCTestCase {
         XCTAssertEqual(ahead.map(\.id), [near.id, far.id])
     }
 
+    /// Swift's `sorted(by:)` is a *stable* sort (guaranteed since Swift 5) —
+    /// pinned here directly against `ahead`'s own real comparator (not just
+    /// assumed from the stdlib docs) so a future refactor to an unstable
+    /// sort can't silently scramble same-day trips' order.
+    func testAheadWithEqualStartDatesPreservesInputOrderStably() {
+        let same = day(2026, 7, 20)
+        let first = trip(id: UUID(), start: same, end: day(2026, 7, 22))
+        let second = trip(id: UUID(), start: same, end: day(2026, 7, 23))
+        let third = trip(id: UUID(), start: same, end: day(2026, 7, 24))
+        let forward = HomeTripOrdering.ahead([first, second, third]) { _ in .upcoming }
+        XCTAssertEqual(forward.map(\.id), [first.id, second.id, third.id])
+        // Same three trips, opposite input order — a stable sort mirrors it
+        // exactly, not some incidental identity/hash-based order.
+        let reversed = HomeTripOrdering.ahead([third, second, first]) { _ in .upcoming }
+        XCTAssertEqual(reversed.map(\.id), [third.id, second.id, first.id])
+    }
+
+    /// Repeated calls against the identical (already-shuffled) input must
+    /// return the identical order every time — guards against any hidden
+    /// nondeterminism (e.g. a `Set`/`Dictionary` detour) creeping into
+    /// `ahead` for same-day trips.
+    func testAheadWithEqualStartDatesIsDeterministicAcrossRepeatedCalls() {
+        let same = day(2026, 7, 20)
+        let shuffled = (0..<6).map { _ in trip(id: UUID(), start: same, end: day(2026, 8, 1)) }.shuffled()
+        let firstRun = HomeTripOrdering.ahead(shuffled) { _ in .upcoming }.map(\.id)
+        let secondRun = HomeTripOrdering.ahead(shuffled) { _ in .upcoming }.map(\.id)
+        XCTAssertEqual(firstRun, secondRun, "sorting the exact same input twice must produce the exact same order")
+    }
+
     /// The roadmap's own claim: "a live trip falls out at position 0 on its
     /// own" — no `isInProgress` special case in the comparator, just plain
     /// `startDate` ascending, since a live trip's start is always in the
@@ -72,6 +101,57 @@ final class HomeRegistersTests: XCTestCase {
         let realBucket: (Trip) -> TripBucket = { TripDateBucketing.bucket(startDate: $0.startDate, endDate: $0.endDate, today: today, calendar: self.utc) }
         XCTAssertTrue(HomeTripOrdering.ahead([endsToday], bucket: realBucket).contains { $0.id == endsToday.id })
         XCTAssertTrue(HomeTripOrdering.been([endsToday], bucket: realBucket).isEmpty)
+    }
+
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 2's Naha case, one level up: the
+    /// `ahead`/`been` split (not just `TripDateBucketing.bucket` alone,
+    /// already covered in `DateBucketingTests`) must still keep a trip whose
+    /// last night is 23:xx local, in a zone AHEAD of a device that's already
+    /// turned its own calendar page, inside `ahead` — composed with the REAL
+    /// `TripDateBucketing.liveTimeZone` + `.bucket` (not a stub), mirroring
+    /// exactly how `HomeView.bucket(for:)` composes them (verified by
+    /// reading; that composition itself is private there, untestable directly).
+    func testAheadKeepsATripEndingLateTonightInAZoneAheadOfTheDevice() {
+        var jst = Calendar(identifier: .gregorian)
+        jst.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let nahaStay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Naha stay",
+            startsAt: instant(2026, 7, 20, 15, 0, tz: "Asia/Tokyo"),
+            endsAt: instant(2026, 7, 26, 23, 0, tz: "Asia/Tokyo"),
+            tz: "Asia/Tokyo"
+        )
+        let nahaTrip = trip(
+            start: DayDate(year: 2026, month: 7, day: 20).asDate(calendar: jst),
+            end: DayDate(year: 2026, month: 7, day: 26).asDate(calendar: jst)
+        )
+        // 2026-07-26 23:30 JST == 2026-07-27 02:30 in Auckland — the device
+        // has already rolled its own calendar over; the trip's own zone
+        // (derived from its items, not the device) hasn't.
+        let now = instant(2026, 7, 26, 23, 30, tz: "Asia/Tokyo")
+        let realBucket: (Trip) -> TripBucket = { candidate in
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TripDateBucketing.liveTimeZone(
+                items: [nahaStay], deviceTimeZone: TimeZone(identifier: "Pacific/Auckland")!
+            )
+            return TripDateBucketing.bucket(startDate: candidate.startDate, endDate: candidate.endDate, today: now, calendar: calendar)
+        }
+        XCTAssertTrue(
+            HomeTripOrdering.ahead([nahaTrip], bucket: realBucket).contains { $0.id == nahaTrip.id },
+            "a trip on its last JST night must stay in `ahead` even once a device further east has rolled over"
+        )
+        XCTAssertTrue(HomeTripOrdering.been([nahaTrip], bucket: realBucket).isEmpty)
+
+        // Sanity (same discipline as DateBucketingTests' own Naha cases):
+        // judged against the DEVICE's own (Auckland) zone instead of the
+        // trip's live zone, this exact same trip/instant really would
+        // already read as past — proves the test isn't accidentally trivial.
+        var auckland = Calendar(identifier: .gregorian)
+        auckland.timeZone = TimeZone(identifier: "Pacific/Auckland")!
+        XCTAssertEqual(
+            TripDateBucketing.bucket(startDate: nahaTrip.startDate, endDate: nahaTrip.endDate, today: now, calendar: auckland),
+            .past,
+            "sanity: judged against the device's own zone this same trip/instant would already read as past"
+        )
     }
 
     func testOrderedIsAheadThenBeen() {
@@ -136,6 +216,30 @@ final class HomeRegistersTests: XCTestCase {
         let past1 = TestFixtures.makeItineraryItem(startsAt: instant(2026, 7, 19, 9, 0, tz: "UTC"))
         let past2 = TestFixtures.makeItineraryItem(startsAt: instant(2026, 7, 18, 9, 0, tz: "UTC"))
         XCTAssertNil(HomeFirstUp.pick(from: [past1, past2], now: now))
+    }
+
+    /// The boundary `pick`'s own filter (`startsAt >= now`) draws: an item
+    /// starting at the EXACT current instant must still be picked, and one
+    /// that started an instant before must not.
+    func testPickIncludesAnItemStartingExactlyNowButExcludesOneInstantBefore() {
+        let now = instant(2026, 7, 20, 12, 0, tz: "UTC")
+        let rightNow = TestFixtures.makeItineraryItem(title: "Right now", startsAt: now)
+        let justMissed = TestFixtures.makeItineraryItem(title: "Just missed it", startsAt: now.addingTimeInterval(-1))
+        XCTAssertEqual(
+            HomeFirstUp.pick(from: [justMissed, rightNow], now: now)?.id, rightNow.id,
+            "`startsAt >= now` must include the exact boundary instant"
+        )
+    }
+
+    /// No "too soon" exclusion exists (or should exist) in `pick` — an item
+    /// under an hour away must still win as the earliest confirmed upcoming
+    /// item, same as one further out.
+    func testPickIncludesAnItemStartingInUnderAnHour() {
+        let now = instant(2026, 7, 20, 12, 0, tz: "UTC")
+        let in45Minutes = TestFixtures.makeItineraryItem(title: "Soon", startsAt: now.addingTimeInterval(45 * 60))
+        let in3Hours = TestFixtures.makeItineraryItem(title: "Later", startsAt: now.addingTimeInterval(3 * 60 * 60))
+        let picked = HomeFirstUp.pick(from: [in3Hours, in45Minutes], now: now)
+        XCTAssertEqual(picked?.id, in45Minutes.id, "an item starting under an hour away must still win as the earliest upcoming")
     }
 
     /// EI-2: an unreviewed email-import suggestion must never surface as
@@ -226,6 +330,27 @@ final class HomeRegistersTests: XCTestCase {
         XCTAssertEqual(panel.moreCount, 2)
     }
 
+    /// The exact boundary `TodayPanelView`'s own `if panel.moreCount > 0`
+    /// gate (HomeRegisterViews.swift) depends on: with exactly 2 items
+    /// today, both render as rows and `moreCount` must be precisely `0`
+    /// (not omitted, not negative) — the pure function's actual contract, so
+    /// the view's gate has something correct to check against and never
+    /// renders a phantom "+0 more today".
+    func testTodayPanelMoreCountIsZeroNotOmittedWhenTodayHasExactlyTwoItems() {
+        let tz = TimeZone(identifier: "Asia/Tokyo")!
+        let now = instant(2026, 7, 24, 8, 0, tz: "Asia/Tokyo")
+        let fiveDayTrip = trip(start: day(2026, 7, 22), end: day(2026, 7, 26))
+        let items = (0..<2).map { offset in
+            TestFixtures.makeItineraryItem(
+                title: "Plan \(offset)", startsAt: instant(2026, 7, 24, 9 + offset, 0, tz: "Asia/Tokyo"), tz: "Asia/Tokyo"
+            )
+        }
+        let todayItems = HomeTodayPlan.items(in: items, liveTimeZone: tz, now: now)
+        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayItems: todayItems, now: now, liveTimeZone: tz, deviceCalendar: utc)
+        XCTAssertEqual(panel.rows.count, 2, "both of today's items must render as rows")
+        XCTAssertEqual(panel.moreCount, 0)
+    }
+
     /// "Day N of M" — day 1 is the trip's own start date; day 3 is two full
     /// days later.
     func testTodayPanelDayNumberCountsFromTripStart() {
@@ -249,6 +374,28 @@ final class HomeRegistersTests: XCTestCase {
         let fiveDayTrip = trip(start: day(2026, 7, 22), end: day(2026, 7, 26))
         let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayItems: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
         XCTAssertEqual(panel.dayNumber, 5)
+    }
+
+    /// Defensive/degenerate case: `Trip.startDate`/`endDate` are non-optional
+    /// `Date`s (confirmed by reading `Trip.swift` — there's no "nil dates"
+    /// case to construct), but nothing stops a corrupted import or manual
+    /// edit from producing `startDate > endDate`. Un-clamped, `durationInDays`
+    /// goes negative — this pins that `make`'s own `max(totalDays, 1)` /
+    /// `min(max(dayNumber))` clamps hold even at this extreme, not just the
+    /// "one day past the end" case `ClampsToTotalDays` above already covers.
+    /// Matters beyond cosmetics: `DayProgressBar`'s `ForEach(1...max(
+    /// totalDays, 1))` (HomeRegisterViews.swift) would crash on a
+    /// zero/negative range without this clamp.
+    func testTodayPanelClampsSafelyForATripWithReversedDates() {
+        let tz = TimeZone(identifier: "UTC")!
+        let now = instant(2026, 7, 24, 9, 0, tz: "UTC")
+        let reversedTrip = trip(start: day(2026, 7, 26), end: day(2026, 7, 22))
+        let panel = HomeTodayPanel.make(trip: reversedTrip, todayItems: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
+        XCTAssertEqual(panel.totalDays, 1, "a reversed date range must clamp to at least 1 day, never negative/zero")
+        XCTAssertTrue(
+            (1...panel.totalDays).contains(panel.dayNumber),
+            "day number must stay inside 1...totalDays even for a degenerate trip"
+        )
     }
 
     // MARK: - HomeBeenSummary (P5.4: "been" row subtitle)
