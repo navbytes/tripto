@@ -71,28 +71,36 @@ final class AddItemSheetReturnLegTests: XCTestCase {
         XCTAssertEqual(next.confirmation, "")
     }
 
-    /// The "+1 day" override must reset to `nil` (auto-detect) for the new
-    /// leg — carrying over the outbound leg's override would be stale once
-    /// the times themselves have also been cleared/reset.
-    func testArrivalDayOffsetOverrideResetsToAutoDetect() {
+    /// P7c (award audit #4): `arrivesTime` must reset to `nil` ("not yet
+    /// set," same as a blank new item) for the new leg — no fabricated leg-2
+    /// arrival either, and carrying over the outbound leg's own arrival
+    /// would be stale once every other field has also been cleared/reset.
+    func testArrivesTimeResetsToNilForTheNewLeg() {
         let next = AddItemSheet.returnLegFields(
             fromIATA: "BKK", toIATA: "HKG", departureZone: bangkok, arrivalZone: hongKong, flightDate: day(2026, 7, 26)
         )
-        XCTAssertNil(next.arrivalDayOffsetOverride)
+        XCTAssertNil(next.arrivesTime)
     }
 
-    /// `departsTime`/`arrivesTime` reset to the exact same "blank new
-    /// flight" defaults `AddItemSheet.init()` uses (`Date()` / `now + 2h`) —
-    /// not carried over from the outbound leg, which flies on a different
-    /// day. Only the relationship between the two is meaningfully testable
-    /// (both are `Date()`-derived at call time).
-    func testTimesResetToFreshDefaultsWithArrivesAfterDeparts() {
+    /// `arrivalDate` resets to the *new* leg's own `flightDate` (same-day,
+    /// same as a blank new item's own default) — not the outbound leg's
+    /// date, and not left on the outbound leg's arrival date either.
+    func testArrivalDateResetsToTheNewLegsOwnFlightDate() {
+        let next = AddItemSheet.returnLegFields(
+            fromIATA: "BKK", toIATA: "HKG", departureZone: bangkok, arrivalZone: hongKong, flightDate: day(2026, 7, 26)
+        )
+        XCTAssertEqual(next.arrivalDate, next.flightDate)
+    }
+
+    /// `departsTime` resets to the exact same "blank new flight" default
+    /// `AddItemSheet.init()` uses (`Date()`) — not carried over from the
+    /// outbound leg, which flies on a different day.
+    func testDepartsTimeResetsToAFreshDefault() {
         let before = Date()
         let next = AddItemSheet.returnLegFields(
             fromIATA: "BKK", toIATA: "HKG", departureZone: bangkok, arrivalZone: hongKong, flightDate: day(2026, 7, 26)
         )
         XCTAssertGreaterThanOrEqual(next.departsTime, before)
-        XCTAssertEqual(next.arrivesTime.timeIntervalSince(next.departsTime), 2 * 3600, accuracy: 1.0)
     }
 
     /// A 31-day month rolling into the next — pins that the "+1 day" goes

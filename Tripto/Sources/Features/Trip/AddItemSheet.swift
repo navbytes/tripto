@@ -46,6 +46,9 @@ struct AddItemSheet: View {
     @Environment(AuthManager.self) private var authManager
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.dismiss) private var dismiss
+    /// P7c: gates the `importAddressCard` teaser's expand/collapse animation
+    /// (`Design/Motion.swift`'s policy — off under Reduce Motion).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Finding 2: `categorySelector`'s AX-size horizontal-scroll branch,
     /// same `isAccessibilitySize` convention as `TripView.tabBar()`. Not
     /// `private` (Phase 3) — `AddItemFormSections.flightSection`'s live
@@ -70,11 +73,22 @@ struct AddItemSheet: View {
     @State var flightDate = Date()
     @State var departsTime = Date()
     @State var departureZone: TimeZone = .current
-    @State var arrivesTime = Date()
+    @State var arrivalDate = Date()
+    /// P7c (award audit #4): `nil` until the user actually sets a real
+    /// arrival — a blank new flight (or an edited item whose own `endsAt`
+    /// was never known) has nothing real yet to compute a duration/day
+    /// badge from, so `flightFields()`/`flightPreviewModel` read `nil` as
+    /// "route-only," the same nil-`Endpoint.date` state `BoardingPassCard`
+    /// already renders for a flight with no known arrival (P1). The Arrives
+    /// picker still needs *some* concrete value to display before that
+    /// first real edit — `arrivesTimeBinding` (`AddItemFormSections.swift`)
+    /// supplies a departure-relative placeholder that's never read as data,
+    /// replacing the old wall-clock-derived `Date()+2h` default the live
+    /// preview used to assert as if it were real (the actual bug: two
+    /// screenshots of the same JFK->LIS route landed different fabricated
+    /// durations purely because they were captured a few minutes apart).
+    @State var arrivesTime: Date?
     @State var arrivalZone: TimeZone = .current
-    /// `nil` = follow `ItemTimeCombining.suggestedArrivalDayOffset`'s
-    /// auto-detect; `true`/`false` once the user taps the "+1 day" chip.
-    @State var arrivalDayOffsetOverride: Bool?
     @State var seat = ""
     @State var terminal = ""
     @State var gate = ""
@@ -111,8 +125,9 @@ struct AddItemSheet: View {
 
     // Transport (rental car / train / ferry / transfer) — pickup A → drop-off B,
     // structurally a flight. Pickup location reuses the shared `locationText`;
-    // `dropoffText` is the drop-off place; `arrivalDayOffsetOverride` (shared
-    // with flight) drives the "+1 day" chip.
+    // `dropoffText` is the drop-off place; `dropoffDate`/`dropoffTime` are its
+    // own explicit pickers (no day-offset toggle) — the same shape flight's
+    // `arrivalDate`/`arrivesTime` now use too (P7c).
     @State var transportTitle = ""
     @State var provider = ""
     @State var transportDate = Date()
@@ -175,6 +190,9 @@ struct AddItemSheet: View {
     /// uses — see `importAddressCard`'s doc comment.
     @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
     @State private var hasFetchedImportAddress = false
+    /// P7c (award audit #7): collapsed by default — see `importAddressCard`'s
+    /// own doc comment for why.
+    @State private var isImportCardExpanded = false
     /// Finding 3: gates the "Discard changes?" confirmation on cancel/swipe-
     /// dismiss, same as `TripFormView`.
     @State private var showDiscardConfirm = false
@@ -217,9 +235,9 @@ struct AddItemSheet: View {
         var flightDate: Date
         var departsTime: Date
         var departureZone: TimeZone
-        var arrivesTime: Date
+        var arrivalDate: Date
+        var arrivesTime: Date?
         var arrivalZone: TimeZone
-        var arrivalDayOffsetOverride: Bool?
         var seat: String
         var terminal: String
         var gate: String
@@ -302,13 +320,16 @@ struct AddItemSheet: View {
                 _departureZone = State(initialValue: editing.primaryTz)
                 let arrivalTz = details.arrivalTz.flatMap(TimeZone.init(identifier:)) ?? editing.primaryTz
                 _arrivalZone = State(initialValue: arrivalTz)
+                // P7c: an `endsAt` that was never known (an import/
+                // suggestion gap) seeds both pickers at the departure's own
+                // day/time as a neutral starting point, exactly like a
+                // blank new item below — `arrivesTime` stays `nil`
+                // (`hasSetArrival` false) until whoever's editing supplies
+                // a real one, rather than quietly treating that seed as data.
                 let endsAt = editing.endsAt ?? editing.startsAt
-                _arrivesTime = State(initialValue: Self.pickerDate(from: endsAt, in: arrivalTz))
-                if editing.endsAt != nil {
-                    let startDay = ItineraryTimeZone.localDay(of: editing.startsAt, in: editing.primaryTz)
-                    let endDay = ItineraryTimeZone.localDay(of: endsAt, in: arrivalTz)
-                    _arrivalDayOffsetOverride = State(initialValue: endDay > startDay)
-                }
+                let arrivalPickerDate = Self.pickerDate(from: endsAt, in: arrivalTz)
+                _arrivalDate = State(initialValue: arrivalPickerDate)
+                _arrivesTime = State(initialValue: editing.endsAt == nil ? nil : arrivalPickerDate)
                 _seat = State(initialValue: details.seat ?? "")
                 _terminal = State(initialValue: details.terminal ?? "")
                 _gate = State(initialValue: details.gate ?? "")
@@ -368,16 +389,18 @@ struct AddItemSheet: View {
             _pickupZone = State(initialValue: defaultZone)
             _dropoffZone = State(initialValue: defaultZone)
             // Lean new-item dates toward the trip's start (a May trip shouldn't
-            // default every item to today), and give arrival a 2h head start so
-            // the form never opens on a zero-length item with a stray "+1 day"
-            // (persona dry-run).
+            // default every item to today) — arrival's date leans the same
+            // way, same day as departure until the user says otherwise
+            // (persona dry-run). P7c: arrival's *time* stays unset (`nil`)
+            // rather than a clock-derived guess — see `arrivesTime`'s own
+            // doc comment.
             let dateDefault = tripStartDate > Date() ? tripStartDate : Date()
             _flightDate = State(initialValue: dateDefault)
+            _arrivalDate = State(initialValue: dateDefault)
             _activityDate = State(initialValue: dateDefault)
             _foodDate = State(initialValue: dateDefault)
             _transportDate = State(initialValue: dateDefault)
             _dropoffDate = State(initialValue: dateDefault)
-            _arrivesTime = State(initialValue: Date().addingTimeInterval(2 * 3600))
             _checkInDate = State(initialValue: dateDefault)
             _checkInTime = State(initialValue: Self.timeOfDay(hour: 15, minute: 0))
             _checkOutTime = State(initialValue: Self.timeOfDay(hour: 11, minute: 0))
@@ -404,8 +427,8 @@ struct AddItemSheet: View {
             airline: _airline.wrappedValue, flightNo: _flightNo.wrappedValue,
             fromIATA: _fromIATA.wrappedValue, toIATA: _toIATA.wrappedValue,
             flightDate: _flightDate.wrappedValue, departsTime: _departsTime.wrappedValue,
-            departureZone: _departureZone.wrappedValue, arrivesTime: _arrivesTime.wrappedValue,
-            arrivalZone: _arrivalZone.wrappedValue, arrivalDayOffsetOverride: _arrivalDayOffsetOverride.wrappedValue,
+            departureZone: _departureZone.wrappedValue, arrivalDate: _arrivalDate.wrappedValue,
+            arrivesTime: _arrivesTime.wrappedValue, arrivalZone: _arrivalZone.wrappedValue,
             seat: _seat.wrappedValue, terminal: _terminal.wrappedValue, gate: _gate.wrappedValue,
             stayName: _stayName.wrappedValue, checkInDate: _checkInDate.wrappedValue,
             checkInTime: _checkInTime.wrappedValue, checkOutDate: _checkOutDate.wrappedValue,
@@ -461,7 +484,7 @@ struct AddItemSheet: View {
             category: category, selectedTags: selectedTags,
             airline: airline, flightNo: flightNo, fromIATA: fromIATA, toIATA: toIATA,
             flightDate: flightDate, departsTime: departsTime, departureZone: departureZone,
-            arrivesTime: arrivesTime, arrivalZone: arrivalZone, arrivalDayOffsetOverride: arrivalDayOffsetOverride,
+            arrivalDate: arrivalDate, arrivesTime: arrivesTime, arrivalZone: arrivalZone,
             seat: seat, terminal: terminal, gate: gate,
             stayName: stayName, checkInDate: checkInDate, checkInTime: checkInTime,
             checkOutDate: checkOutDate, checkOutTime: checkOutTime, stayZone: stayZone, room: room,
@@ -749,21 +772,83 @@ struct AddItemSheet: View {
     /// card, moved here from `ShareTripView` — getting data in (paste or
     /// forward-by-email) is this sheet's job now, not the people-and-links
     /// Share screen's (`ItineraryTabView`'s own copy stays put, unaffected).
-    /// Same consent gating and AI-disclosure copy as before, moved verbatim
-    /// — `ImportAddressCard` itself is untouched. Gated on
-    /// `ItemPermissions.canAdd`, same reasoning as `ShareTripView.importCard`
-    /// had: `get_or_create_trip_import_address` requires trip membership, so
+    /// Same consent gating as before. Gated on `ItemPermissions.canAdd`,
+    /// same reasoning as `ShareTripView.importCard` had:
+    /// `get_or_create_trip_import_address` requires trip membership, so
     /// fetching for a viewer/signed-out visitor would just fail/spin behind
     /// a sheet they can't normally reach anyway.
+    ///
+    /// P7c (award audit #7): `ImportAddressCard` is a deliberately big, high-
+    /// contrast navy hero at its OTHER two call sites (`ItineraryTabView`'s
+    /// empty-state teaser, `ShareTripView`'s persistent card) — both screens
+    /// where it's the main event. Inlined at that same size here, it
+    /// out-weighed the whole manual form beneath it. Collapsed by default
+    /// behind a teaser styled exactly like `pasteFirstBanner` right above it
+    /// (same visual tier as the other "get data in" door, not a second
+    /// hero), expanding in place to the untouched card on tap — this
+    /// restyles the entry point's own collapsed weight only; the shared
+    /// three-call-site `ImportAddressCard` component and its AI-disclosure/
+    /// consent copy are unchanged, and every state (loading/loaded/failed)
+    /// still renders exactly as before once expanded.
     @ViewBuilder
     private var importAddressCard: some View {
         if ItemPermissions.canAdd(role: myRole) {
-            ImportAddressCard(state: importLoadState) { address in
-                onToast(ClipboardFeedback.copy(address, label: "Import address"))
-            } onRetry: {
-                retryImportAddressFetch()
-            } onConsentGranted: {
-                grantEmailImportConsentAndFetch()
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Button {
+                    withAnimation(Motion.m(Motion.snappy, reduceMotion: reduceMotion)) {
+                        isImportCardExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: Spacing.md) {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Palette.amberSoft)
+                            .frame(width: 40, height: 40)
+                            .overlay {
+                                // Same icon `ImportAddressCard` itself uses —
+                                // one consistent email-import visual whether
+                                // collapsed or expanded.
+                                Image(systemName: "envelope.badge")
+                                    .foregroundStyle(Palette.amberInk)
+                            }
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Forward a booking email")
+                                .font(Typo.body(weight: .semibold))
+                                .foregroundStyle(Palette.ink)
+                            Text("We\u{2019}ll add it to your itinerary for you to review")
+                                .font(Typo.body(Typo.Size.caption))
+                                .foregroundStyle(Palette.slate)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: Spacing.sm)
+                        Image(systemName: isImportCardExpanded ? "chevron.up" : "chevron.right")
+                            .font(.system(size: pasteBannerChevronSize, weight: .semibold))
+                            .foregroundStyle(Palette.slate)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(Spacing.md)
+                    .frame(minHeight: 44)
+                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                            .stroke(Palette.mist, lineWidth: 1)
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint(isImportCardExpanded ? "Double tap to collapse" : "Double tap to expand")
+                .accessibilityIdentifier("importAddressCardTeaser")
+
+                if isImportCardExpanded {
+                    ImportAddressCard(state: importLoadState) { address in
+                        onToast(ClipboardFeedback.copy(address, label: "Import address"))
+                    } onRetry: {
+                        retryImportAddressFetch()
+                    } onConsentGranted: {
+                        grantEmailImportConsentAndFetch()
+                    }
+                }
             }
         }
     }
@@ -1104,9 +1189,9 @@ struct AddItemSheet: View {
         departureZone = next.departureZone
         arrivalZone = next.arrivalZone
         flightDate = next.flightDate
+        arrivalDate = next.arrivalDate
         departsTime = next.departsTime
         arrivesTime = next.arrivesTime
-        arrivalDayOffsetOverride = next.arrivalDayOffsetOverride
         seat = next.seat
         terminal = next.terminal
         gate = next.gate
@@ -1124,9 +1209,9 @@ struct AddItemSheet: View {
         var departureZone: TimeZone
         var arrivalZone: TimeZone
         var flightDate: Date
+        var arrivalDate: Date
         var departsTime: Date
-        var arrivesTime: Date
-        var arrivalDayOffsetOverride: Bool?
+        var arrivesTime: Date?
         var seat: String
         var terminal: String
         var gate: String
@@ -1137,26 +1222,29 @@ struct AddItemSheet: View {
     /// clears everything specific to ONE leg's own schedule. Airline/flight
     /// number are deliberately NOT part of this transform — most return
     /// legs fly the same carrier, so `saveAndAddReturnLeg()` leaves those
-    /// two fields untouched rather than clearing them here. `departsTime`/
-    /// `arrivesTime` reset to the exact same "blank new flight" defaults
-    /// `init()` uses for a brand-new item (`Date()` / `now + 2h`), not the
-    /// outbound leg's own clock times — a return leg is a different day, so
-    /// carrying over the same times would rarely be right.
-    /// `readingCalendar` mirrors `flightInstants`/`transportInstants`'s own
-    /// injectable-calendar parameter (deterministic in tests regardless of
-    /// the machine's own calendar).
+    /// two fields untouched rather than clearing them here. `arrivalDate`
+    /// resets to the same day as the new leg's own `flightDate` (same-day,
+    /// same as a blank new item — see `arrivalDate`'s own default in
+    /// `init`), and `arrivesTime` resets to `nil` (P7c: "not yet set,"
+    /// matching a brand-new item — no fabricated leg-2 arrival either).
+    /// `departsTime` resets to `Date()`, the same "blank new flight" default
+    /// `init()` uses, not the outbound leg's own clock time — a return leg
+    /// is a different day, so carrying over the same time would rarely be
+    /// right. `readingCalendar` mirrors `flightInstants`/`transportInstants`'s
+    /// own injectable-calendar parameter (deterministic in tests regardless
+    /// of the machine's own calendar).
     static func returnLegFields(
         fromIATA: String, toIATA: String,
         departureZone: TimeZone, arrivalZone: TimeZone,
         flightDate: Date,
         readingCalendar: Calendar = .current
     ) -> ReturnLegFields {
-        ReturnLegFields(
+        let nextFlightDate = readingCalendar.date(byAdding: .day, value: 1, to: flightDate) ?? flightDate
+        return ReturnLegFields(
             fromIATA: toIATA, toIATA: fromIATA,
             departureZone: arrivalZone, arrivalZone: departureZone,
-            flightDate: readingCalendar.date(byAdding: .day, value: 1, to: flightDate) ?? flightDate,
-            departsTime: Date(), arrivesTime: Date().addingTimeInterval(2 * 3600),
-            arrivalDayOffsetOverride: nil,
+            flightDate: nextFlightDate, arrivalDate: nextFlightDate,
+            departsTime: Date(), arrivesTime: nil,
             seat: "", terminal: "", gate: "", confirmation: ""
         )
     }
@@ -1324,10 +1412,6 @@ struct AddItemSheet: View {
         }
     }
 
-    /// The "+1 day" chip state — flight only. Transport no longer uses a
-    /// next-day toggle; it has an explicit drop-off date picker instead.
-    var effectiveNextDay: Bool { effectiveArrivalIsNextDay }
-
     /// A transport item is named by either its title or its provider — a rental
     /// is often just "Hertz" with no distinct title, so requiring both was
     /// redundant (persona dry-run).
@@ -1386,27 +1470,29 @@ struct AddItemSheet: View {
         )
     }
 
-    /// Whether the arrival lands on the calendar day after departure — the
-    /// "+1 day" chip's effective state (this milestone's brief: "arrival
-    /// wall < departure wall → +1 day, toggleable").
-    var effectiveArrivalIsNextDay: Bool {
-        arrivalDayOffsetOverride ?? (
-            ItemTimeCombining.suggestedArrivalDayOffset(departsTimeOfDay: departsTime, arrivesTimeOfDay: arrivesTime) == 1
-        )
-    }
+    /// P7c (award audit #4): `true` once the user has actually set a real
+    /// arrival (`arrivesTime != nil`) — `false` means there's nothing real
+    /// yet to validate or preview a duration/day-offset from, so
+    /// `flightEndAfterStart` doesn't block Save on it and `flightFields()`
+    /// leaves `endsAt` `nil` (route-only, same as Activity/Food's own "no
+    /// end time" shape).
+    var hasSetArrival: Bool { arrivesTime != nil }
 
     /// Whether a flight's arrival instant is strictly after its departure
     /// instant — the same "end after start" rule Stay/Transport enforce, so
-    /// a same-day arrival clock earlier than departure (with the "+1 day"
-    /// chip off) can't save as a negative-duration flight. Compares the
-    /// *absolute instants* `flightInstants` composes, not wall-clock times:
-    /// a westward cross-zone flight can have an arrival wall-clock earlier
-    /// than departure's yet still land on a later instant, and that is
-    /// valid. Drives both `isValid` and the form's hint.
+    /// a same-day arrival clock earlier than departure can't save as a
+    /// negative-duration flight. Compares the *absolute instants*
+    /// `flightInstants` composes, not wall-clock times: a westward
+    /// cross-zone flight can have an arrival wall-clock earlier than
+    /// departure's yet still land on a later instant, and that is valid.
+    /// Vacuously true while arrival isn't set yet (`hasSetArrival == false`)
+    /// — there's nothing real to compare. Drives both `isValid` and the
+    /// form's hint.
     var flightEndAfterStart: Bool {
+        guard let arrivesTime else { return true }
         let (start, end) = Self.flightInstants(
-            flightDate: flightDate, departsTime: departsTime, departureZone: departureZone,
-            arrivesTime: arrivesTime, arrivalZone: arrivalZone, nextDay: effectiveArrivalIsNextDay
+            departureDate: flightDate, departsTime: departsTime, departureZone: departureZone,
+            arrivalDate: arrivalDate, arrivesTime: arrivesTime, arrivalZone: arrivalZone
         )
         return end > start
     }
@@ -1427,19 +1513,29 @@ struct AddItemSheet: View {
         return end > start
     }
 
-    /// Composes a flight item's departure and arrival instants — the same
-    /// math `flightFields()` needs to actually save the item, factored out
-    /// (mirroring `transportInstants` above) so validation and the save path
-    /// share one source of truth. Pure; exposed for tests.
+    /// Composes a flight item's departure and arrival instants from two
+    /// independent date+time+zone pairs — the same math `flightFields()`
+    /// needs to actually save the item, factored out (mirroring
+    /// `transportInstants` above) so validation and the save path share one
+    /// source of truth. P7c: replaces the old single shared `flightDate` +
+    /// boolean `nextDay` shape (capped at 0 or +1 day, and — worse — that
+    /// default was guessed from wall-clock minutes alone, blind to either
+    /// zone: a late-enough departure paired with an unrelated stale arrival
+    /// default could need +2 days to reach a valid arrival at all, which the
+    /// old boolean had no way to express). An explicit `arrivalDate` makes
+    /// any day gap directly representable and the day badge/duration a pure
+    /// output of the two real instants, never a separate toggle to keep in
+    /// sync. Pure; exposed for tests.
     static func flightInstants(
-        flightDate: Date, departsTime: Date, departureZone: TimeZone,
-        arrivesTime: Date, arrivalZone: TimeZone, nextDay: Bool,
+        departureDate: Date, departsTime: Date, departureZone: TimeZone,
+        arrivalDate: Date, arrivesTime: Date, arrivalZone: TimeZone,
         readingCalendar: Calendar = .current
     ) -> (start: Date, end: Date) {
-        let start = ItemTimeCombining.combine(date: flightDate, timeOfDay: departsTime, targetTz: departureZone, readingCalendar: readingCalendar)
+        let start = ItemTimeCombining.combine(
+            date: departureDate, timeOfDay: departsTime, targetTz: departureZone, readingCalendar: readingCalendar
+        )
         let end = ItemTimeCombining.combine(
-            date: flightDate, timeOfDay: arrivesTime,
-            dayOffset: nextDay ? 1 : 0, targetTz: arrivalZone, readingCalendar: readingCalendar
+            date: arrivalDate, timeOfDay: arrivesTime, targetTz: arrivalZone, readingCalendar: readingCalendar
         )
         return (start, end)
     }
@@ -1447,10 +1543,17 @@ struct AddItemSheet: View {
     private func flightFields() -> ComposedFields {
         let from = fromIATA.trimmingCharacters(in: .whitespaces).uppercased()
         let to = toIATA.trimmingCharacters(in: .whitespaces).uppercased()
-        let (start, end) = Self.flightInstants(
-            flightDate: flightDate, departsTime: departsTime, departureZone: departureZone,
-            arrivesTime: arrivesTime, arrivalZone: arrivalZone, nextDay: effectiveArrivalIsNextDay
-        )
+        let start = ItemTimeCombining.combine(date: flightDate, timeOfDay: departsTime, targetTz: departureZone)
+        // P7c: no fabricated arrival — `endsAt` stays `nil` (route-only,
+        // same as Activity/Food's own shape) until the user actually sets
+        // one; `flightPreviewModel` reuses this same field, so the live
+        // pass can never assert a duration/day badge that isn't real.
+        let end = arrivesTime.map { arrives in
+            Self.flightInstants(
+                departureDate: flightDate, departsTime: departsTime, departureZone: departureZone,
+                arrivalDate: arrivalDate, arrivesTime: arrives, arrivalZone: arrivalZone
+            ).end
+        }
         let title = [
             airline.trimmingCharacters(in: .whitespacesAndNewlines),
             flightNo.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1487,6 +1590,11 @@ struct AddItemSheet: View {
     /// `private` — `AddItemFormSections.flightSection` (a different file,
     /// same type) reads it; see `tagIconSize`'s doc comment for the
     /// identical reasoning.
+    ///
+    /// P7c (award audit #4): inherits "no fabricated arrival" for free —
+    /// `flightFields().endsAt` is `nil` until `hasSetArrival`, and
+    /// `BoardingPassContent.make`/`BoardingPassCard` already render a `nil`
+    /// destination date as route-only (no duration, no day badge), per P1.
     var flightPreviewModel: BoardingPassCard.Model {
         let fields = flightFields()
         let transient = ItineraryItem(

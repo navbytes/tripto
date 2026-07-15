@@ -39,21 +39,4 @@ enum ItemTimeCombining {
         guard dayOffset != 0 else { return base }
         return targetCalendar.date(byAdding: .day, value: dayOffset, to: base) ?? base
     }
-
-    /// The flight form's "+1 day" default (this milestone's brief §4.3):
-    /// an arrival wall-clock earlier than the departure wall-clock suggests
-    /// a red-eye/long-haul that lands the calendar day after it left. This
-    /// is only ever a *default* the user can toggle off — never assumed
-    /// silently once they've overridden it.
-    static func suggestedArrivalDayOffset(
-        departsTimeOfDay: Date,
-        arrivesTimeOfDay: Date,
-        readingCalendar: Calendar = .current
-    ) -> Int {
-        let dep = readingCalendar.dateComponents([.hour, .minute], from: departsTimeOfDay)
-        let arr = readingCalendar.dateComponents([.hour, .minute], from: arrivesTimeOfDay)
-        let depMinutes = (dep.hour ?? 0) * 60 + (dep.minute ?? 0)
-        let arrMinutes = (arr.hour ?? 0) * 60 + (arr.minute ?? 0)
-        return arrMinutes < depMinutes ? 1 : 0
-    }
 }

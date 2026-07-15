@@ -65,11 +65,18 @@ extension AddItemSheet {
                         .foregroundStyle(Palette.slate)
                 }
 
-                LabeledDatePicker(label: "Arrives", date: $arrivesTime, displayedComponents: .hourAndMinute)
-                HStack {
-                    Spacer(minLength: 0)
-                    nextDayChip
-                }
+                // P7c (award audit #4): the arrival *date* is now its own
+                // explicit picker, the same "two independent date+time
+                // pickers, no day-offset toggle" shape `transportSection`'s
+                // pickup/drop-off pair already uses below — any day gap
+                // (same-day, +1, or the pathological +2 a late departure +
+                // a large eastbound zone gain can need) is directly
+                // pickable, rather than guessed from wall-clock minutes and
+                // capped at one boolean day. The day badge on the preview
+                // above is purely computed from these two real instants —
+                // there's nothing left here to toggle.
+                LabeledDatePicker(label: "Arrival date", date: $arrivalDate, displayedComponents: .date)
+                LabeledDatePicker(label: "Arrives", date: arrivesTimeBinding, displayedComponents: .hourAndMinute)
                 if !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
                     && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
                     && !flightEndAfterStart {
@@ -78,7 +85,7 @@ extension AddItemSheet {
                         .foregroundStyle(Palette.rose)
                 }
                 ZonePicker(
-                    title: "Arrival time zone", selection: $arrivalZone, referenceDate: arrivesTime,
+                    title: "Arrival time zone", selection: $arrivalZone, referenceDate: arrivesTimeBinding.wrappedValue,
                     hint: isArrivalZoneAutoSet ? "Set by arrival airport" : nil
                 )
                 if isArrivalAirportUnknown {
@@ -339,7 +346,11 @@ extension AddItemSheet {
             .overlay {
                 Capsule().stroke(isOn ? Color.clear : Palette.mist, lineWidth: 1)
             }
-            // Finding 4 (§6.5 44pt floor) — see `nextDayChip`'s comment.
+            // Finding 4 (§6.5 44pt floor): applied after the background so
+            // the visual pill stays compact at its natural size — this only
+            // grows the invisible tappable frame around it, with
+            // `.contentShape` extending hit-testing to match. Same recipe
+            // as `tagToggle` below.
             .frame(minHeight: 44)
             .contentShape(Capsule())
         }
@@ -365,7 +376,7 @@ extension AddItemSheet {
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.xs + 2)
             .background(isOn ? CategoryColor.activity.fg : CategoryColor.activity.soft, in: Capsule())
-            // Finding 4 (§6.5 44pt floor) — see `nextDayChip`'s comment.
+            // Finding 4 (§6.5 44pt floor) — see `assigneeChipToggle`'s comment.
             .frame(minHeight: 44)
             .contentShape(Capsule())
         }
@@ -403,31 +414,19 @@ extension AddItemSheet {
         return code.count == 3 && AirportTimeZones.tzIdentifier(for: code) == nil
     }
 
-    var nextDayChip: some View {
-        Button {
-            arrivalDayOffsetOverride = !effectiveNextDay
-        } label: {
-            Text("+1 day")
-                .font(Typo.body(11, weight: .semibold))
-                // Finding 3 (sweep, same defect class): raw `.white` on
-                // `Palette.amber` measures ~2.3:1 (fails AA) — the same
-                // white-on-amber bug `Palette.onAmber` exists to fix,
-                // already used by every other filled-amber CTA in this
-                // codebase (e.g. `TripView.missingTripState`).
-                .foregroundStyle(effectiveNextDay ? Palette.onAmber : Palette.slate)
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .background(effectiveNextDay ? Palette.amber : Palette.mist, in: Capsule())
-                // Finding 4 (§6.5 44pt floor): applied after the background
-                // so the visual pill stays compact at its natural size —
-                // this only grows the invisible tappable frame around it,
-                // with `.contentShape` extending hit-testing to match.
-                .frame(minHeight: 44)
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Arrives next day")
-        .accessibilityAddTraits(effectiveNextDay ? [.isSelected] : [])
+    /// P7c (award audit #4): the "Arrives" picker's own binding —
+    /// `arrivesTime` is `nil` until the user actually sets a real arrival
+    /// (`hasSetArrival`), but a time-wheel picker still needs *some*
+    /// concrete value to display before that first real edit. This reads a
+    /// neutral placeholder (two hours after whatever "Departs" currently
+    /// shows) that's never consulted as data — `flightFields()`/
+    /// `flightPreviewModel` read `arrivesTime` itself (still `nil` until a
+    /// real write lands through this binding's `set`), not this fallback.
+    var arrivesTimeBinding: Binding<Date> {
+        Binding(
+            get: { arrivesTime ?? departsTime.addingTimeInterval(2 * 3600) },
+            set: { arrivesTime = $0 }
+        )
     }
 }
 

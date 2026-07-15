@@ -84,10 +84,16 @@ struct BookingDetailView: View {
     /// Not used inside `flightHeader`/`transportHeader`/etc. — those sit in
     /// the boarding-pass hero art with their own fixed decorative glyphs
     /// (route-line airplane, header badge icon), not an icon-beside-caption
-    /// pairing this recipe is for.
+    /// pairing this recipe is for. `landingNoteIconSize` below IS one of
+    /// these pairings (P7c) — it sits in the pass card, but as a plain
+    /// icon-beside-one-line-of-caption row, the same shape as the other
+    /// three.
     @ScaledMetric(relativeTo: .body) private var lockIconSize: CGFloat = 11
     @ScaledMetric(relativeTo: .body) private var copyIconSize: CGFloat = 11
     @ScaledMetric(relativeTo: .body) private var actionIconSize: CGFloat = 18
+    /// `landingNoteFooter`'s icon — same size as `BoardingPassCard
+    /// .footerIconSize`, the pass this footer's own recipe is unifying with.
+    @ScaledMetric(relativeTo: .body) private var landingNoteIconSize: CGFloat = 12
 
     init(itemId: UUID) {
         self.itemId = itemId
@@ -369,6 +375,11 @@ struct BookingDetailView: View {
             // scales all the way to accessibility5, matching the grid below.
             passHeader(for: item)
             perforatedGrid(for: item)
+            // Audit #8: the timeline pass already shows a flight's landing
+            // note (`TZShiftChip.landingText`, via `BoardingPassContent
+            // .make`) — this detail pass silently dropped it. See
+            // `landingNoteFooter`'s own doc comment.
+            landingNoteFooter(for: item)
         }
         .background(Palette.elevated)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -448,19 +459,29 @@ struct BookingDetailView: View {
         let details = item.details
         let flightName = [details.airline, details.flightNo].compactMap { $0 }.joined(separator: " ")
         let depTime = ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz)
-        let depZone = ItineraryTimeZone.zoneLabel(for: item.primaryTz, at: item.startsAt)
+        // Audit #8 (P7c): was `ItineraryTimeZone.zoneLabel` (an abbreviation
+        // like "EDT") — the timeline pass's own boarding-pass card
+        // (`BoardingPassMath.gmtOffsetLabel`) shows a universally-readable
+        // "GMT-4" for the exact same flight instead; this pass now speaks
+        // the same vocabulary rather than disagreeing on the same fact.
+        let depZone = BoardingPassMath.gmtOffsetLabel(for: item.primaryTz, at: item.startsAt)
         // Bug fix: was `citySegment(of: item.primaryTz.identifier)` — the
         // timezone's canonical city, not the actual airport's city (EWR's
         // zone is "America/New_York", so this showed "New York" for a
         // Newark departure). Falls back to the old timezone-derived city
         // for an airport `AirportTimeZones` doesn't know, same graceful
         // degradation `tzIdentifier` already uses elsewhere in this file.
+        // Audit #8: no longer shown on the visible caption below (the
+        // timeline pass's own endpoint block never names a city either,
+        // relying on the big airport code above it) — kept only for the
+        // caption's `accessibilityLabel`, the same "code visually, city for
+        // VoiceOver" split `BoardingPassCard.Endpoint.name` already uses.
         let depCity = details.fromIATA.flatMap(AirportTimeZones.cityName(for:))
             ?? ItineraryTimeZone.citySegment(of: item.primaryTz.identifier)
         let arrivalTz = item.effectiveTz
         let endsAt = item.endsAt ?? item.startsAt
         let arrTime = ItineraryTimeZone.timeString(endsAt, in: arrivalTz)
-        let arrZone = ItineraryTimeZone.zoneLabel(for: arrivalTz, at: endsAt)
+        let arrZone = BoardingPassMath.gmtOffsetLabel(for: arrivalTz, at: endsAt)
         let arrCity = details.toIATA.flatMap(AirportTimeZones.cityName(for:))
             ?? ItineraryTimeZone.citySegment(of: arrivalTz.identifier)
 
@@ -501,9 +522,10 @@ struct BookingDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(details.fromIATA ?? "—")
                             .font(Typo.display(34))
-                        Text("\(depCity) · \(depTime) \(depZone)")
+                        Text("\(depTime) \(depZone)")
                             .font(Typo.body(Typo.Size.caption))
                             .lineLimit(2)
+                            .accessibilityLabel("\(depCity), \(depTime) \(depZone)")
                     }
                     Image(systemName: "airplane")
                         .font(.system(size: 15))
@@ -517,9 +539,10 @@ struct BookingDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(details.toIATA ?? "—")
                             .font(Typo.display(34))
-                        Text("\(arrCity) · \(arrTime) \(arrZone)")
+                        Text("\(arrTime) \(arrZone)")
                             .font(Typo.body(Typo.Size.caption))
                             .lineLimit(2)
+                            .accessibilityLabel("\(arrCity), \(arrTime) \(arrZone)")
                     }
                 }
                 .foregroundStyle(.white)
@@ -528,8 +551,9 @@ struct BookingDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(details.fromIATA ?? "—")
                             .font(Typo.display(34))
-                        Text("\(depCity) · \(depTime) \(depZone)")
+                        Text("\(depTime) \(depZone)")
                             .font(Typo.body(Typo.Size.caption))
+                            .accessibilityLabel("\(depCity), \(depTime) \(depZone)")
                     }
                     Spacer(minLength: Spacing.sm)
                     routeLine
@@ -537,8 +561,9 @@ struct BookingDetailView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(details.toIATA ?? "—")
                             .font(Typo.display(34))
-                        Text("\(arrCity) · \(arrTime) \(arrZone)")
+                        Text("\(arrTime) \(arrZone)")
                             .font(Typo.body(Typo.Size.caption))
+                            .accessibilityLabel("\(arrCity), \(arrTime) \(arrZone)")
                     }
                 }
                 .foregroundStyle(.white)
@@ -775,6 +800,48 @@ struct BookingDetailView: View {
             .padding(.top, Spacing.md)
     }
 
+    /// Audit #8 (P7c): the timeline pass already shows a flight's landing
+    /// note once it crosses zones (`TZShiftChip.landingText`, wired through
+    /// `BoardingPassContent.make` for `TimelineCardRow`'s own boarding
+    /// pass) — this detail pass silently dropped it, one of three ways the
+    /// two disagreed on the same flight (the other two, unified in
+    /// `flightHeader`: the zone-label vocabulary and the endpoint
+    /// captions). Appended below the grid using the exact perforated-notch
+    /// + dashed-rule recipe `stubContent` already establishes for this card
+    /// — the same recipe `BoardingPassCard.footerView` itself borrows, per
+    /// that view's own doc comment — so this reads as one more torn strip
+    /// on the same pass, not a bolted-on banner. Flights only, and only
+    /// once `TZShiftChip.landingText` has something to say (a same-zone hop
+    /// has nothing to report, matching the timeline pass's own contract).
+    @ViewBuilder
+    private func landingNoteFooter(for item: ItineraryItem) -> some View {
+        if item.category == .flight, let landingText = TZShiftChip.landingText(for: item) {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                dashedRule(progress: 0)
+                HStack(alignment: .top, spacing: Spacing.xs) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: landingNoteIconSize, weight: .semibold))
+                        .foregroundStyle(Palette.amberInk)
+                        .accessibilityHidden(true)
+                    Text(landingText)
+                        .font(Typo.body(11.5, weight: .semibold))
+                        .foregroundStyle(Palette.slate)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, Spacing.xl)
+                .padding(.bottom, Spacing.xl)
+            }
+            .background(Palette.elevated)
+            .overlay(alignment: .top) {
+                HStack {
+                    Circle().fill(Palette.paper).frame(width: 22, height: 22).offset(x: -11, y: -11)
+                    Spacer()
+                    Circle().fill(Palette.paper).frame(width: 22, height: 22).offset(x: 11, y: -11)
+                }
+            }
+        }
+    }
+
     private func gridCell(label: String, value: String) -> some View {
         let isCopyable = (label == "Confirmation" || label == "Ticket") && value != "—"
         return VStack(alignment: .leading, spacing: 3) {
@@ -809,7 +876,7 @@ struct BookingDetailView: View {
                     .foregroundStyle(Palette.ink)
                     // Finding 7 (§6.5 44pt floor): grows only the invisible
                     // tappable band around the ~20pt-tall label — same
-                    // recipe as `AddItemFormSections.nextDayChip`/
+                    // recipe as `AddItemFormSections.assigneeChipToggle`/
                     // `TripView.pasteImportPill`, visuals unchanged.
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())

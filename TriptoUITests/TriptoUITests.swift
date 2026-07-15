@@ -344,29 +344,17 @@ final class TriptoUITests: XCTestCase {
         let toField = app.textFields["e.g. LIS"]
         toField.tap()
         toField.typeText("LIS")
-        // Dismiss the keyboard *before* reaching for the date pickers/next-
-        // day chip below — while it's up, it covers roughly the bottom half
-        // of the screen, and XCUITest's auto-scroll-to-hittable has to
-        // scroll considerably further to bring an otherwise-nearby control
-        // into the remaining, keyboard-free visible area.
+        // Dismiss the keyboard *before* reaching for the date pickers below
+        // — while it's up, it covers roughly the bottom half of the screen,
+        // and XCUITest's auto-scroll-to-hittable has to scroll considerably
+        // further to bring an otherwise-nearby control into the remaining,
+        // keyboard-free visible area.
         app.keyboards.buttons["return"].tap()
 
-        // P7 hardening: `departsTime` defaults to the device's current wall
-        // clock, and JFK's real zone (America/New_York, auto-detected from
-        // the code just typed) sits ~5h behind Lisbon's — late enough in
-        // the evening (confirmed empirically: any run starting at/after
-        // 22:00 local), the nominal (zone-blind) "+1 day" auto-suggest
-        // (`ItemTimeCombining.suggestedArrivalDayOffset`) can no longer
-        // land on a valid arrival at all, same-day OR +1-day, since this
-        // route would actually need +2 days, which the chip has no way to
-        // express (`arrivalDayOffsetOverride` is a plain Bool). Setting an
-        // explicit, safe morning departure — rather than depending on
-        // whatever time this happens to run — sidesteps the whole edge case
-        // instead of fighting it; a real person filling this same route at
-        // 9am would land here as a matter of course, and everyone hitting
-        // save mid-tear-off-into-tomorrow already has this fixed at P7 for
-        // a coder to actually resolve (docs/UX_REDESIGN_ROADMAP.md P7 audit
-        // list), not this capture suite.
+        // `departsTime` defaults to the device's current wall clock — pinning
+        // it to a fixed morning value keeps this capture's boarding-pass
+        // screenshot deterministic regardless of when the suite actually
+        // runs, rather than showing whatever real time this happened to be.
         let departsTimePicker = app.datePickers["Departs"].buttons["Time Picker"]
         XCTAssertTrue(departsTimePicker.waitForExistence(timeout: 5), "Departs time picker never appeared")
         departsTimePicker.tap()
@@ -386,17 +374,32 @@ final class TriptoUITests: XCTestCase {
         // outside the popover at any Dynamic Type size.
         app.staticTexts["Add to Lisbon"].tap()
 
-        // A 9am departure never needs more than the ordinary "+1 day" this
-        // route's ~5h zone gap calls for (proven for any pre-10pm departure
-        // — see the comment above) — `nextDayChip`'s own action toggles
-        // (`arrivalDayOffsetOverride = !effectiveNextDay`), so this only
-        // taps it while the (now reliable) suggestion isn't already showing
-        // it selected.
-        let nextDayChip = app.buttons["Arrives next day"]
-        XCTAssertTrue(nextDayChip.waitForExistence(timeout: 5), "+1 day chip never appeared")
-        if !nextDayChip.isSelected {
-            nextDayChip.tap()
-        }
+        // P7c: the old boolean "+1 day" chip is gone — arrival is now an
+        // explicit "Arrival date" picker plus its own "Arrives" time, and
+        // the preview stays route-only (no duration/day badge) until a real
+        // arrival is set (`AddItemSheet.hasSetArrival`). "Arrival date"
+        // defaults to departure's own day, which is left as-is here — an
+        // evening Lisbon arrival is a same-day, unambiguous, deterministic
+        // instant regardless of the ~4-5h JFK/LIS zone gap (which shifts by
+        // a rare DST-mismatch week either way), so there's no need to drive
+        // its calendar-grid popover (whose day-cell labels aren't a stable,
+        // locale-independent target the way a wheel-adjust is). Same
+        // wheel-adjust recipe as "Departs" above — this is the write that
+        // actually flips `arrivesTime` from `nil` to a real value
+        // (`hasSetArrival`), which is what takes the preview out of
+        // route-only and renders a real duration, matching this capture's
+        // original (pre-P7c) intent.
+        let arrivesTimePicker = app.datePickers["Arrives"].buttons["Time Picker"]
+        XCTAssertTrue(arrivesTimePicker.waitForExistence(timeout: 5), "Arrives time picker never appeared")
+        arrivesTimePicker.tap()
+        let arrivesHourWheel = app.pickerWheels.element(boundBy: 0)
+        XCTAssertTrue(arrivesHourWheel.waitForExistence(timeout: 5), "Arrives time picker wheels never appeared")
+        arrivesHourWheel.adjust(toPickerWheelValue: "9")
+        app.pickerWheels.element(boundBy: 1).adjust(toPickerWheelValue: "00")
+        app.pickerWheels.element(boundBy: 2).adjust(toPickerWheelValue: "PM")
+        // Same dismiss target as Departs' popover above.
+        app.staticTexts["Add to Lisbon"].tap()
+
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "add-item-flight-preview", of: app)
 
