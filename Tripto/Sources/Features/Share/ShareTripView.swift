@@ -30,21 +30,24 @@ struct ShareTripView: View {
 
     @State private var toast: String?
     @State private var shareSheetItems: [Any]?
-    @State private var isPresentingResetConfirm = false
     /// Bug fix: the card used to only offer "Reset link" (revoke +
     /// immediately create a replacement) — no way to just turn the link
     /// off. Mirrors `invitePendingRevoke`'s "revoke, no replacement"
-    /// pattern below.
+    /// pattern below. P4.1 (docs/UX_REDESIGN_ROADMAP.md): now also the
+    /// confirm gate behind the compact public-link row's own Toggle turning
+    /// off — see `publicLinkToggleBinding`.
     @State private var linkPendingRemoval: TripShareLink?
-    @State private var memberPendingRoleChange: TripMember?
     @State private var memberPendingOrganizerConfirm: TripMember?
     @State private var memberPendingRemoval: TripMember?
+    /// P4.1: the Traveller chip menu's "Remove from trip" — same shape as
+    /// `memberPendingRemoval` above, for the no-account `TripProfile` rows.
+    @State private var profilePendingRemoval: TripProfile?
     @State private var invitePendingRevoke: Invite?
-    /// Guards the deliberate network-bound share-link create/reset (see the
-    /// "Mutations" doc comment below) — without this, a double-tap on
-    /// "Create view link" fires two concurrent inserts. Kept in the Button
-    /// actions themselves, not inside `createShareLink()`, so the DEBUG
-    /// autopilot and `resetShareLink()` aren't blocked by a reentrancy guard.
+    /// Guards the deliberate network-bound share-link create (see the
+    /// "Mutations" doc comment below) — without this, a double-tap on the
+    /// public-link row's Toggle fires two concurrent inserts. Kept in the
+    /// Toggle's own binding, not inside `createShareLink()`, so the DEBUG
+    /// autopilot isn't blocked by a reentrancy guard.
     @State private var busyShareLink = false
     /// Same as `busyShareLink`, per-role, for the two invite buttons.
     @State private var busyInviteRoles: Set<TripRole> = []
@@ -52,30 +55,21 @@ struct ShareTripView: View {
     /// (this milestone's brief §2) — both drive `TripProfileFormSheet`.
     @State private var isPresentingAddProfile = false
     @State private var editingProfile: TripProfile?
+    /// Scope amendment to P4.2 (docs/UX_REDESIGN_ROADMAP.md, mid-build):
+    /// the full `ImportAddressCard` cluster moved to `AddItemSheet`, but
+    /// the client still reaches for the trip's email-import address from
+    /// Share by muscle memory — `forwardBookingEmailsRow` keeps it findable
+    /// here, one tap deeper, via this sheet. Same card/consent flow as
+    /// before (and as `AddItemSheet`'s own copy) — no second copy of the
+    /// disclosure.
+    @State private var isPresentingImportAddress = false
     /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address,
-    /// fetched once per screen visit and cached here — see
-    /// `fetchImportAddressIfNeeded()`. Mirrors `ItineraryTabView`'s own
-    /// `importLoadState`/`hasFetchedImportAddress` pair (deliberately not
-    /// shared state — each screen fetches independently), so the
-    /// forwarding-address card stays reachable here even once the itinerary
-    /// has items and its own teaser has stopped rendering.
-    ///
+    /// fetched once per screen visit and cached here — mirrors
+    /// `AddItemSheet`/`ItineraryTabView`'s own identically-shaped pair.
     /// A5 (`docs/BACKLOG.md`): starts `.needsConsent` (not `.loading`) when
-    /// email-import consent isn't on record yet — see `ItineraryTabView`'s
-    /// matching property doc comment for why this is resolved synchronously
-    /// here rather than inside `fetchImportAddressIfNeeded()`. "Each screen
-    /// fetches independently" above now also means each screen re-reads
-    /// `EmailImportConsent.isGranted()` independently at its own first
-    /// appearance — granting on one screen updates the OTHER screen's card
-    /// only the next time that screen's own view identity is freshly
-    /// created, same class of staleness this pair already accepted for the
-    /// fetch result itself.
+    /// consent isn't on record yet, same reasoning as those two.
     @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
     @State private var hasFetchedImportAddress = false
-    /// TI-2: "Or paste text instead" — the fallback path below
-    /// `importCard`'s email-address card, presenting `PasteImportSheet`
-    /// in `.booking` mode.
-    @State private var isPresentingPasteImport = false
 
     /// `shareLinkRow`'s `ShareLink` icon — glyph+container scaled together
     /// (this view owns the whole row, no external layout contract on its
@@ -97,11 +91,20 @@ struct ShareTripView: View {
 
     var body: some View {
         ScrollView {
+            // P4.1 (docs/UX_REDESIGN_ROADMAP.md): people first — "who's on
+            // this trip and what can they do" is the screen's job, a link is
+            // the mechanism, not the feature. Invite is the primary action
+            // right under the list; the public link (the least-common path)
+            // is demoted to a compact row at the bottom. The full "paste OR
+            // forward" email-import cluster moved to `AddItemSheet` (P4.2)
+            // — `forwardBookingEmailsRow` keeps the address findable here
+            // too, one tap deeper (scope amendment), in the same
+            // demoted/utility area as the public link.
             VStack(alignment: .leading, spacing: Spacing.xl) {
-                shareLinkCard
-                inviteSection
-                importCard
                 peopleSection
+                inviteSection
+                publicLinkSection
+                forwardBookingEmailsRow
             }
             .padding(Spacing.xl)
         }
@@ -110,48 +113,29 @@ struct ShareTripView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toastOverlay($toast)
         .activityShareSheet(items: $shareSheetItems)
-        // TI-2/TI-3: the fallback path beside `importCard`'s email-address
-        // card — not one of the three tabs the paste-import consistency
-        // pass (TripView.pasteImportPill) targeted, left as its own entry
-        // point here, just updated to the unified sheet's new signature.
-        .sheet(isPresented: $isPresentingPasteImport) {
-            PasteImportSheet(
-                tripId: tripId,
-                onItineraryItemsImported: { created in
-                    toast = "\(created) item\(created == 1 ? "" : "s") added to review"
-                },
-                onPackingConfirmed: { candidates in
-                    // Bug fix (review): a bare `guard let userId =
-                    // authManager.userId else { return }` silently dropped
-                    // every confirmed item with no toast when signed out —
-                    // `?? trips.first?.createdBy` matches the fallback
-                    // `TripView`/`PackingListView.addItem` already use for
-                    // exactly this signed-out-local-creator case.
-                    let creatorId = authManager.userId ?? trips.first?.createdBy
-                    guard let creatorId else { return }
-                    for candidate in candidates {
-                        PackingItem.insert(
-                            label: candidate.label, groupKey: candidate.groupKey, assigneeProfileId: nil,
-                            tripId: tripId, createdBy: creatorId,
-                            modelContext: modelContext, syncEngine: syncEngine
-                        )
+        // Scope amendment to P4.2: `forwardBookingEmailsRow`'s "one tap
+        // deeper" — the exact same `ImportAddressCard` component/consent
+        // flow `AddItemSheet.importAddressCard` wires up, just presented in
+        // its own small sheet here instead of inline in a form.
+        .sheet(isPresented: $isPresentingImportAddress) {
+            NavigationStack {
+                VStack(spacing: 0) {
+                    SheetHeader(title: "Forward booking emails", onCancel: { isPresentingImportAddress = false })
+                    ScrollView {
+                        ImportAddressCard(state: importLoadState) { address in
+                            toast = ClipboardFeedback.copy(address, label: "Import address")
+                        } onRetry: {
+                            retryImportAddressFetch()
+                        } onConsentGranted: {
+                            grantEmailImportConsentAndFetch()
+                        }
+                        .padding(Spacing.xl)
                     }
-                    toast = "\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list"
                 }
-            )
-        }
-        .sheet(item: $memberPendingRoleChange) { member in
-            RolePickerSheet(currentRole: member.role) { newRole in
-                memberPendingRoleChange = nil
-                if newRole == .organizer {
-                    memberPendingOrganizerConfirm = member
-                } else {
-                    changeRole(of: member, to: newRole)
-                }
-            } onRemove: {
-                memberPendingRoleChange = nil
-                memberPendingRemoval = member
+                .background(Palette.paper)
+                .toolbar(.hidden, for: .navigationBar)
             }
+            .presentationDetents([.medium])
         }
         .sheet(isPresented: $isPresentingAddProfile) {
             TripProfileFormSheet(mode: .add) { name, color in
@@ -164,16 +148,6 @@ struct ShareTripView: View {
                 onSave: { name, color in updateProfile(profile, displayName: name, avatarColor: color) },
                 onDelete: { deleteProfile(profile) }
             )
-        }
-        .confirmationDialog(
-            "Reset the share link?",
-            isPresented: $isPresentingResetConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Reset link", role: .destructive) { resetShareLink() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Anyone with the old link loses access.")
         }
         .confirmationDialog(
             "Make \(memberPendingOrganizerConfirm.map(displayName) ?? "this person") an organizer?",
@@ -204,6 +178,26 @@ struct ShareTripView: View {
                 memberPendingRemoval = nil
             }
             Button("Cancel", role: .cancel) { memberPendingRemoval = nil }
+        }
+        // P4.1: the Traveller chip menu's "Remove from trip" — same copy
+        // `TripProfileFormSheet`'s own internal confirm already uses, just a
+        // second reachable entry point now that removal is also offered
+        // inline instead of only from inside the edit sheet.
+        .confirmationDialog(
+            "Remove \(profilePendingRemoval?.displayName ?? "this person") from the trip?",
+            isPresented: Binding(
+                get: { profilePendingRemoval != nil },
+                set: { isPresented in if !isPresented { profilePendingRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let profile = profilePendingRemoval { deleteProfile(profile) }
+                profilePendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { profilePendingRemoval = nil }
+        } message: {
+            Text("They\u{2019}ll no longer be assignable on plans or packing tasks.")
         }
         .confirmationDialog(
             "Remove the share link?",
@@ -242,19 +236,12 @@ struct ShareTripView: View {
             await applyUITestAutopilotIfNeeded()
             #endif
         }
-        // Reviewer should-fix: `myRole` (below) is derived from `@Query
-        // members`, which can still be empty on first render (fresh
-        // install, just-joined trip, this screen opened before member sync
-        // completes) — a plain one-shot `.task` here fired once with
-        // `myRole == nil`, the gate inside `fetchImportAddressIfNeeded()`
-        // failed, and `hasFetchedImportAddress` was left `false` forever
-        // (the early return never sets it), so once `members` synced in and
-        // `importCard` started rendering, nothing ever re-fetched — a
-        // permanent loading spinner for the rest of that visit. Re-running
-        // on every `myRole` change fixes that: the guard inside the
-        // function still no-ops once a fetch has actually been attempted,
-        // so this only ever causes a retry in the false/unknown -> true
-        // transition.
+        // `myRole` is `@Query`-derived and can still be empty on first
+        // render (fresh install, just-joined trip, this screen opened
+        // before member sync completes) — re-running on every `myRole`
+        // change (rather than a plain one-shot `.task`) is what lets a
+        // later sync-in retry the one real fetch attempt
+        // `fetchImportAddressIfNeeded()`'s own guard only allows once.
         .task(id: myRole) { await fetchImportAddressIfNeeded() }
     }
 
@@ -346,124 +333,104 @@ struct ShareTripView: View {
         }
     }
 
-    /// Text color for the "Copy"/"Create view link" pills, which sit on
-    /// the gradient card and are deliberately always-white (unlike most of
-    /// this screen, that pill background doesn't adapt to dark mode) — so
-    /// their text must be a fixed dark ink, never the adaptive `Palette.ink`
-    /// (which flips near-white in dark mode and would sit unreadably on a
-    /// white pill; caught in the M3 dark-mode screenshot pass).
-    private static let onWhitePillInk = Color(hex: "#1A1B2E")
+    // MARK: - Public link (compact switch row — P4.1, demoted + last)
 
-    /// `shareLinkCard`'s text scrim (UX audit finding 1). Unlike `TripCard`'s
-    /// `CoverGradient.textScrim` — a vertical, bottom-heavy ramp built for
-    /// text that sits at the bottom of that card — this card's title/
-    /// description sit at the TOP-LEADING corner, `CoverGradient.dusk`'s
-    /// lightest stop (#E8955A, ~2.4:1 for white per `Palette.onAmber`'s doc).
-    /// A bottom-heavy scrim would darken the wrong corner, so this is a
-    /// diagonal ramp along `.dusk`'s own axis (`.topLeading` ->
-    /// `.bottomTrailing`) instead. Black 0.45 composited over #E8955A yields
-    /// L~0.108 => ~6.6:1 for full white and ~5.3:1 for the description's
-    /// `.white.opacity(0.9)`, clearing WCAG AA (4.5:1); the bottom fine-print
-    /// already sits over dark indigo/plum and is unaffected. Fixed (not
-    /// theme-adaptive), same rationale as `CoverGradient.textScrim`: cover
-    /// gradients don't change between light and dark.
-    ///
-    /// This would normally live as a `CoverGradient` companion next to
-    /// `textScrim` in `Design/PaletteExtras.swift` (same file/rationale —
-    /// `gen_tokens.py` never touches it), but this pass is scoped to the
-    /// Share screen's own files only (concurrent work on other screens is
-    /// touching `Design/` files elsewhere on this branch), so it's kept
-    /// local here. Worth hoisting into `PaletteExtras.swift` in a later,
-    /// non-concurrent pass if `TripCard` or another cover-gradient card ever
-    /// needs the same top-leading treatment.
-    private static let shareLinkCardScrim = LinearGradient(
-        stops: [
-            .init(color: .black.opacity(0.45), location: 0.0),
-            .init(color: .clear, location: 0.6)
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-
-    // MARK: - Share link card (top gradient card)
-
-    private var shareLinkCard: some View {
+    /// P4.1 (docs/UX_REDESIGN_ROADMAP.md): demoted from the top gradient
+    /// hero card to a compact switch-style row, moved last — inviting people
+    /// you know is the common case, so the public link no longer has to be
+    /// the loudest thing on the screen. The `Toggle` IS the create/revoke
+    /// control now: turning it on calls `createShareLink()`, turning it off
+    /// routes through the exact same confirmation `linkPendingRemoval`
+    /// already gated (`removeShareLink()`) rather than revoking instantly —
+    /// see `publicLinkToggleBinding`. The old one-tap "Reset link" (revoke +
+    /// immediately replace) doesn't carry over to a two-state switch; the
+    /// same end result is still one toggle-off, toggle-on away.
+    private var publicLinkSection: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: "link")
-                    .accessibilityHidden(true)
-                Text("Anyone-can-view link").font(Typo.body(weight: .bold))
+            Text("Public page")
+                .font(Typo.body(Typo.Size.caption, weight: .bold))
+                .foregroundStyle(Palette.slate)
+                .textCase(.uppercase)
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: Spacing.md) {
+                    Image(systemName: "link")
+                        .foregroundStyle(Palette.slate)
+                        .frame(width: 22)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Anyone-can-view link")
+                            .font(Typo.body(weight: .semibold))
+                            .foregroundStyle(Palette.ink)
+                        Text("Opens in any browser \u{2014} no app, no account.")
+                            .font(Typo.body(Typo.Size.caption))
+                            .foregroundStyle(Palette.slate)
+                    }
+                    Spacer(minLength: Spacing.sm)
+                    // Non-organizers can never learn whether a link exists —
+                    // RLS scopes `share_links` SELECT to the organizer too,
+                    // so their query is always `[]` regardless of the real
+                    // state (`TripShareLink`'s doc comment) — the switch
+                    // itself is therefore organizer-only, not just disabled.
+                    if isOrganizer {
+                        Toggle("Anyone-can-view link", isOn: publicLinkToggleBinding)
+                            .labelsHidden()
+                            .tint(Palette.amber)
+                            .disabled(busyShareLink)
+                    }
+                }
+
+                if !isOrganizer {
+                    Text("Only the organizer can create a share link.")
+                        .font(Typo.body(Typo.Size.caption, weight: .medium))
+                        .foregroundStyle(Palette.slate)
+                } else if busyShareLink {
+                    HStack(spacing: Spacing.sm) {
+                        ProgressView()
+                        Text("Updating link\u{2026}")
+                            .font(Typo.body(Typo.Size.caption))
+                            .foregroundStyle(Palette.slate)
+                    }
+                } else if let link = activeShareLink {
+                    shareLinkRow(link)
+                }
+
+                Text("Booking codes and notes never appear on this link.")
+                    .font(Typo.body(10.5))
+                    .foregroundStyle(Palette.slate)
             }
-            .foregroundStyle(.white)
+            .padding(Spacing.md)
+            .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                    .stroke(Palette.mist, lineWidth: 1)
+            }
+        }
+    }
 
-            Text("Share a read-only itinerary that opens in any browser \u{2014} no app, no account. Perfect for grandparents.")
-                .font(Typo.body(Typo.Size.caption))
-                .foregroundStyle(.white.opacity(0.9))
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Non-organizers can never learn whether a link exists — RLS
-            // scopes `share_links` SELECT to the organizer too, so their
-            // query is always `[]` regardless of the real state
-            // (`TripShareLink`'s doc comment). The muted message is
-            // therefore unconditional here, not "if none exists".
-            if !isOrganizer {
-                Text("Only the organizer can create a share link.")
-                    .font(Typo.body(Typo.Size.caption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-            } else if let link = activeShareLink {
-                shareLinkRow(link)
-                HStack(spacing: Spacing.lg) {
-                    Button("Reset link") { isPresentingResetConfirm = true }
-                        .foregroundStyle(.white.opacity(0.85))
-                        .contentShape(Rectangle())
-                        .frame(minHeight: 44)
-                    Button("Remove link") { linkPendingRemoval = link }
-                        .foregroundStyle(.white)
-                        .contentShape(Rectangle())
-                        .frame(minHeight: 44)
-                }
-                .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                .disabled(busyShareLink)
-            } else if busyShareLink {
-                HStack(spacing: Spacing.sm) {
-                    ProgressView().tint(Self.onWhitePillInk)
-                    Text("Creating link\u{2026}")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Self.onWhitePillInk)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Spacing.sm)
-                .background(.white, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
-            } else {
-                Button {
+    /// The switch's create/revoke bridge — derives `isOn` from
+    /// `activeShareLink` (the real `@Query`-backed source of truth) rather
+    /// than owning a separate boolean, so cancelling the revoke confirm
+    /// dialog needs no manual "snap back": `activeShareLink` never actually
+    /// changed, so `get` just re-derives `true` on the next render. Same
+    /// derived-`Binding` idiom `SettingsView`'s archive-alert bindings
+    /// already use.
+    private var publicLinkToggleBinding: Binding<Bool> {
+        Binding(
+            get: { activeShareLink != nil || busyShareLink },
+            set: { isOn in
+                if isOn {
+                    guard activeShareLink == nil, !busyShareLink else { return }
                     Task {
                         busyShareLink = true
                         _ = await createShareLink()
                         busyShareLink = false
                     }
-                } label: {
-                    Text("Create view link")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Self.onWhitePillInk)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, Spacing.sm)
-                        .background(.white, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+                } else if let link = activeShareLink {
+                    linkPendingRemoval = link
                 }
-                .buttonStyle(.plain)
-                .disabled(busyShareLink)
             }
-
-            Text("Booking codes and notes never appear on this link.")
-                .font(Typo.body(10.5))
-                .foregroundStyle(.white.opacity(0.75))
-        }
-        .padding(Spacing.lg)
-        .background {
-            RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous)
-                .fill(CoverGradient.dusk)
-                .overlay { Self.shareLinkCardScrim }
-                .clipShape(RoundedRectangle(cornerRadius: Radii.card + 4, style: .continuous))
-        }
+        )
     }
 
     private func shareLinkRow(_ link: TripShareLink) -> some View {
@@ -471,7 +438,7 @@ struct ShareTripView: View {
         return HStack(spacing: Spacing.sm) {
             Text("\(url.host ?? "")\(url.path)")
                 .font(Typo.mono(Typo.Size.caption))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(Palette.ink)
                 .lineLimit(1)
                 .truncationMode(.middle)
 
@@ -479,10 +446,12 @@ struct ShareTripView: View {
 
             Button("Copy") { copy(url) }
                 .font(Typo.body(Typo.Size.caption, weight: .bold))
-                .foregroundStyle(Self.onWhitePillInk)
+                .foregroundStyle(Palette.ink)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.xs)
-                .background(.white, in: Capsule())
+                .overlay {
+                    Capsule().stroke(Palette.mist, lineWidth: 1)
+                }
                 .contentShape(Rectangle())
                 .frame(minWidth: 44, minHeight: 44)
                 // States the action rather than the bare "Copy" (finding:
@@ -493,15 +462,93 @@ struct ShareTripView: View {
             ShareLink(item: url) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: shareIconFontSize, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Palette.slate)
                     .frame(width: shareIconDiameter, height: shareIconDiameter)
-                    .background(.white.opacity(0.22), in: Circle())
+                    .contentShape(Rectangle())
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .accessibilityLabel("Share link")
         }
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.sm)
-        .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+        .background(Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+    }
+
+    // MARK: - Forward booking emails (compact pointer — P4.2 scope amendment)
+
+    /// Scope amendment to P4.2 (docs/UX_REDESIGN_ROADMAP.md, mid-build):
+    /// the full "paste OR forward" cluster moved to `AddItemSheet`, but the
+    /// client reaches for the email-import address from Share by muscle
+    /// memory — this compact row keeps it findable here too, one tap
+    /// deeper (`isPresentingImportAddress`'s sheet in `body`). Same
+    /// `ItemPermissions.canAdd` gate `importCard` used before this
+    /// amendment; same reasoning as `AddItemSheet.importAddressCard` for
+    /// why: the underlying RPC needs trip membership, so a viewer/signed-out
+    /// visitor would just fail/spin for a row they can never see anyway.
+    @ViewBuilder
+    private var forwardBookingEmailsRow: some View {
+        if ItemPermissions.canAdd(role: myRole) {
+            Button {
+                isPresentingImportAddress = true
+            } label: {
+                HStack(spacing: Spacing.md) {
+                    Image(systemName: "envelope.badge")
+                        .foregroundStyle(Palette.slate)
+                        .frame(width: 22)
+                        .accessibilityHidden(true)
+                    Text("Forward booking emails")
+                        .font(Typo.body(weight: .semibold))
+                        .foregroundStyle(Palette.ink)
+                    Spacer(minLength: Spacing.sm)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: captionIconSize, weight: .semibold))
+                        .foregroundStyle(Palette.slate.opacity(0.5))
+                        .accessibilityHidden(true)
+                }
+                .padding(Spacing.md)
+                .frame(minHeight: 44)
+                .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                        .stroke(Palette.mist, lineWidth: 1)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens your trip's email-import address")
+        }
+    }
+
+    /// Same one-shot-per-visit shape as `AddItemSheet.fetchImportAddressIfNeeded()`
+    /// (identical reasoning — `myRole` resolves asynchronously via `@Query`,
+    /// so `.task(id: myRole)` above re-invokes this on every change rather
+    /// than firing once).
+    private func fetchImportAddressIfNeeded() async {
+        guard ItemPermissions.canAdd(role: myRole), !hasFetchedImportAddress else { return }
+        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
+        hasFetchedImportAddress = true
+        await fetchImportAddress()
+    }
+
+    /// The actual RPC call, split out so `retryImportAddressFetch()` can
+    /// re-run it without re-triggering `hasFetchedImportAddress`'s guard.
+    private func fetchImportAddress() async {
+        do {
+            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: tripId))
+        } catch {
+            importLoadState = .failed
+        }
+    }
+
+    private func retryImportAddressFetch() {
+        importLoadState = .loading
+        Task { await fetchImportAddress() }
+    }
+
+    private func grantEmailImportConsentAndFetch() {
+        EmailImportConsent.grant()
+        hasFetchedImportAddress = true
+        retryImportAddressFetch()
     }
 
     // MARK: - Invite section
@@ -510,10 +557,14 @@ struct ShareTripView: View {
         // Organizer-only, same RLS reality as the share link (`Invite`'s
         // doc comment) — a non-organizer would only ever see `[]` here, so
         // the buttons/rows below are hidden for them, mirroring
-        // `shareLinkCard`'s "muted message instead of vanishing" treatment
-        // rather than hiding the whole section.
+        // `publicLinkSection`'s "muted message instead of vanishing"
+        // treatment rather than hiding the whole section.
         VStack(alignment: .leading, spacing: Spacing.md) {
-            Text("Invite to edit or view")
+            // P4.1: positioned as the primary action right under the people
+            // list now (was "Invite to edit or view", second on the screen
+            // behind the old gradient link hero) — same two role-scoped
+            // invite links/logic below, unchanged.
+            Text("Invite someone")
                 .font(Typo.body(Typo.Size.caption, weight: .bold))
                 .foregroundStyle(Palette.slate)
                 .textCase(.uppercase)
@@ -622,137 +673,10 @@ struct ShareTripView: View {
         .padding(.vertical, Spacing.sm)
     }
 
-    // MARK: - Import card
-
-    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): a persistent copy of
-    /// `ItineraryTabView`'s import teaser — that one only renders while the
-    /// itinerary has zero items, so once any item exists the forwarding
-    /// address becomes unreachable there. This card lives alongside the
-    /// other copyable tokens on this screen (share link, invite links) so
-    /// it's always reachable. Gated on `ItemPermissions.canAdd` — same
-    /// permission check `addProfileButton` above uses — since only an
-    /// organizer/companion can usefully forward confirmations into the
-    /// itinerary; a viewer sees neither this card nor the teaser's `canEdit`
-    /// equivalent.
-    @ViewBuilder
-    private var importCard: some View {
-        if ItemPermissions.canAdd(role: myRole) {
-            VStack(alignment: .center, spacing: Spacing.sm) {
-                ImportAddressCard(state: importLoadState) { address in
-                    toast = ClipboardFeedback.copy(address, label: "Import address")
-                } onRetry: {
-                    retryImportAddressFetch()
-                } onConsentGranted: {
-                    grantEmailImportConsentAndFetch()
-                }
-                pasteImportSecondaryAction
-            }
-        }
-    }
-
-    /// TI-2: a deliberately lightweight fallback beside the primary
-    /// email-import card — pasting text is the secondary path, so this is a
-    /// plain text button, not another card competing for attention.
-    private var pasteImportSecondaryAction: some View {
-        Button {
-            isPresentingPasteImport = true
-        } label: {
-            Text("Or paste text instead")
-                .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                .foregroundStyle(Palette.slate)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Same one-shot-per-visit *shape* as `ItineraryTabView`'s function of
-    /// the same name, but gated on `ItemPermissions.canAdd` (not `canEdit`)
-    /// — deliberately different from the teaser's gate: the RPC requires
-    /// trip membership, so fetching for a viewer or signed-out user would
-    /// just fail/spin for someone who can never see `importCard` anyway.
-    ///
-    /// Unlike `ItineraryTabView`'s `canEdit` (a plain `let`, synchronously
-    /// known at init), `myRole` here is derived from `@Query members`,
-    /// which resolves *asynchronously* and can still be empty the first
-    /// time this runs — that's why the `.task(id: myRole)` above re-invokes
-    /// this on every `myRole` change rather than firing once, and why
-    /// `hasFetchedImportAddress` must only ever be set `true` once a fetch
-    /// has actually been attempted (never inside this guard's early
-    /// return), so a gate that starts `false` and later flips `true` still
-    /// gets its one real attempt.
-    /// A5 (`docs/BACKLOG.md`): the new second guard clause is the actual
-    /// fetch gate — see `ItineraryTabView.fetchImportAddressIfNeeded()`'s
-    /// matching doc comment (identical reasoning, including why
-    /// `hasFetchedImportAddress` is deliberately NOT set on the
-    /// not-yet-consented path).
-    private func fetchImportAddressIfNeeded() async {
-        guard ItemPermissions.canAdd(role: myRole), !hasFetchedImportAddress else { return }
-        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
-        hasFetchedImportAddress = true
-        await fetchImportAddress()
-    }
-
-    /// The actual RPC call, split out from the one-shot guard above so
-    /// `retryImportAddressFetch()` can re-run it without re-triggering
-    /// `hasFetchedImportAddress`'s guard.
-    private func fetchImportAddress() async {
-        do {
-            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: tripId))
-        } catch {
-            importLoadState = .failed
-        }
-    }
-
-    /// Reviewer should-fix: `importCard`'s tap-to-retry action on a
-    /// `.failed` state.
-    private func retryImportAddressFetch() {
-        importLoadState = .loading
-        Task { await fetchImportAddress() }
-    }
-
-    /// A5 (`docs/BACKLOG.md`): `importCard`'s `.needsConsent` card ->
-    /// `onConsentGranted` — see `ItineraryTabView.grantEmailImportConsentAndFetch()`'s
-    /// matching doc comment (identical shape).
-    private func grantEmailImportConsentAndFetch() {
-        EmailImportConsent.grant()
-        hasFetchedImportAddress = true
-        retryImportAddressFetch()
-    }
-
     // MARK: - People list
-
-    /// A read-only "what you can do" card so any member — especially a
-    /// Companion — can see their own role and its capabilities without needing
-    /// the organizer-only role picker (persona dry-run).
-    @ViewBuilder
-    private var ownRoleCard: some View {
-        if let myRole {
-            let badge = roleBadge(for: myRole)
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: badge.icon).foregroundStyle(badge.color).frame(width: 22)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Your role: \(badge.label)")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                    Text(myRole.capabilityDescription)
-                        .font(Typo.body(Typo.Size.caption))
-                        .foregroundStyle(Palette.slate)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(Spacing.md)
-            .background(badge.color.opacity(0.08), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
-            // Non-interactive info card — one VoiceOver stop instead of icon
-            // + two texts.
-            .accessibilityElement(children: .combine)
-        }
-    }
 
     private var peopleSection: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            ownRoleCard
             Text("On this trip \u{00B7} \(personRows.count)")
                 .font(Typo.body(Typo.Size.caption, weight: .bold))
                 .foregroundStyle(Palette.slate)
@@ -854,18 +778,33 @@ struct ShareTripView: View {
             Spacer(minLength: Spacing.sm)
 
             if canManage {
-                Button {
-                    memberPendingRoleChange = member
+                // P4.1 (docs/UX_REDESIGN_ROADMAP.md): replaces the separate
+                // `RolePickerSheet` — the chip itself is now the picker via
+                // an inline `Menu`. `Picker` + `.pickerStyle(.inline)` nested
+                // directly inside `Menu` content is the standard SwiftUI
+                // idiom for a checkmarked in-menu picker (no separate sheet,
+                // Dynamic Type/VoiceOver/44pt all still system-provided).
+                Menu {
+                    Picker("Role", selection: rolePickerBinding(for: member)) {
+                        ForEach(TripRole.allCases, id: \.self) { role in
+                            Label(role.rawValue.capitalized, systemImage: roleBadge(for: role).icon).tag(role)
+                        }
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        memberPendingRemoval = member
+                    } label: {
+                        Label("Remove from trip", systemImage: "person.badge.minus")
+                    }
                 } label: {
                     roleBadgeLabel(info)
                         .contentShape(Rectangle())
                         .frame(minHeight: 44)
                 }
-                .buttonStyle(.plain)
-                // Role picker row: states the current value and what
-                // tapping does, rather than the badge's icon/text alone.
+                // Role chip menu: states the current role and that tapping
+                // changes it, rather than the badge's icon/text alone.
                 .accessibilityLabel("Role: \(info.label)")
-                .accessibilityHint("Opens the role picker for \(name)")
+                .accessibilityHint("Changes role")
             } else {
                 roleBadgeLabel(info)
             }
@@ -873,14 +812,67 @@ struct ShareTripView: View {
         .padding(.vertical, Spacing.sm)
     }
 
-    /// Tappable (opens `TripProfileFormSheet` in edit mode) only for
-    /// organizers — `trip_profiles_update`/`_delete` RLS is organizer-only
-    /// (confirmed live), unlike the insert path `addProfileButton` gates
-    /// more permissively. Removal happens from the form sheet's own
-    /// "Remove from trip" button, not a swipe action (finding 1:
-    /// `.swipeActions` never fires on a `VStack` row inside a `ScrollView`).
+    /// P4.1: the same role-scoped destination `RolePickerSheet.onSelect`
+    /// used to resolve — organizer needs the extra promote confirmation,
+    /// everyone else changes immediately — factored into a pure
+    /// `roleMenuAction(selected:current:)` below so
+    /// `ShareTripViewRoleMenuTests` can pin the mapping without a live
+    /// `Menu`/`ModelContext`. The `Picker`'s own selection binding just
+    /// dispatches on that pure result.
+    private func rolePickerBinding(for member: TripMember) -> Binding<TripRole> {
+        Binding(
+            get: { member.role },
+            set: { newRole in
+                switch Self.roleMenuAction(selected: newRole, current: member.role) {
+                case .none:
+                    break
+                case .confirmPromoteToOrganizer:
+                    memberPendingOrganizerConfirm = member
+                case .changeRoleImmediately(let role):
+                    changeRole(of: member, to: role)
+                }
+            }
+        )
+    }
+
+    /// The inline role-chip `Menu`'s tap-to-select outcome. Picking the role
+    /// a member already has is a no-op (the underlying value didn't change,
+    /// nothing to write); picking Organizer routes through the same promote
+    /// confirmation dialog `RolePickerSheet` used to gate before this inline
+    /// menu replaced it; anything else changes the role immediately.
+    enum RoleMenuAction: Equatable {
+        case none
+        case confirmPromoteToOrganizer
+        case changeRoleImmediately(TripRole)
+    }
+
+    static func roleMenuAction(selected: TripRole, current: TripRole) -> RoleMenuAction {
+        guard selected != current else { return .none }
+        if selected == .organizer { return .confirmPromoteToOrganizer }
+        return .changeRoleImmediately(selected)
+    }
+
+    /// P4.1: the no-account `TripProfile`'s badge tuple, same shape as
+    /// `roleBadge(for:)` (reused via the same `roleBadgeLabel` renderer) but
+    /// not a `TripRole` case — a traveller has no role, no access, no app
+    /// (BUILD_PLAN §3.3/§5.3). `Palette.ink`, not one of the three role
+    /// hues: measured ~11.96:1 light / ~10.63:1 dark against this label's
+    /// own `.opacity(0.15)` capsule fill (`roleBadgeLabel`'s background),
+    /// comfortably clearing WCAG AA — `Palette.slate` in the same spot
+    /// measured only ~4.25:1 light, under the 4.5:1 bar for this caption-
+    /// bold text.
+    private var travellerBadge: (icon: String, color: Color, label: String) {
+        (icon: "person.fill", color: Palette.ink, label: "Traveller")
+    }
+
+    /// Tappable (organizer only — `trip_profiles_update`/`_delete` RLS is
+    /// organizer-only, confirmed live) via the same chip-`Menu` control
+    /// style as `memberRow`'s role chip (P4.1) — offers exactly the two
+    /// actions this profile already had (`TripProfileFormSheet`'s own Edit
+    /// fields + its "Remove from trip" button), just reachable inline now
+    /// instead of only after opening the sheet. No new capability.
     private func unlinkedProfileRow(_ profile: TripProfile) -> some View {
-        let content = HStack(spacing: Spacing.md) {
+        HStack(spacing: Spacing.md) {
             Circle()
                 .fill(AvatarColor.color(named: profile.avatarColor))
                 .frame(width: 42, height: 42)
@@ -895,28 +887,31 @@ struct ShareTripView: View {
                 Text("No account yet").font(Typo.body(Typo.Size.caption)).foregroundStyle(Palette.slate)
             }
             Spacer(minLength: Spacing.sm)
-            PillLabel(text: "Can be assigned plans \u{00B7} no app needed", tint: .neutral)
+
             if isOrganizer {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: captionIconSize, weight: .semibold))
-                    .foregroundStyle(Palette.slate.opacity(0.5))
-                    // Decorative disclosure indicator — the wrapping
-                    // Button's own trait already conveys "tappable".
-                    .accessibilityHidden(true)
+                Menu {
+                    Button {
+                        editingProfile = profile
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        profilePendingRemoval = profile
+                    } label: {
+                        Label("Remove from trip", systemImage: "person.badge.minus")
+                    }
+                } label: {
+                    roleBadgeLabel(travellerBadge)
+                        .contentShape(Rectangle())
+                        .frame(minHeight: 44)
+                }
+                .accessibilityLabel("Role: Traveller")
+                .accessibilityHint("Opens edit and remove options")
+            } else {
+                roleBadgeLabel(travellerBadge)
             }
         }
         .padding(.vertical, Spacing.sm)
-        .contentShape(Rectangle())
-
-        return Group {
-            if isOrganizer {
-                Button { editingProfile = profile } label: { content }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Opens their profile to edit")
-            } else {
-                content
-            }
-        }
     }
 
     // MARK: - Mutations (SYNC_DESIGN.md: SwiftData write on the main
@@ -1019,33 +1014,14 @@ struct ShareTripView: View {
         }
     }
 
-    /// Creates the replacement link **before** revoking the old one, so
-    /// `activeShareLink` (`shareLinks.first { !revoked }`) never goes empty
-    /// mid-reset — the old create-then-revoke order let `shareLinkCard`
-    /// flash back to its "Create view link" empty state for a frame
-    /// (finding 2/3).
-    private func resetShareLink() {
-        Task {
-            busyShareLink = true
-            defer { busyShareLink = false }
-            let old = activeShareLink
-            if await createShareLink() != nil {
-                if let old {
-                    old.revoked = true
-                    try? modelContext.save()
-                    let dto = old.toDTO()
-                    let id = old.id
-                    await syncEngine?.enqueueUpsert(table: .shareLinks, rowId: id, tripId: tripId, payload: dto)
-                }
-                toast = "Link reset"
-            }
-        }
-    }
-
-    /// "Remove link" — revoke with no replacement, unlike `resetShareLink`.
-    /// Same local-write-then-enqueue shape as `revokeInvite`; no
-    /// `busyShareLink` guard needed since (unlike reset/create) this never
-    /// makes a network round trip itself before the local write.
+    /// P4.1 (docs/UX_REDESIGN_ROADMAP.md): the public-link switch's
+    /// toggle-off path, via `publicLinkToggleBinding` -> `linkPendingRemoval`
+    /// -> this confirmed revoke. Same local-write-then-enqueue shape as
+    /// `revokeInvite`; no `busyShareLink` guard needed since (unlike create)
+    /// this never makes a network round trip itself before the local write.
+    /// The old one-tap "Reset link" (revoke + immediately replace) doesn't
+    /// carry over to the two-state switch — toggling off then back on
+    /// reaches the same end state.
     private func removeShareLink(_ link: TripShareLink) {
         link.revoked = true
         try? modelContext.save()

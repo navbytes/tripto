@@ -7,6 +7,14 @@ import UniformTypeIdentifiers
 /// `HomeView`'s avatar tap.
 struct SettingsView: View {
     @Query private var profiles: [Profile]
+    /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): backs the Export row's real
+    /// "N trips · M items" subtitle — the same two domains
+    /// `TripArchiveExporter.composeDocument(trips:items:profiles:)` already
+    /// counts, read live off the local store via `@Query` rather than a
+    /// one-off fetch, so the count on screen can never disagree with what
+    /// tapping the row will actually export.
+    @Query private var trips: [Trip]
+    @Query private var items: [ItineraryItem]
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
@@ -121,23 +129,20 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Account") {
-                if let email = authManager.session?.user.email, !email.isEmpty {
-                    LabeledContent("Signed in as", value: email)
-                } else {
-                    LabeledContent("Account", value: "Signed in")
-                }
-                // UX audit finding 6: no longer `.destructive` — sign-out is
-                // a reversible session end, not data loss, so it shouldn't
-                // read identically to "Delete account" below. Finding 1:
-                // routes through a confirmation instead of firing instantly.
-                Button("Sign out") {
-                    isPresentingSignOutConfirm = true
-                }
-                .disabled(isDeletingAccount)
-            }
-
+            // P4.3 (docs/UX_REDESIGN_ROADMAP.md): "Your data" moves above
+            // Account — bring-your-history-in via any LLM is this product's
+            // most distinctive feature, not a third link under a paragraph.
             Section {
+                // Featured, not a plain row — `.listRowInsets`/
+                // `.listRowBackground(.clear)` let this one row opt out of
+                // the Form's default row chrome and render its own amber-
+                // wash card, same technique any custom-styled Form row uses;
+                // every other row on this screen keeps stock Form styling.
+                conversionPromptFeatureCard
+                    .padding(.vertical, Spacing.xs)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+
                 Button {
                     isPresentingArchiveImporter = true
                 } label: {
@@ -161,24 +166,40 @@ struct SettingsView: View {
                             Text("Preparing export\u{2026}")
                         }
                     } else {
-                        Text("Export trips")
+                        // P4.3: real counts instead of a bare label — "N
+                        // trips · M items" is the difference between
+                        // trusting a backup and hoping.
+                        HStack {
+                            Text("Export trips")
+                            Spacer()
+                            Text(Self.exportCountsText(tripCount: trips.count, itemCount: items.count))
+                                .font(Typo.body(Typo.Size.caption))
+                                .foregroundStyle(Palette.slate)
+                        }
                     }
-                }
-                .disabled(isImportingArchive || isExportingArchive || isDeletingAccount)
-
-                Button("Copy conversion prompt") {
-                    copyConversionPrompt()
                 }
                 .disabled(isImportingArchive || isExportingArchive || isDeletingAccount)
             } header: {
                 Text("Your data")
             } footer: {
-                Text(
-                    "Import trips from a Tripto Archive file, or export your trips to share or back up. "
-                        + "Coming from another app? Copy the conversion prompt, paste it (and your old trip data) "
-                        + "into any AI assistant, and import what it gives back."
-                )
-                .font(Typo.body(Typo.Size.caption))
+                Text("Import trips from a Tripto Archive file, or export your trips to share or back up.")
+                    .font(Typo.body(Typo.Size.caption))
+            }
+
+            Section("Account") {
+                if let email = authManager.session?.user.email, !email.isEmpty {
+                    LabeledContent("Signed in as", value: email)
+                } else {
+                    LabeledContent("Account", value: "Signed in")
+                }
+                // UX audit finding 6: no longer `.destructive` — sign-out is
+                // a reversible session end, not data loss, so it shouldn't
+                // read identically to "Delete account" below. Finding 1:
+                // routes through a confirmation instead of firing instantly.
+                Button("Sign out") {
+                    isPresentingSignOutConfirm = true
+                }
+                .disabled(isDeletingAccount)
             }
 
             Section {
@@ -391,6 +412,60 @@ struct SettingsView: View {
         }
     }
 
+    /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): "Coming from another app?" —
+    /// bring-your-history-in-via-any-LLM used to be a plain "Copy
+    /// conversion prompt" button, the third link under a four-line
+    /// paragraph. Same `copyConversionPrompt()` action underneath, unchanged
+    /// — only the visual weight/copy changed to match how distinctive the
+    /// feature actually is.
+    ///
+    /// AA: title `Palette.ink` on `Palette.amberSoft` measures ~14.4:1
+    /// light / ~10.9:1 dark (the exact pairing `AddItemSheet.footerBar`'s
+    /// "Save & add the return leg" button already measured and documented —
+    /// reused rather than re-derived). The body line is `Palette.ink` at
+    /// 75% opacity for a visibly secondary tone without dropping below AA:
+    /// `Palette.slate` in this same spot measures only ~4.2:1 light, under
+    /// the 4.5:1 bar for this caption-regular text (`amberInk`, the OTHER
+    /// obvious "secondary ink" candidate, measures ~4.45:1 there too — both
+    /// too close to the line); `ink` at 75% measures ~6.8:1 light / ~6.9:1
+    /// dark. The tile/CTA reuse `Palette.amber`/`onAmber`, the app's
+    /// existing ~7:1 CTA-pill pairing.
+    private var conversionPromptFeatureCard: some View {
+        HStack(alignment: .top, spacing: Spacing.md) {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Palette.amber)
+                .frame(width: 34, height: 34)
+                .overlay {
+                    Image(systemName: "sparkles").foregroundStyle(Palette.onAmber)
+                }
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("Coming from another app?")
+                    .font(Typo.body(weight: .bold))
+                    .foregroundStyle(Palette.ink)
+                Text("Copy a prompt, paste it into any AI assistant with your old trip data, and import whatever it gives back.")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.ink.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Copy the prompt") {
+                    copyConversionPrompt()
+                }
+                .font(Typo.body(Typo.Size.caption, weight: .bold))
+                .foregroundStyle(Palette.onAmber)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.xs)
+                .background(Palette.amber, in: Capsule())
+                .contentShape(Rectangle())
+                .frame(minHeight: 44)
+                .disabled(isImportingArchive || isExportingArchive || isDeletingAccount)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Spacing.md)
+        .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+    }
+
     /// F1: names the actual consequence of signing out — restores the
     /// protection commit e8f2722 added for permanently-failed syncs
     /// (`syncIssues`), which an unconfirmed sign-out used to drop silently
@@ -589,6 +664,15 @@ struct SettingsView: View {
         let tripWord = report.tripsImported == 1 ? "trip" : "trips"
         let itemWord = report.itemsImported == 1 ? "item" : "items"
         return "\(report.tripsImported) \(tripWord), \(report.itemsImported) \(itemWord) imported."
+    }
+
+    /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): the Export row's "N trips · M
+    /// items" subtitle. Not `private` (unlike `importSummary` above) so
+    /// `SettingsExportCountsTests` can pin the pluralization directly.
+    static func exportCountsText(tripCount: Int, itemCount: Int) -> String {
+        let tripWord = tripCount == 1 ? "trip" : "trips"
+        let itemWord = itemCount == 1 ? "item" : "items"
+        return "\(tripCount) \(tripWord) \u{00B7} \(itemCount) \(itemWord)"
     }
 }
 

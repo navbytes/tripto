@@ -213,18 +213,21 @@ final class TriptoUITests: XCTestCase {
         XCTAssertEqual(row.value as? String, "Packed", "tapping the row should check it off")
     }
 
-    // MARK: - Paste-to-import entry point (ShareTripView)
+    // MARK: - Paste-to-import entry point (AddItemSheet, P3.5 + P4.2)
     //
-    // A second, deliberately-kept-separate entry point beside
-    // `TripView.pasteImportPill` below: `ShareTripView`'s "Or paste text
-    // instead" button next to the email-import address card. Not one of
-    // the three tabs the TI-3 consistency pass targeted (Share is its own
-    // screen), so it kept its own trigger — reachable on the
-    // already-seeded (non-empty) demo trip via `-uitestOpenShare`.
-    func testPasteImportEntryPointFromShare() {
-        let app = launch(["-uitestOpenShare"])
-        let pasteButton = app.buttons["Or paste text instead"]
-        XCTAssertTrue(pasteButton.waitForExistence(timeout: 30), "Share screen / paste entry point never appeared")
+    // Used to cover `ShareTripView`'s "Or paste text instead" button next to
+    // its email-import address card. Phase 4 (docs/UX_REDESIGN_ROADMAP.md
+    // P4.2) moved the whole "get data in" cluster (paste OR forward-by-
+    // email) off Share entirely, onto the Add sheet's own `pasteFirstBanner`
+    // (P3.5) — retargeted here rather than deleted, so this suite keeps a
+    // second, deliberately-kept-separate entry point covered besides
+    // `TripView.pasteImportPill` below. `pasteFirstBanner` matches by
+    // `accessibilityIdentifier`, not visible text — `.accessibilityElement(
+    // children: .combine)` concatenates its title/subtitle into one label.
+    func testPasteImportEntryPointFromAddSheet() {
+        let app = launch(["-uitestOpenAdd"])
+        let pasteButton = app.buttons["pasteFirstBanner"]
+        XCTAssertTrue(pasteButton.waitForExistence(timeout: 30), "Add sheet's paste-banner entry point never appeared")
         pasteButton.tap()
 
         XCTAssertTrue(

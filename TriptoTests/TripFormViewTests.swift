@@ -152,4 +152,65 @@ final class TripFormViewTests: XCTestCase {
         XCTAssertTrue(TripFormValidation.countries(matching: "Lisbon").isEmpty)
         XCTAssertTrue(TripFormValidation.countries(matching: "Protugal").isEmpty)
     }
+
+    // MARK: - P4.4 (docs/UX_REDESIGN_ROADMAP.md): seededGradientKey — a
+    // deterministic (never `String.hashValue`, re-seeded per process
+    // launch) checksum, not true randomness, so the same destination always
+    // renders the same cover across cold starts.
+
+    func testSeededGradientKeyIsDeterministicForTheSameInput() {
+        let first = TripFormView.seededGradientKey(countryCode: "PT", destination: "Lisbon")
+        let second = TripFormView.seededGradientKey(countryCode: "PT", destination: "Lisbon")
+        XCTAssertEqual(first, second)
+    }
+
+    func testSeededGradientKeyFallsBackToDuskForBlankInput() {
+        XCTAssertEqual(TripFormView.seededGradientKey(countryCode: "", destination: ""), "dusk")
+    }
+
+    func testSeededGradientKeyIsCaseInsensitive() {
+        let lower = TripFormView.seededGradientKey(countryCode: "pt", destination: "lisbon")
+        let mixed = TripFormView.seededGradientKey(countryCode: "PT", destination: "Lisbon")
+        XCTAssertEqual(lower, mixed)
+    }
+
+    func testSeededGradientKeyIsAlwaysOneOfTheThreeOptions() {
+        let key = TripFormView.seededGradientKey(countryCode: "TH", destination: "Bangkok")
+        XCTAssertTrue(["dusk", "plum", "moss"].contains(key))
+    }
+
+    /// Hand-verified checksums (byte sum mod 3) so this pins the exact
+    /// mapping rather than merely "differs" — single-letter destinations
+    /// keep the arithmetic checkable by hand: "a"=97 (%3=1 -> plum),
+    /// "b"=98 (%3=2 -> moss), "c"=99 (%3=0 -> dusk).
+    func testSeededGradientKeyDistributesAcrossAllThreeBuckets() {
+        XCTAssertEqual(TripFormView.seededGradientKey(countryCode: "", destination: "a"), "plum")
+        XCTAssertEqual(TripFormView.seededGradientKey(countryCode: "", destination: "b"), "moss")
+        XCTAssertEqual(TripFormView.seededGradientKey(countryCode: "", destination: "c"), "dusk")
+    }
+
+    // MARK: - P4.4: shuffledGradientKey — cycles rather than picks truly at
+    // random, so it's always visibly different from the current cover and
+    // stays deterministic here.
+
+    func testShuffleAlwaysChangesTheSelection() {
+        for key in ["dusk", "plum", "moss"] {
+            XCTAssertNotEqual(TripFormView.shuffledGradientKey(current: key), key)
+        }
+    }
+
+    func testShuffleCyclesThroughAllThreeOptionsInOrder() {
+        XCTAssertEqual(TripFormView.shuffledGradientKey(current: "dusk"), "plum")
+        XCTAssertEqual(TripFormView.shuffledGradientKey(current: "plum"), "moss")
+        XCTAssertEqual(TripFormView.shuffledGradientKey(current: "moss"), "dusk")
+    }
+
+    func testShuffleNormalizesAnUnknownCurrentKeyFirst() {
+        // canonicalGradientKey("default") == "dusk" — shuffling from either
+        // should step to the same next option.
+        XCTAssertEqual(
+            TripFormView.shuffledGradientKey(current: "default"),
+            TripFormView.shuffledGradientKey(current: "dusk")
+        )
+    }
 }
