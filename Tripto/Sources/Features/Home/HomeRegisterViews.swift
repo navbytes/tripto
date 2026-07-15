@@ -319,23 +319,41 @@ struct BeenRow: View {
     let trip: Trip
     let itemCount: Int
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         HStack(spacing: Spacing.md) {
             // `.saturation`/`.opacity` are the direct SwiftUI equivalents of
-            // the mockup's `filter: saturate(.5); opacity: .92` — no cover
-            // gradient work needed, just muting the same token-driven
-            // gradient every other register already uses.
+            // the mockup's `filter: saturate(.5); opacity: .92` — P7b craft
+            // audit: at `.5` every cover read as near-identical muted navy
+            // (each gradient's own accent hue drowned out, especially since
+            // all three curated gradients — and every generated one —
+            // already share one fixed dark-indigo third stop,
+            // `CoverGradientGenerator`'s own doc comment). Bumped to `.75` so
+            // each thumb keeps a real hint of its own cover's hue; still
+            // well below a live card's full `1.0` (no `.saturation` at all
+            // in `TripCard`) and paired with the same `.opacity(0.92)`, so
+            // "been" thumbnails still visibly recede vs. an "ahead" card —
+            // register discipline (the roadmap's own "a 2019 trip shouldn't
+            // shout as loudly as the live one," this type's own doc comment)
+            // isn't just preserved by opacity/scale alone.
             CoverGradient.from(key: trip.coverGradient)
                 .frame(width: 44, height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .saturation(0.5)
+                .saturation(0.75)
                 .opacity(0.92)
 
             VStack(alignment: .leading, spacing: 2) {
+                // P7b craft-audit fix: hard-truncated at 1 line even at AX3
+                // (`home-been-light-ax3.png`) — 2 lines at accessibility
+                // sizes only, same `isAccessibilitySize` convention as
+                // `TripCard.title`/`FirstUpStrip.layout`; default size stays
+                // 1 line (this is a quiet, compact archive row, not a
+                // register card).
                 Text(trip.title)
                     .font(Typo.body(14.5, weight: .bold))
                     .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 // `Palette.ink`/`Palette.slate` on `Palette.paper` — this
                 // app's most-used text pairing (e.g. `HomeView.greetingBlock`),
                 // already well clear of AA; no new contrast math needed.

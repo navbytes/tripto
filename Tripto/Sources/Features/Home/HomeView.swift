@@ -400,7 +400,42 @@ struct HomeView: View {
         }
 
         var targetTripId = trips.first?.id
-        if arguments.contains("-uitestSeedIfEmpty"), trips.isEmpty {
+        // P7b suite-health fix (p7-shots/MANIFEST.md "Suite health"): a
+        // full-class `TriptoUITests` run shares one persistent app install/
+        // store across test methods, which broke order-independence TWO
+        // ways once a differently-flagged test ran first:
+        //  1. A showcase flag names an EXACT fixture (`DemoSeeder.seed`'s
+        //     own `-uitestSeedRegisterShowcase`/`-uitestSeedNextRegisterShowcase`/
+        //     `-uitestSeedP6TrustShowcase` checks), but `seed()` early-
+        //     returns the moment a trip named "Lisbon" already exists,
+        //     skipping every showcase call below that guard (`DemoSeeder
+        //     .swift`'s own doc comment) — so a showcase-flagged launch
+        //     after ANY earlier seed silently never got its own content.
+        //  2. Even a plain `-uitestSeedIfEmpty` launch (no showcase flag)
+        //     used to skip calling `seed()` at all once `trips.isEmpty` was
+        //     false, falling back to `trips.first?.id` — correct only when
+        //     "Lisbon" happens to sort first; the moment an earlier,
+        //     differently-flagged test left a trip that sorts before it by
+        //     `startDate`, this opened the WRONG trip (confirmed live:
+        //     `testSeededTripOpensAndTabsRender`, which carries no showcase
+        //     flag at all, failed the exact same "seeded trip hero title
+        //     never appeared" way after a showcase test ran first).
+        // Fix: reset the store first when a showcase flag needs fresh sub-
+        // seeding a stale "Lisbon" would otherwise block, THEN always call
+        // `seed()` (not just when `trips.isEmpty`) — cheap even when
+        // "Lisbon" already exists (one fetch, immediate return of its id;
+        // see `DemoSeeder.seed`'s own idempotence guard), so `targetTripId`
+        // always resolves to the actual "Lisbon" trip regardless of what
+        // else is in the store or how it sorts. Every launch in this suite
+        // passes `-simulateOffline`, so `resetLocalStore()`'s own re-pull
+        // never fires (its early-return right after the wipe) — this stays
+        // exactly as hermetic/no-network as the rest of the suite.
+        let showcaseFlags = ["-uitestSeedRegisterShowcase", "-uitestSeedNextRegisterShowcase", "-uitestSeedP6TrustShowcase"]
+        let needsShowcaseReset = !trips.isEmpty && showcaseFlags.contains { arguments.contains($0) }
+        if arguments.contains("-uitestSeedIfEmpty") {
+            if needsShowcaseReset {
+                await syncEngine?.resetLocalStore()
+            }
             targetTripId = await DemoSeeder.seed(modelContext: modelContext, syncEngine: syncEngine, authManager: authManager)
         }
         if arguments.contains("-uitestOpenFirstTrip"), let targetTripId, path.isEmpty {
@@ -561,8 +596,19 @@ struct HomeView: View {
     /// the exact same loading/settled signal `HomeEmptyPlaceholder.resolve`
     /// already uses for the trips list itself, so the two can't disagree
     /// about whether this session has "settled" yet.
+    ///
+    /// P7b craft-audit fix: that P5 fix-round still missed a THIRD settled
+    /// case — offline with no cached profile. `pullHome()` no-ops while
+    /// offline, so `hasCompletedInitialHomePull` can never flip true there
+    /// either, and the skeleton stayed up forever on exactly that
+    /// combination (every `home-*` P7 screenshot). Delegates to
+    /// `HomeGreetingLoading.isStillLoading` (`HomeRegisters.swift`), which
+    /// now also settles on `isOffline` — see that function's own doc comment.
     private var isProfileStillLoading: Bool {
-        myDisplayName == nil && authManager.userId != nil && !syncStatus.hasCompletedInitialHomePull
+        HomeGreetingLoading.isStillLoading(
+            hasDisplayName: myDisplayName != nil, isSignedIn: authManager.userId != nil,
+            hasCompletedInitialHomePull: syncStatus.hasCompletedInitialHomePull, isOffline: syncStatus.isOffline
+        )
     }
 
     // MARK: - List

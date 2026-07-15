@@ -74,10 +74,19 @@ struct TripCard: View {
                 Spacer(minLength: Spacing.md)
 
                 VStack(alignment: .leading, spacing: Spacing.xs) {
+                    // P7b craft-audit fix: hard-truncated at 1 line even at
+                    // default Dynamic Type size ("Marrakech Long We…") — a
+                    // register card has no fixed/max height (`.frame(
+                    // minHeight:)` below is a floor only), so a second line
+                    // just grows the card, same as any other longer content
+                    // already does; the trip-DETAIL hero (`TripHeroView`,
+                    // Features/Trip/HeroCollapse.swift) stays 1-line by its
+                    // own deliberate "no two-line wrap" rule and is
+                    // unaffected by this.
                     Text(trip.title)
                         .font(Typo.display(Typo.Size.display))
                         .foregroundStyle(.white)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .lineLimit(2)
 
                     metaLayout {
                         if let locationText {

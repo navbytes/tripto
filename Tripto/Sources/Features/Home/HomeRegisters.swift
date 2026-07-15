@@ -329,3 +329,27 @@ enum HomePastTripsVisibility {
         "\(beenCount) past trip\(beenCount == 1 ? "" : "s") hidden"
     }
 }
+
+// MARK: - Greeting loading/settled split (P7b craft audit)
+
+/// `HomeView.greetingBlock`'s loading-vs-settled decision, split out so it's
+/// unit-testable without a view hierarchy — same house pattern as
+/// `HomeEmptyPlaceholder.resolve`/`HomeRegister.kind` above. Closes a P7
+/// award-audit finding: the old inline check (`myDisplayName == nil &&
+/// authManager.userId != nil && !syncStatus.hasCompletedInitialHomePull`)
+/// treated "offline, first pull never completed" as indistinguishable from
+/// "still loading" — but `pullHome()` no-ops while offline
+/// (`HomeEmptyPlaceholder`'s own `.offlineFirstLoad` case doc comment), so
+/// `hasCompletedInitialHomePull` can never flip true on an offline launch,
+/// leaving the redacted "Good morning, Traveler" skeleton up FOREVER
+/// whenever there's no cached profile to hydrate from — every `home-*` P7
+/// screenshot shows exactly this. `isOffline` now settles the decision the
+/// same way `HomeEmptyPlaceholder.resolve` already treats it: a fact to
+/// render around (a plain, nameless "Good morning,"), not a reason to keep
+/// waiting.
+enum HomeGreetingLoading {
+    static func isStillLoading(hasDisplayName: Bool, isSignedIn: Bool, hasCompletedInitialHomePull: Bool, isOffline: Bool) -> Bool {
+        guard isSignedIn, !hasDisplayName else { return false }
+        return !hasCompletedInitialHomePull && !isOffline
+    }
+}
