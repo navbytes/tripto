@@ -214,7 +214,238 @@ enum DemoSeeder {
             await syncEngine.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: tripId, payload: packingItem.toDTO())
         }
         await syncEngine.flushPush()
+
+        // UX P5 verify wave (docs/UX_REDESIGN_ROADMAP.md Phase 5): "Lisbon"
+        // alone can only ever occupy ONE HomeRegisterKind at a time, so
+        // there was nothing to screenshot "the full register stack"
+        // against — these four companion trips fill in the rest. See
+        // `seedRegisterShowcaseTrips`'s own doc comment for which register
+        // each one earns (and the one that can never coexist with `.now`).
+        //
+        // Opt-in via `-uitestSeedRegisterShowcase` (same "DemoSeeder reads
+        // ProcessInfo directly" recipe as `-uitestSeedToday` above), NOT
+        // unconditional: `HomeView.applyUITestAutopilotIfNeeded`'s
+        // `-uitestOpenFirstTrip` targets `trips.first?.id` (`@Query(sort:
+        // \Trip.startDate)`) on every launch OTHER than the very first
+        // empty-store one — which, once the multi-year "been" trips below
+        // exist, is an earlier startDate than Lisbon's, not Lisbon itself.
+        // Every one of `TriptoUITests`' other cases relies on that hook
+        // reliably reopening "Lisbon" specifically; gating this whole
+        // showcase behind an explicit flag those tests never pass keeps
+        // their fixture (and `trips.first`) exactly as before this file's
+        // change. Confirmed live: unguarded, this flipped `-
+        // uitestOpenFirstTrip` onto the showcase's own earliest-dated past
+        // trip for every test after the first in a shared-store run.
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedRegisterShowcase") {
+            await seedRegisterShowcaseTrips(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
+        }
         return tripId
+    }
+
+    // MARK: - UX P5 register showcase (Home one-list, three registers)
+    //
+    // Additive to the "Lisbon" fixture above (docs/UX_REDESIGN_ROADMAP.md
+    // Phase 5 verify wave): on its own, "Lisbon" can only ever occupy ONE
+    // `HomeRegisterKind` at a time (whichever its own fixed May 2026 dates
+    // happen to fall into on the day this runs), so there was nothing to
+    // screenshot "the full register stack" against. These four companion
+    // trips are dated relative to `Date()` (unlike Lisbon's fixed dates) so
+    // "live"/"future" stay true no matter when the seed actually runs.
+    //
+    // `.next` (the "FIRST UP" strip) is the one `HomeRegisterKind` that can
+    // NEVER render alongside `.now` in the same screenshot: `HomeRegister
+    // .kind` only ever grants either one to `ahead.first`, and a live
+    // trip's `startDate` (always `<= today`) permanently outranks any
+    // future trip for that single slot (`HomeTripOrdering.ahead`'s own doc
+    // comment — "a live trip's startDate is always <= today, so it sorts to
+    // position 0 for free"). Not an omission here — `Tokyo Sprint` (live)
+    // and `Kyoto Autumn` (future) below prove `.now` + `.plain` coexist;
+    // `.next` alone is already covered by `HomeRegistersTests.swift`'s
+    // `testFirstAheadTripThatIsUpcomingIsNext`.
+    private static func seedRegisterShowcaseTrips(modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date) async {
+        var deviceCalendar = Calendar(identifier: .gregorian)
+        deviceCalendar.timeZone = .current
+        let today = deviceCalendar.startOfDay(for: now)
+
+        await seedLiveTrip(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now, today: today, deviceCalendar: deviceCalendar)
+        await seedFutureTrip(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now, today: today, deviceCalendar: deviceCalendar)
+        // Dec 31 / Jan 1 back to back, on purpose: the exact "been"
+        // year-boundary case the P5 verify wave flagged (does a trip ending
+        // right at the New Year land under the right sticky year header?) —
+        // `HomeView.beenYears` groups by `Calendar.current.component(.year,
+        // from: trip.endDate)`, so this is the most direct way to exercise
+        // it live in a UI test.
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Rome Christmas", destination: "Rome, Italy", countryCode: "IT", coverGradient: "plum",
+            start: DayDate(year: 2025, month: 12, day: 24), end: DayDate(year: 2025, month: 12, day: 31),
+            deviceCalendar: deviceCalendar
+        )
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Seoul New Year", destination: "Seoul, South Korea", countryCode: "KR", coverGradient: "moss",
+            start: DayDate(year: 2026, month: 1, day: 1), end: DayDate(year: 2026, month: 1, day: 3),
+            deviceCalendar: deviceCalendar
+        )
+    }
+
+    /// The `.now` register: today sits comfortably mid-trip (day 4 of 8),
+    /// with 3 confirmed items today — P5.3's inline mini-list needs at
+    /// least that many to also show "+K more today" — plus one each on the
+    /// surrounding days so `DayProgressBar` has real done/upcoming segments
+    /// either side of "now", not just a single-day trip.
+    private static func seedLiveTrip(
+        modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date, today: Date, deviceCalendar: Calendar
+    ) async {
+        let tripId = UUID()
+        let trip = Trip(
+            id: tripId, title: "Tokyo Sprint", destination: "Tokyo, Japan", countryCode: "JP",
+            startDate: deviceCalendar.date(byAdding: .day, value: -3, to: today) ?? today,
+            endDate: deviceCalendar.date(byAdding: .day, value: 4, to: today) ?? today,
+            coverGradient: "plum", tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        let member = TripMember(id: UUID(), tripId: tripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        let tz = TimeZone.current.identifier
+
+        // A named struct, not a 4-tuple (`large_tuple`'s own configured cap
+        // is 3 — `.swiftlint.yml`) — same "Draft" local-struct convention
+        // `packingItems` below already uses for the same reason.
+        struct TodayPlanEntry {
+            let hour: Int
+            let category: ItemCategory
+            let title: String
+            let location: String
+        }
+        var items: [ItineraryItem] = []
+        let todaysPlan: [TodayPlanEntry] = [
+            TodayPlanEntry(hour: 8, category: .food, title: "Tsukiji breakfast", location: "Tsukiji Outer Market, Tokyo"),
+            TodayPlanEntry(hour: 13, category: .activity, title: "teamLab Planets", location: "Toyosu, Tokyo"),
+            TodayPlanEntry(hour: 19, category: .food, title: "Ramen crawl", location: "Shinjuku, Tokyo")
+        ]
+        for plan in todaysPlan {
+            items.append(makeItem(
+                tripId: tripId, category: plan.category, title: plan.title,
+                startsAt: deviceCalendar.date(bySettingHour: plan.hour, minute: 0, second: 0, of: today) ?? today,
+                endsAt: nil, tz: tz, locationName: plan.location, confirmation: nil,
+                details: .empty, userId: userId, now: now
+            ))
+        }
+        if let yesterday = deviceCalendar.date(byAdding: .day, value: -1, to: today) {
+            items.append(makeItem(
+                tripId: tripId, category: .activity, title: "Senso-ji Temple",
+                startsAt: deviceCalendar.date(bySettingHour: 10, minute: 0, second: 0, of: yesterday) ?? yesterday,
+                endsAt: nil, tz: tz, locationName: "Asakusa, Tokyo", confirmation: nil,
+                details: .empty, userId: userId, now: now
+            ))
+        }
+        if let tomorrow = deviceCalendar.date(byAdding: .day, value: 1, to: today) {
+            items.append(makeItem(
+                tripId: tripId, category: .activity, title: "Mount Fuji day trip",
+                startsAt: deviceCalendar.date(bySettingHour: 7, minute: 0, second: 0, of: tomorrow) ?? tomorrow,
+                endsAt: nil, tz: tz, locationName: "Kawaguchiko", confirmation: "TKT-9001",
+                details: .empty, userId: userId, now: now
+            ))
+        }
+
+        await pushShowcaseTrip(trip, member: member, items: items, modelContext: modelContext, syncEngine: syncEngine)
+    }
+
+    /// A `.plain` ahead card ~6 weeks out (never `.next` — see this
+    /// section's own doc comment above) with a real flight + hotel, so it
+    /// reads as a genuine upcoming trip rather than filler.
+    private static func seedFutureTrip(
+        modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date, today: Date, deviceCalendar: Calendar
+    ) async {
+        let tripId = UUID()
+        let startDate = deviceCalendar.date(byAdding: .day, value: 45, to: today) ?? today
+        let endDate = deviceCalendar.date(byAdding: .day, value: 51, to: today) ?? today
+        let trip = Trip(
+            id: tripId, title: "Kyoto Autumn", destination: "Kyoto, Japan", countryCode: "JP",
+            startDate: startDate, endDate: endDate, coverGradient: "moss",
+            tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        let member = TripMember(id: UUID(), tripId: tripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        let tz = TimeZone.current.identifier
+
+        var flightDetails = ItemDetails.empty
+        flightDetails.airline = "ANA"; flightDetails.flightNo = "NH1"
+        flightDetails.fromIATA = "JFK"; flightDetails.toIATA = "KIX"
+        let flight = makeItem(
+            tripId: tripId, category: .flight, title: "ANA NH1",
+            startsAt: deviceCalendar.date(bySettingHour: 11, minute: 30, second: 0, of: startDate) ?? startDate,
+            endsAt: nil, tz: tz, locationName: "JFK", confirmation: "KY7731",
+            details: flightDetails, userId: userId, now: now
+        )
+        let checkOutDay = deviceCalendar.date(byAdding: .day, value: 6, to: startDate) ?? startDate
+        let hotel = makeItem(
+            tripId: tripId, category: .hotel, title: "Kyoto Ryokan",
+            startsAt: deviceCalendar.date(bySettingHour: 15, minute: 0, second: 0, of: startDate) ?? startDate,
+            endsAt: deviceCalendar.date(bySettingHour: 11, minute: 0, second: 0, of: checkOutDay) ?? checkOutDay,
+            tz: tz, locationName: "Higashiyama, Kyoto", confirmation: "RY-2201",
+            details: .empty, userId: userId, now: now
+        )
+
+        await pushShowcaseTrip(trip, member: member, items: [flight, hotel], modelContext: modelContext, syncEngine: syncEngine)
+    }
+
+    /// A "been" register row — `start`/`end` are `DayDate` (the same
+    /// tz-less "just a day" type `Trip.startDate`/`endDate` themselves use,
+    /// `DayDate.swift`'s own doc comment), not relative-to-`now` like the
+    /// live/future trips above: a past trip's whole point here is a FIXED
+    /// year for the "been" section's sticky year headers to group.
+    private static func seedPastTrip(
+        modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date,
+        title: String, destination: String, countryCode: String, coverGradient: String,
+        start: DayDate, end: DayDate, deviceCalendar: Calendar
+    ) async {
+        let tripId = UUID()
+        let startInstant = start.asDate(calendar: deviceCalendar)
+        let trip = Trip(
+            id: tripId, title: title, destination: destination, countryCode: countryCode,
+            startDate: startInstant, endDate: end.asDate(calendar: deviceCalendar),
+            coverGradient: coverGradient, tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        let member = TripMember(id: UUID(), tripId: tripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        let tz = deviceCalendar.timeZone.identifier
+
+        let plan: [(dayOffset: Int, category: ItemCategory, title: String)] = [
+            (0, .activity, "Arrival"), (1, .food, "Welcome dinner"),
+            (1, .activity, "Old town walk"), (2, .food, "Farewell lunch")
+        ]
+        let items = plan.map { entry -> ItineraryItem in
+            let day = deviceCalendar.date(byAdding: .day, value: entry.dayOffset, to: startInstant) ?? startInstant
+            return makeItem(
+                tripId: tripId, category: entry.category, title: entry.title,
+                startsAt: deviceCalendar.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day,
+                endsAt: nil, tz: tz, locationName: destination, confirmation: nil,
+                details: .empty, userId: userId, now: now
+            )
+        }
+
+        await pushShowcaseTrip(trip, member: member, items: items, modelContext: modelContext, syncEngine: syncEngine)
+    }
+
+    /// One trip + its organizer membership (local-only, never enqueued —
+    /// same reasoning as `seed()`'s own `member` above) + its items, pushed
+    /// through the exact same insert-then-enqueue path every other mutation
+    /// in the app uses.
+    private static func pushShowcaseTrip(
+        _ trip: Trip, member: TripMember, items: [ItineraryItem], modelContext: ModelContext, syncEngine: SyncEngine
+    ) async {
+        modelContext.insert(trip)
+        modelContext.insert(member)
+        for item in items { modelContext.insert(item) }
+        try? modelContext.save()
+
+        await syncEngine.enqueueUpsert(table: .trips, rowId: trip.id, tripId: trip.id, payload: trip.toDTO())
+        await syncEngine.flushPush()
+        for item in items {
+            await syncEngine.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: trip.id, payload: item.toDTO())
+        }
+        await syncEngine.flushPush()
     }
 
     // MARK: - M4 family layer (non-app profiles, item_assignees, packing)

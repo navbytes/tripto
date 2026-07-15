@@ -60,7 +60,11 @@ final class CardFrameIndex {
 final class HeroFlightModel {
     enum State: Equatable {
         case idle
-        case flying(trip: Trip, people: [AvatarStack.Person], isPending: Bool, sourceFrame: CGRect)
+        /// P5 fix-round (item 12): carries the tapped card's own register
+        /// (`.plain`/`.next`/`.now`) so `HeroFlightClone` can render the
+        /// SAME shape the real card had — see that type's own doc comment
+        /// for why the mismatch mattered.
+        case flying(trip: Trip, people: [AvatarStack.Person], isPending: Bool, register: HomeCardRegister, sourceFrame: CGRect)
     }
 
     var state: State = .idle
@@ -73,7 +77,7 @@ final class HeroFlightModel {
 
 /// Pure gate for whether a card tap should fly or fall back to a plain
 /// push (PLAN-signature-layer.md §D1 point 7) -- split out for the same
-/// reason as `HomeInitialTab.resolve`/`HomeEmptyPlaceholder.resolve`: the
+/// reason as `HomeEmptyPlaceholder.resolve`/`HomeRegister.kind`: the
 /// decision table is unit-testable without a live view hierarchy.
 enum HeroFlightGate {
     /// `hasSourceFrame` covers the (rare) case `CardFrameIndex` hasn't
@@ -139,8 +143,11 @@ struct HeroFlightOverlay: View {
     var body: some View {
         ZStack {
             Color.clear
-            if case let .flying(trip, people, isPending, sourceFrame) = model.state {
-                HeroFlightClone(trip: trip, people: people, isPending: isPending, sourceFrame: sourceFrame, model: model)
+            if case let .flying(trip, people, isPending, register, sourceFrame) = model.state {
+                HeroFlightClone(
+                    trip: trip, people: people, isPending: isPending, register: register,
+                    sourceFrame: sourceFrame, model: model
+                )
             }
         }
         .contentShape(Rectangle())
@@ -154,17 +161,34 @@ struct HeroFlightOverlay: View {
 /// `CoverGradient.from(key:)` + `textScrim` + a bottom-leading white
 /// `Typo.display(30)` title at the *same* font size in both end states, so
 /// the title never needs to visually rescale, only the frame around it
-/// does); the card-only garnish (status/pending pills, avatars, meta row)
-/// fades out first, since neither the flight nor the hero has anywhere for
-/// it to land. Only ever mounted at non-accessibility text sizes
+/// does); the card-only garnish (status/pending pills, avatars, meta row,
+/// and — P5 fix-round item 12 — the register's own extra content) fades out
+/// first, since neither the flight nor the hero has anywhere for any of it
+/// to land. Only ever mounted at non-accessibility text sizes
 /// (`HeroFlightGate` keeps `HomeView` from ever setting `model.state =
 /// .flying` otherwise), so -- unlike `TripCard` itself -- this doesn't need
 /// that view's AX-size `AnyLayout` branches; it mirrors `TripCard`'s plain
 /// (non-AX) layout only.
+///
+/// P5 fix-round (item 12, the coder's own P5 flag): this clone used to
+/// render only the pre-P5 anatomy (pill + spacer + title/meta), sized to the
+/// tapped card's *measured* `sourceFrame`. For a "next"/"now" card, that
+/// frame is taller (the FIRST-UP strip / today mini-list add real height),
+/// so the clone's own `Spacer` — proposed that larger *exact* height via a
+/// fixed `.frame(width:height:)` — expanded to fill it (unlike the real
+/// card, whose `.frame(minHeight:)` only floors at 178pt and lets genuinely
+/// taller content flow naturally, no expansion), visibly shifting the
+/// title/meta position for an instant at flight start; independently, this
+/// clone's own `statusPill` didn't know about "Day N of M"/the ring either.
+/// Now `register` (threaded through `HeroFlightModel.State.flying`,
+/// `HomeView.openTrip`) drives the SAME `statusPill`/`registerContent` shape
+/// `TripCard` renders, so the clone's natural size and text match the real
+/// card exactly, for all three registers.
 private struct HeroFlightClone: View {
     let trip: Trip
     let people: [AvatarStack.Person]
     let isPending: Bool
+    let register: HomeCardRegister
     let sourceFrame: CGRect
     let model: HeroFlightModel
 
@@ -175,10 +199,14 @@ private struct HeroFlightClone: View {
     @State private var hasStartedFlight = false
     @State private var didLand = false
 
-    init(trip: Trip, people: [AvatarStack.Person], isPending: Bool, sourceFrame: CGRect, model: HeroFlightModel) {
+    init(
+        trip: Trip, people: [AvatarStack.Person], isPending: Bool, register: HomeCardRegister,
+        sourceFrame: CGRect, model: HeroFlightModel
+    ) {
         self.trip = trip
         self.people = people
         self.isPending = isPending
+        self.register = register
         self.sourceFrame = sourceFrame
         self.model = model
         _frame = State(initialValue: sourceFrame)
@@ -193,7 +221,7 @@ private struct HeroFlightClone: View {
                 HStack(alignment: .top, spacing: Spacing.sm) {
                     statusPill
                     if isPending {
-                        glassPill(text: "Waiting to sync", icon: "clock")
+                        glassPill(text: "Waiting to sync", leading: .icon("clock"))
                     }
                     Spacer(minLength: Spacing.sm)
                     AvatarStack(people: people)
@@ -210,6 +238,8 @@ private struct HeroFlightClone: View {
 
                     metaRow.opacity(garnishOpacity)
                 }
+
+                registerContent.opacity(garnishOpacity)
             }
             .padding(Spacing.lg)
         }
@@ -277,23 +307,56 @@ private struct HeroFlightClone: View {
         }
     }
 
+    /// Mirrors `TripCard.statusPill` exactly (same register switch, same
+    /// pill text) — see this type's own doc comment (item 12).
     @ViewBuilder
     private var statusPill: some View {
-        switch trip.bucket() {
-        case .inProgress:
-            glassPill(text: "In progress", icon: nil)
-        case .upcoming:
-            let days = trip.daysUntilStart()
-            glassPill(text: "in \(days) day\(days == 1 ? "" : "s")", icon: nil)
-        case .past:
-            glassPill(text: "Completed", icon: nil)
+        switch register {
+        case .now(let panel):
+            glassPill(text: "Day \(panel.dayNumber) of \(panel.totalDays)", leading: .liveDot)
+        case .next:
+            glassPill(text: "in \(daysUntilStartText)", leading: .ring(fraction: countdownRingFraction))
+        case .plain:
+            switch trip.bucket() {
+            case .inProgress:
+                glassPill(text: "In progress")
+            case .upcoming:
+                glassPill(text: "in \(daysUntilStartText)")
+            case .past:
+                glassPill(text: "Completed")
+            }
         }
     }
 
-    private func glassPill(text: String, icon: String?) -> some View {
+    private var daysUntilStartText: String {
+        let days = trip.daysUntilStart()
+        return "\(days) day\(days == 1 ? "" : "s")"
+    }
+
+    /// Same formula as `TripCard.countdownRingFraction` — see that
+    /// property's own doc comment.
+    private var countdownRingFraction: Double {
+        min(max(Double(trip.daysUntilStart()), 0), 60) / 60
+    }
+
+    private enum PillLeading {
+        case none
+        case icon(String)
+        case ring(fraction: Double)
+        case liveDot
+    }
+
+    private func glassPill(text: String, leading: PillLeading = .none) -> some View {
         HStack(spacing: Spacing.xxs) {
-            if let icon {
-                Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            switch leading {
+            case .none:
+                EmptyView()
+            case .icon(let name):
+                Image(systemName: name).font(.system(size: 10, weight: .semibold))
+            case .ring(let fraction):
+                CountdownRing(fraction: fraction)
+            case .liveDot:
+                LiveDot()
             }
             Text(text)
         }
@@ -302,6 +365,28 @@ private struct HeroFlightClone: View {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
         .background(Palette.coverPillFill, in: Capsule())
+    }
+
+    /// Mirrors `TripCard.registerContent` exactly.
+    @ViewBuilder
+    private var registerContent: some View {
+        switch register {
+        case .plain:
+            EmptyView()
+        case .next(let firstUp):
+            if let firstUp {
+                FirstUpStrip(model: firstUp)
+                    .padding(.top, Spacing.md)
+            }
+        case .now(let panel):
+            VStack(alignment: .leading, spacing: Spacing.sm + 4) {
+                DayProgressBar(dayNumber: panel.dayNumber, totalDays: panel.totalDays)
+                if !panel.rows.isEmpty {
+                    TodayPanelView(panel: panel)
+                }
+            }
+            .padding(.top, Spacing.md)
+        }
     }
 
     private var metaRow: some View {

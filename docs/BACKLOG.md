@@ -63,6 +63,7 @@ which is what makes E1 cheap.
 - **E2 — "Duplicate trip" (retention hook).** ✅ **SHIPPED (Build 6).** Clone an existing trip as a
   template (re-run an annual trip): copy items with dates rebased, drop
   confirmation codes/bookings, keep the owner as sole member. Shipped in `Models/TripDuplication.swift` + UI in Home/TripForm + `TriptoTests/TripDuplicationTests.swift` (PR #21 era).
+  - **Follow-up (qa D1, fixed):** duplicating a trip never opened this session cloned an itemless copy — `pullHome` doesn't load items, so the source's rows weren't local. Now pulls the source first (`HomeDuplication.cloneContent` + `HomeDuplicationTests`). **Known gap:** doing this *offline* still yields an empty copy (`pullTrip` no-ops with no network, nothing local to clone). Low priority — surface a "connect to copy this trip's plans" note if it ever bites.
 - **E3 — "Download my data" export (privacy / compliance).** ✅ **SHIPPED 2026-07-14.** Settings → "Export trips" writes Tripto Archive v1 JSON (spec: `docs/IMPORT_FORMAT.md`), scoped to the owner's trips only (RLS-enforced server-side). Works bidirectionally with E3 import below — round-trip re-import is a no-op via UUIDv5 idempotence. No sanitization — it's the owner's own data. Exported scope constraints noted in IMPORT_FORMAT.md §7.
 - **E4 — PDF / printable itinerary (low priority, likely redundant).** The
   public share link (§5.2) already gives a no-app, read-only view for

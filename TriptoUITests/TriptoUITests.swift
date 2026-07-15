@@ -415,18 +415,17 @@ final class TriptoUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty"]
         app.launch()
-        // Not `app.staticTexts["Lisbon"]`: `HomeInitialTab.resolve` can open
-        // Home on either Upcoming or Past depending on what's already in the
-        // (cross-launch-persistent, `-simulateOffline`) local store — e.g. a
-        // previous run of this very test leaving an Upcoming trip behind —
-        // so the seeded (Past-dated) Lisbon trip isn't a reliable "Home has
-        // loaded" signal here. The Upcoming/Past `SegmentedControl` is fixed
-        // chrome above the trip `List` (unlike `planNewTripRow`, the list's
-        // own last row — pushed off-screen, and so not yet instantiated by
-        // SwiftUI's lazy `List`, once enough trips accumulate across
-        // repeated local runs of this same test), so it renders regardless
-        // of scroll position or which tab is showing.
-        XCTAssertTrue(app.buttons["Upcoming"].waitForExistence(timeout: 30), "Home never loaded")
+        // Not `app.staticTexts["Lisbon"]`: this repo's local store persists
+        // across launches (`-simulateOffline`), so a previous run of this
+        // very test can leave other trips behind, and the seeded (Past-dated)
+        // Lisbon trip isn't guaranteed to be the first row. "Your trips" is
+        // `header`'s fixed chrome above the one list (docs/UX_REDESIGN_ROADMAP.md
+        // Phase 5 retired the Upcoming/Past `SegmentedControl` this used to
+        // wait on) — unlike `planNewTripRow`, the list's own last row (pushed
+        // off-screen, and so not yet instantiated by SwiftUI's lazy `List`,
+        // once enough trips accumulate across repeated local runs), it
+        // renders regardless of scroll position or list contents.
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
 
         // `planNewTripRow` is the list's own last row — scroll to it rather
         // than assume it's already on-screen, same bounded-swipe technique
@@ -473,11 +472,9 @@ final class TriptoUITests: XCTestCase {
         // Same fixed-chrome reasoning as the first wait above (not
         // `Plan a new trip`/`Lisbon`) — a generous 60s timeout for the same
         // reason as the settle sleep above.
-        XCTAssertTrue(app.buttons["Upcoming"].waitForExistence(timeout: 60), "Home never reappeared after relaunch")
-        // Explicitly select Upcoming — where the newly created trip(s)
-        // actually live, being dated today — rather than depending on
-        // `HomeInitialTab.resolve` already having landed there.
-        app.buttons["Upcoming"].tap()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 60), "Home never reappeared after relaunch")
+        // docs/UX_REDESIGN_ROADMAP.md Phase 5: no tab to select any more —
+        // the newly created trip(s), dated today, are always in the one list.
 
         // `TripCard` is `.accessibilityElement(children: .ignore)` with one
         // combined label starting with the title (`HomeView.swift`'s
@@ -564,6 +561,106 @@ final class TriptoUITests: XCTestCase {
         app.swipeUp()
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "newtrip", of: app)
+    }
+
+    // MARK: - P5 register showcase screenshots (docs/UX_REDESIGN_ROADMAP.md
+    // Phase 5 verify wave) — same "config-agnostic test, appearance/Dynamic
+    // Type flipped from OUTSIDE between separate invocations" recipe as
+    // `testCaptureItineraryScreen` above (see the Tester report for the exact
+    // `xcrun simctl ui` commands). `DemoSeeder.seed`'s additive
+    // `seedRegisterShowcaseTrips` call gives Home a live + future + 3
+    // multi-year-past trip alongside "Lisbon", so `.now`/`.plain`/`.been`
+    // all render together in one shot. `.next` can never join them —
+    // `seedRegisterShowcaseTrips`'s own doc comment (`DemoSeeder.swift`)
+    // covers why a live trip's `startDate` always outranks a future one for
+    // that single register slot.
+
+    /// Waits on the live "Tokyo Sprint" card specifically (the most
+    /// content-heavy new element — today panel + day-progress bar), not
+    /// just "Lisbon", so this proves the whole showcase fixture (not only
+    /// the original seed) is on screen before capturing. Two captures at
+    /// two natural scroll depths, same "one test, two attachments at
+    /// different scroll positions" recipe `testCaptureAddItemFlightSheet`
+    /// above already uses: `home` at the top (the full register stack —
+    /// live + plain ahead cards, "Been there" coming into view), `home-been`
+    /// scrolled one screen further so a sticky year header is caught
+    /// mid-stick rather than just-arrived at the top of frame.
+    func testCaptureHomeRegisterShowcase() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedRegisterShowcase"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
+        let liveCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tokyo Sprint")).firstMatch
+        XCTAssertTrue(liveCard.waitForExistence(timeout: 30), "live register showcase trip (Tokyo Sprint) never appeared")
+        Thread.sleep(forTimeInterval: 0.5)
+        attachScreenshot(named: "home", of: app)
+
+        let beenHeader = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Been there")).firstMatch
+        for _ in 0..<15 where !beenHeader.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(beenHeader.waitForExistence(timeout: 10), "'Been there' section never scrolled into view")
+        // One more page down so a year header sits pinned mid-scroll rather
+        // than just-arrived at the very top of frame.
+        app.swipeUp()
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "home-been", of: app)
+    }
+
+    /// P5.5's "launch always opens at top" contract, verified explicitly
+    /// (not just inferred from `HomeView`'s own doc comment): scroll deep,
+    /// force-relaunch, and confirm the top ahead card is immediately
+    /// hittable with no further scroll — same relaunch recipe
+    /// `testDoubleTapStartFromBookingEmailCreatesExactlyOneTrip` above
+    /// already uses for a cross-launch assertion.
+    func testHomeRegisterShowcaseReopensAtTopAfterDeepScroll() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedRegisterShowcase"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
+        let liveCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tokyo Sprint")).firstMatch
+        XCTAssertTrue(liveCard.waitForExistence(timeout: 30), "live register showcase trip never appeared")
+
+        for _ in 0..<15 { app.swipeUp() } // scroll deep toward "Plan a new trip"
+        let planRow = app.buttons["Plan a new trip"]
+        XCTAssertTrue(planRow.waitForExistence(timeout: 10), "'Plan a new trip' row never scrolled into view")
+
+        app.terminate()
+        Thread.sleep(forTimeInterval: 1.0)
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 60), "Home never reappeared after relaunch")
+        let liveCardAfterRelaunch = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tokyo Sprint")).firstMatch
+        XCTAssertTrue(liveCardAfterRelaunch.waitForExistence(timeout: 15), "top card not present right after relaunch")
+        XCTAssertTrue(
+            liveCardAfterRelaunch.isHittable,
+            "P5.5: launch must always open at the top of the list — the live register card should be immediately " +
+                "hittable with no scroll needed, even after a deep scroll right before terminating"
+        )
+    }
+
+    /// "Mid-swipe" on a "been" row, for the register showcase's copy-to-new-
+    /// trip affordance (P5.4) — captured right after the swipe reveals the
+    /// action, before it's tapped. `.swipeActions` snaps to fully-revealed
+    /// or fully-hidden on gesture completion (no true half-dragged state to
+    /// hold a screenshot against), so "mid-swipe" here means "revealed, not
+    /// yet acted on" — the same state a real screenshot of this moment would
+    /// show. If the reveal doesn't settle in time this fails cleanly rather
+    /// than hanging; per the brief this shot is skippable if flaky.
+    func testCaptureHomeBeenRowSwipeReveal() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedRegisterShowcase"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
+        let beenRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Seoul New Year")).firstMatch
+        for _ in 0..<15 where !beenRow.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(beenRow.waitForExistence(timeout: 10), "'Seoul New Year' been row never scrolled into view")
+        beenRow.swipeLeft()
+        let copyAction = app.buttons["Copy to a new trip"]
+        XCTAssertTrue(copyAction.waitForExistence(timeout: 5), "swipe action never revealed")
+        Thread.sleep(forTimeInterval: 0.2)
+        attachScreenshot(named: "home-swipe-copy", of: app)
     }
 
     private func attachScreenshot(named name: String, of app: XCUIApplication) {
