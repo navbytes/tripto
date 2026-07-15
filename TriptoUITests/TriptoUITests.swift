@@ -344,25 +344,59 @@ final class TriptoUITests: XCTestCase {
         let toField = app.textFields["e.g. LIS"]
         toField.tap()
         toField.typeText("LIS")
-        // Dismiss the keyboard *before* reaching for the next-day chip
-        // below — while it's up, it covers roughly the bottom half of the
-        // screen, and XCUITest's auto-scroll-to-hittable has to scroll
-        // considerably further to bring an otherwise-nearby control into
-        // the remaining, keyboard-free visible area.
+        // Dismiss the keyboard *before* reaching for the date pickers/next-
+        // day chip below — while it's up, it covers roughly the bottom half
+        // of the screen, and XCUITest's auto-scroll-to-hittable has to
+        // scroll considerably further to bring an otherwise-nearby control
+        // into the remaining, keyboard-free visible area.
         app.keyboards.buttons["return"].tap()
 
-        // JFK's real zone (America/New_York, auto-detected from the code
-        // just typed) sits ~5h behind the trip-default zone `departsTime`'s
-        // clock value was originally set against, so — unadjusted — the
-        // composed arrival instant now lands *before* departure (the
-        // "+1 day" auto-suggest is wall-clock-only, doesn't know a zone
-        // changed) and the form would show a red validation error instead
-        // of a clean preview. Forcing "+1 day" (`arrivalDayOffsetOverride`)
-        // is the same fix a real person filling this same route would
-        // reach for.
+        // P7 hardening: `departsTime` defaults to the device's current wall
+        // clock, and JFK's real zone (America/New_York, auto-detected from
+        // the code just typed) sits ~5h behind Lisbon's — late enough in
+        // the evening (confirmed empirically: any run starting at/after
+        // 22:00 local), the nominal (zone-blind) "+1 day" auto-suggest
+        // (`ItemTimeCombining.suggestedArrivalDayOffset`) can no longer
+        // land on a valid arrival at all, same-day OR +1-day, since this
+        // route would actually need +2 days, which the chip has no way to
+        // express (`arrivalDayOffsetOverride` is a plain Bool). Setting an
+        // explicit, safe morning departure — rather than depending on
+        // whatever time this happens to run — sidesteps the whole edge case
+        // instead of fighting it; a real person filling this same route at
+        // 9am would land here as a matter of course, and everyone hitting
+        // save mid-tear-off-into-tomorrow already has this fixed at P7 for
+        // a coder to actually resolve (docs/UX_REDESIGN_ROADMAP.md P7 audit
+        // list), not this capture suite.
+        let departsTimePicker = app.datePickers["Departs"].buttons["Time Picker"]
+        XCTAssertTrue(departsTimePicker.waitForExistence(timeout: 5), "Departs time picker never appeared")
+        departsTimePicker.tap()
+        let hourWheel = app.pickerWheels.element(boundBy: 0)
+        XCTAssertTrue(hourWheel.waitForExistence(timeout: 5), "Departs time picker wheels never appeared")
+        hourWheel.adjust(toPickerWheelValue: "9")
+        app.pickerWheels.element(boundBy: 1).adjust(toPickerWheelValue: "00")
+        app.pickerWheels.element(boundBy: 2).adjust(toPickerWheelValue: "AM")
+        // Not `app.buttons["dismiss popup"]`: that "PopoverDismissRegion"
+        // covers the whole screen MINUS the popover itself, an irregular
+        // area whose XCUITest-computed tap point isn't something this test
+        // controls — confirmed empirically at AX3, where it landed on the
+        // "Departure time zone" row instead and opened ITS OWN zone-search
+        // sheet (the resulting screenshot, from a real run, showed a "Time
+        // zone" city list, not the flight preview). The sheet's own title
+        // is a stable, always-present, non-interactive tap target well
+        // outside the popover at any Dynamic Type size.
+        app.staticTexts["Add to Lisbon"].tap()
+
+        // A 9am departure never needs more than the ordinary "+1 day" this
+        // route's ~5h zone gap calls for (proven for any pre-10pm departure
+        // — see the comment above) — `nextDayChip`'s own action toggles
+        // (`arrivalDayOffsetOverride = !effectiveNextDay`), so this only
+        // taps it while the (now reliable) suggestion isn't already showing
+        // it selected.
         let nextDayChip = app.buttons["Arrives next day"]
         XCTAssertTrue(nextDayChip.waitForExistence(timeout: 5), "+1 day chip never appeared")
-        nextDayChip.tap()
+        if !nextDayChip.isSelected {
+            nextDayChip.tap()
+        }
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "add-item-flight-preview", of: app)
 
@@ -605,6 +639,27 @@ final class TriptoUITests: XCTestCase {
         app.swipeUp()
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "home-been", of: app)
+
+        // P7 award-audit capture set: scroll deeper still, into what's now a
+        // 6-row 2025 section (`DemoSeeder`'s additive past trips, alongside
+        // "Rome Christmas") — before this addition, every "been" year had
+        // only 1-3 rows, short enough that the ENTIRE archive (both years,
+        // every row, "Plan a new trip") fit inside about 1.5 screens —
+        // confirmed empirically (screenshots from several attempts, at
+        // every scroll position reachable at all): a header can't look
+        // genuinely "pinned mid-scroll" when there's barely anything left
+        // to scroll THROUGH once it appears, headers included. Six rows
+        // makes 2025 alone comfortably taller than one screen, so scrolling
+        // to its last row necessarily passes through several of its own
+        // earlier rows while the "2025" header stays stuck at the top —
+        // the actual behavior this scene needs to demonstrate.
+        let edinburghRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Edinburgh Fringe")).firstMatch
+        for _ in 0..<20 where !edinburghRow.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(edinburghRow.waitForExistence(timeout: 10), "'Edinburgh Fringe' been row (2025's last) never scrolled into view")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "home-year-pinned", of: app)
     }
 
     /// P5.5's "launch always opens at top" contract, verified explicitly
@@ -710,6 +765,10 @@ final class TriptoUITests: XCTestCase {
         // BEFORE the countdown starts — tap through it first.
         let confirmButton = app.buttons["Merge"]
         XCTAssertTrue(confirmButton.waitForExistence(timeout: 5), "merge confirmation dialog never appeared")
+        // P7 award-audit capture set: the dialog itself, not just tapped
+        // through on the way to the countdown toast below.
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "merge-confirm-dialog", of: app)
         confirmButton.tap()
 
         let undoButton = app.buttons["Undo"]
@@ -765,5 +824,176 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Trips"].waitForExistence(timeout: 5), "stat tiles never appeared")
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "import-result-sheet", of: app)
+    }
+
+    // MARK: - P7 award-audit capture set (the full-app visual record for the
+    // ux-expert's award audit) — same "config-agnostic test, appearance/
+    // Dynamic Type flipped from OUTSIDE between separate invocations" recipe
+    // as every capture test above (see the Tester report for the exact
+    // `xcrun simctl ui` commands). Several required P7 scenes are already
+    // exactly covered by an existing capture test's own attachment —
+    // `add-item-flight-preview` (P3), `settings`/`newtrip` (P4),
+    // `share-dedupe-banner`/`dedupe-review-sheet`/`import-result-sheet` (P6)
+    // — those are re-run for fresh PNGs, not duplicated here; only the
+    // scenes with no existing capture get a new test method below.
+
+    /// The "next" register alone — countdown ring + "FIRST UP" strip — the
+    /// one register kind no prior phase ever captured visually.
+    /// `-uitestSeedRegisterShowcase` (used for the "now"/"been" shots below)
+    /// can't show it: that fixture's own live "Tokyo Sprint" always outranks
+    /// a future trip for `ahead.first` (see `DemoSeeder
+    /// .seedNextRegisterShowcase`'s doc comment), so this uses its own,
+    /// separate, live-trip-free seed instead.
+    func testCaptureHomeNextRegister() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedNextRegisterShowcase"]
+        app.launch()
+        let nextCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Marrakech Long Weekend")).firstMatch
+        XCTAssertTrue(nextCard.waitForExistence(timeout: 30), "'next' register showcase trip never appeared")
+        Thread.sleep(forTimeInterval: 0.5)
+        attachScreenshot(named: "home-next-register", of: app)
+    }
+
+    /// Day 1, unscrolled: the conflict banner, both flagged hotel cards
+    /// (`hotel1`/`hotel1Duplicate`, the same seeded conflict
+    /// `testCaptureItineraryScreen` above already renders), AND the
+    /// outbound flight's own boarding pass with its tz-crossing note ("Lands
+    /// 20:15 in Lisbon — clocks jump ahead 5h" + the GMT-4/GMT+1 endpoint
+    /// labels) — one frame, two required P7 scenes. Not two separate
+    /// captures: P1's own ratified decision (DECISIONS.md) folded the
+    /// landing tz marker INTO the pass's footer instead of a standalone
+    /// rail row, and `-uitestScrollTimeline` (the older hook built for a
+    /// separate rail chip) now centers on that same suppressed, invisible
+    /// row — confirmed empirically, not assumed — so it adds a pointless
+    /// scroll rather than a better one. Lisbon's fixed May 2026 dates are
+    /// already behind "today," so the auto-scroll-to-today `.task` never
+    /// fires and Day 1 stays at the very top of frame on its own.
+    func testCaptureItineraryConflictBanner() {
+        let app = launch()
+        XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 30), "trip never opened")
+        Thread.sleep(forTimeInterval: 1.5)
+        attachScreenshot(named: "itinerary-conflict", of: app)
+    }
+
+    /// A mid-stay "night N of M" strip next to a genuinely empty "Free day"
+    /// slot — `DemoSeeder`'s additive one-day extension to the register
+    /// showcase's "Kyoto Autumn" trip (its hotel's last staying night, then
+    /// checkout, then a day nothing else touches). Reached by tapping the
+    /// card directly, not `-uitestOpenFirstTrip` — that hook targets
+    /// `trips.first?.id`, which is a DIFFERENT (earlier-dated "been") trip
+    /// once the showcase exists, the same landmine `seedRegisterShowcaseTrips`'s
+    /// own doc comment already flags for every other showcase test above.
+    func testCaptureItineraryStayStripAndFreeDay() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedRegisterShowcase"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
+        let kyotoCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kyoto Autumn")).firstMatch
+        XCTAssertTrue(kyotoCard.waitForExistence(timeout: 30), "'Kyoto Autumn' register showcase trip never appeared")
+        kyotoCard.tap()
+        XCTAssertTrue(app.staticTexts["Kyoto Autumn"].waitForExistence(timeout: 15), "trip screen never opened")
+
+        // `isHittable`, not `.exists`: this trip's whole itinerary is short
+        // enough (8 one-row days) that SwiftUI's `LazyVStack` had already
+        // instantiated the free day row (making it `.exists`) before any
+        // scrolling — `.exists` alone exited this loop on the first check
+        // and captured the still-at-top screen (confirmed empirically).
+        // `isHittable` tracks actual on-screen position instead.
+        let freeDayText = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Free day")).firstMatch
+        for _ in 0..<15 where !freeDayText.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(freeDayText.isHittable, "the new free day never scrolled into view")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "itinerary-stay-strip-free-day", of: app)
+    }
+
+    /// The Add-item sheet's "get data in" cluster (P4.2) — paste banner +
+    /// email-import address card + the category rail, all together at the
+    /// sheet's natural, unscrolled top, before typing into anything moves
+    /// keyboard focus/auto-scroll further down (unlike
+    /// `testCaptureAddItemFlightSheet` above, which fills fields first).
+    func testCaptureAddItemPasteAndEmailCluster() {
+        let app = launch(["-uitestOpenAdd"])
+        let pasteButton = app.buttons["pasteFirstBanner"]
+        XCTAssertTrue(pasteButton.waitForExistence(timeout: 30), "Add-item sheet's paste banner never appeared")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "add-item-paste-email-cluster", of: app)
+    }
+
+    /// Share's people-first list (role chips included), the "Who can do
+    /// what" disclosure expanded (tapped open here — collapsed by default,
+    /// and no prior capture test has ever expanded it), the public-link row,
+    /// and "Forward booking emails," all in one frame.
+    ///
+    /// Deliberately NOT `-uitestSeedShareAndInvite`: confirmed empirically
+    /// (a genuine `Copy link` wait timeout, not a flaky one) that hook can
+    /// never populate anything under this whole suite's `-simulateOffline`
+    /// convention — `ShareTripView`'s own "Mutations" doc comment says so
+    /// directly: creating a share link/invite is "the one deliberate
+    /// exception to this app's otherwise-universal offline-first write
+    /// path," a real network round-trip with no local-first fallback. That
+    /// hook needs a signed, actually-online build (same category as
+    /// `LiveAuthWriteTests`, docs/TESTING.md), not this hermetic suite. The
+    /// toggle-off public-link row plus the un-created invite buttons are
+    /// still a real "link row" — just not a populated one. Same bounded
+    /// drag-to-scroll recipe `testCaptureShareScreen` above uses, tuned for
+    /// the extra height the now-expanded disclosure adds above the invite/
+    /// link sections.
+    func testCaptureShareFullPeopleAndLinkRow() {
+        let app = launch(["-uitestOpenShare"])
+        XCTAssertTrue(app.navigationBars["Share this trip"].waitForExistence(timeout: 30), "Share screen never appeared")
+
+        let disclosureButton = app.buttons["Who can do what"]
+        let disclosureText = app.staticTexts["Who can do what"]
+        if disclosureButton.waitForExistence(timeout: 10) {
+            disclosureButton.tap()
+        } else {
+            XCTAssertTrue(disclosureText.waitForExistence(timeout: 5), "'Who can do what' disclosure never appeared")
+            disclosureText.tap()
+        }
+        let organizerCapability = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Everything, incl.")
+        ).firstMatch
+        XCTAssertTrue(organizerCapability.waitForExistence(timeout: 5), "'Who can do what' disclosure didn't expand")
+
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "share-full", of: app)
+    }
+
+    /// The signed-out Welcome/sign-in screen — the one screen no existing
+    /// capture test reaches (every other one launches straight through
+    /// `-uitestAutoSignIn`). Omitting that flag entirely (rather than
+    /// `-uitestSignOut`, which drives a real, if `try?`-swallowed,
+    /// `Supa.client.auth.signOut()` network call) keeps this launch
+    /// hermetic: with no flag, `AuthManager.init` subscribes to the SDK's
+    /// `authStateChanges`, which resolves synchronously to "no session"
+    /// against a Keychain no test in this suite has ever written a real
+    /// session into (every other test's fake session lives only in memory —
+    /// see `-uitestAutoSignIn`'s own doc comment).
+    func testCaptureWelcomeScreen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-simulateOffline"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Tripto"].waitForExistence(timeout: 30), "Welcome screen never appeared")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "welcome", of: app)
+    }
+
+    /// The original boarding-pass-physicality `BookingDetailView`, for a
+    /// side-by-side consistency comparison against the new itinerary
+    /// timeline's own pass card — same seeded outbound flight
+    /// `-uitestOpenBookingDetail` (existing `TripView` hook) already prefers
+    /// ("a flight with a confirmation," which the Lisbon fixture's
+    /// `TAP TP1234`/`QK7P2M` is). No tear/travel-day flags: this is the
+    /// pass's plain resting state, not a torn-stub/mid-tear evidence shot.
+    func testCaptureBookingDetailOriginalPass() {
+        let app = launch(["-uitestOpenBookingDetail"])
+        XCTAssertTrue(app.navigationBars["Booking details"].waitForExistence(timeout: 30), "Booking detail never appeared")
+        Thread.sleep(forTimeInterval: 0.5)
+        attachScreenshot(named: "booking-detail-original-pass", of: app)
     }
 }

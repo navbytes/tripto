@@ -246,7 +246,59 @@ enum DemoSeeder {
         if ProcessInfo.processInfo.arguments.contains("-uitestSeedP6TrustShowcase") {
             await seedP6TrustShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
         }
+        // P7 award-audit capture set: own flag, same "own flag, additive"
+        // recipe as the two above — see `seedNextRegisterShowcase`'s own
+        // doc comment for why the "next" register needs an isolated seed
+        // rather than folding into `seedRegisterShowcaseTrips`.
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedNextRegisterShowcase") {
+            await seedNextRegisterShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
+        }
         return tripId
+    }
+
+    // MARK: - UX P7 "next" register showcase (Home, countdown ring + FIRST UP)
+
+    /// A single upcoming (never live) trip so `ahead.first` earns `.next`
+    /// (the countdown ring + "FIRST UP" strip) — the one register kind
+    /// `seedRegisterShowcaseTrips` below deliberately never shows: a live
+    /// trip's `startDate` always sorts ahead of a future one
+    /// (`HomeTripOrdering.ahead`'s own doc comment), so `.now` and `.next`
+    /// can never both render off one seed, and that showcase's own "Tokyo
+    /// Sprint" is deliberately live. That function's doc comment says as
+    /// much: `.next` was, until now, covered only by
+    /// `HomeRegistersTests.testFirstAheadTripThatIsUpcomingIsNext` — a
+    /// logic-only unit test, never a visual capture. Own flag, own trip, no
+    /// live trip anywhere in this seed — the countdown ring has nothing to
+    /// lose to. One confirmed flight (`HomeFirstUp.pick`'s own
+    /// `status == .confirmed && startsAt >= now` filter) gives "FIRST UP"
+    /// real content instead of an empty strip.
+    private static func seedNextRegisterShowcase(modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date) async {
+        var deviceCalendar = Calendar(identifier: .gregorian)
+        deviceCalendar.timeZone = .current
+        let today = deviceCalendar.startOfDay(for: now)
+        let tripId = UUID()
+        let startDate = deviceCalendar.date(byAdding: .day, value: 12, to: today) ?? today
+        let endDate = deviceCalendar.date(byAdding: .day, value: 16, to: today) ?? today
+        let trip = Trip(
+            id: tripId, title: "Marrakech Long Weekend", destination: "Marrakech, Morocco", countryCode: "MA",
+            startDate: startDate, endDate: endDate, coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        let member = TripMember(id: UUID(), tripId: tripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        let tz = TimeZone.current.identifier
+
+        var flightDetails = ItemDetails.empty
+        flightDetails.airline = "Royal Air Maroc"; flightDetails.flightNo = "AT201"
+        flightDetails.fromIATA = "JFK"; flightDetails.toIATA = "RAK"
+        let flight = makeItem(
+            tripId: tripId, category: .flight, title: "Royal Air Maroc AT201",
+            startsAt: deviceCalendar.date(bySettingHour: 9, minute: 15, second: 0, of: startDate) ?? startDate,
+            endsAt: nil, tz: tz, locationName: "JFK", confirmation: "MK55210",
+            details: flightDetails, userId: userId, now: now
+        )
+
+        await pushShowcaseTrip(trip, member: member, items: [flight], modelContext: modelContext, syncEngine: syncEngine)
     }
 
     // MARK: - UX P6 trust-suite showcase (import-result / merge / dedupe)
@@ -363,6 +415,55 @@ enum DemoSeeder {
             start: DayDate(year: 2026, month: 1, day: 1), end: DayDate(year: 2026, month: 1, day: 3),
             deviceCalendar: deviceCalendar
         )
+        // P7 award-audit capture set: more 2025 "been" trips, additive — the
+        // archive already had 2 distinct years (2025/2026 above, plus the
+        // base "Lisbon" fixture itself, whose fixed May 2026 dates have
+        // since aged into "been" too), but only 1 row apiece — not enough
+        // rows for a whole screen, let alone proving a header stays pinned
+        // WHILE scrolling through its own section (confirmed empirically: a
+        // 3-row 2025 still let the entire archive fit within about 1.5
+        // screens, so "one page down" always showed everything at once,
+        // headers included, with nothing genuinely stuck). 2025 now carries
+        // 6 rows — comfortably taller than one screen by itself — so
+        // scrolling through it necessarily catches the "2025" header
+        // pinned at the top with several of its own rows still sliding by
+        // underneath, not just visible once.
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Barcelona Long Weekend", destination: "Barcelona, Spain", countryCode: "ES", coverGradient: "dusk",
+            start: DayDate(year: 2025, month: 8, day: 15), end: DayDate(year: 2025, month: 8, day: 18),
+            deviceCalendar: deviceCalendar
+        )
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Prague Spring Break", destination: "Prague, Czechia", countryCode: "CZ", coverGradient: "plum",
+            start: DayDate(year: 2025, month: 4, day: 3), end: DayDate(year: 2025, month: 4, day: 6),
+            deviceCalendar: deviceCalendar
+        )
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Amsterdam Canals", destination: "Amsterdam, Netherlands", countryCode: "NL", coverGradient: "moss",
+            start: DayDate(year: 2025, month: 6, day: 6), end: DayDate(year: 2025, month: 6, day: 9),
+            deviceCalendar: deviceCalendar
+        )
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Vienna Weekend", destination: "Vienna, Austria", countryCode: "AT", coverGradient: "dusk",
+            start: DayDate(year: 2025, month: 9, day: 19), end: DayDate(year: 2025, month: 9, day: 21),
+            deviceCalendar: deviceCalendar
+        )
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Dublin St. Patrick's", destination: "Dublin, Ireland", countryCode: "IE", coverGradient: "plum",
+            start: DayDate(year: 2025, month: 3, day: 15), end: DayDate(year: 2025, month: 3, day: 17),
+            deviceCalendar: deviceCalendar
+        )
+        await seedPastTrip(
+            modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now,
+            title: "Edinburgh Fringe", destination: "Edinburgh, Scotland", countryCode: "GB", coverGradient: "moss",
+            start: DayDate(year: 2025, month: 8, day: 2), end: DayDate(year: 2025, month: 8, day: 5),
+            deviceCalendar: deviceCalendar
+        )
     }
 
     /// The `.now` register: today sits comfortably mid-trip (day 4 of 8),
@@ -430,12 +531,22 @@ enum DemoSeeder {
     /// A `.plain` ahead card ~6 weeks out (never `.next` — see this
     /// section's own doc comment above) with a real flight + hotel, so it
     /// reads as a genuine upcoming trip rather than filler.
+    ///
+    /// P7 award-audit capture set: `endDate` is one day past the hotel's own
+    /// checkout (`checkOutDay` below), additive — the itinerary tab's
+    /// gap-fill (`ItineraryDayBucketing.sections(tripEnd:)`) renders any day
+    /// in `tripStart...tripEnd` no item touches as a quiet "Free day" row,
+    /// and this trip previously had none: every day was either the check-in,
+    /// an in-between "staying \u{2014} night N of M" strip, or the checkout
+    /// itself. The extra day now sits right after checkout, adjacent to the
+    /// last staying strip, so one scroll position shows both a stay strip
+    /// and a genuinely empty day slot together.
     private static func seedFutureTrip(
         modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date, today: Date, deviceCalendar: Calendar
     ) async {
         let tripId = UUID()
         let startDate = deviceCalendar.date(byAdding: .day, value: 45, to: today) ?? today
-        let endDate = deviceCalendar.date(byAdding: .day, value: 51, to: today) ?? today
+        let endDate = deviceCalendar.date(byAdding: .day, value: 52, to: today) ?? today
         let trip = Trip(
             id: tripId, title: "Kyoto Autumn", destination: "Kyoto, Japan", countryCode: "JP",
             startDate: startDate, endDate: endDate, coverGradient: "moss",
