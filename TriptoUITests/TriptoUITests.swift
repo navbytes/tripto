@@ -398,6 +398,18 @@ final class TriptoUITests: XCTestCase {
         // (`hasSetArrival`), which is what takes the preview out of
         // route-only and renders a real duration, matching this capture's
         // original (pre-P7c) intent.
+        //
+        // P7e (round-2 re-audit item 1): "Arrival date"/"Arrives" render as
+        // an unset placeholder pair (`arrivalDatePlaceholder`/
+        // `arrivesTimePlaceholder`) until this first tap — matched by their
+        // own stable identifiers rather than visible text, same reasoning
+        // `pasteFirstBanner`'s doc comment already gives. This is the tap
+        // that reveals the real pickers below (both together — one shared
+        // `hasSetArrival`), so `datePickers["Arrives"]` only exists after it.
+        let arrivesTimePlaceholder = app.buttons["arrivesTimePlaceholder"]
+        XCTAssertTrue(arrivesTimePlaceholder.waitForExistence(timeout: 5), "Arrives placeholder never appeared")
+        arrivesTimePlaceholder.tap()
+
         let arrivesTimePicker = app.datePickers["Arrives"].buttons["Time Picker"]
         XCTAssertTrue(arrivesTimePicker.waitForExistence(timeout: 5), "Arrives time picker never appeared")
         arrivesTimePicker.tap()
