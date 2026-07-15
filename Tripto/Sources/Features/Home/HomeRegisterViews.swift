@@ -213,6 +213,91 @@ struct TodayPanelView: View {
     }
 }
 
+/// P6.2 (docs/UX_REDESIGN_ROADMAP.md): the duplicate-trip strip — Home
+/// phone 1 note 3's fused "Same dates as the trip above" + Merge. `HomeView`
+/// renders this as its own adjacent `List` row directly below the SECOND
+/// card of a detected duplicate pair (`TripMergeDetection.survivorByShellId`)
+/// — not fused inside `TripCard` itself (that file is off this phase's
+/// surface list), so the "fusion" is approximated with tightened spacing
+/// between the two rows rather than shared/matched corner radii. ponytail:
+/// a pixel-perfect flush card+strip (matching the mockup's shared rounded-
+/// rect silhouette) would need `TripCard`'s own corner treatment to
+/// coordinate with this row; revisit if the plain rounded-card-below-card
+/// look reads as two unrelated elements in the ux-expert pass.
+struct DuplicateTripStrip: View {
+    /// The survivor card's title — folded into the "Merge" button's own
+    /// accessibility label (see below) so the action still names its
+    /// target if VoiceOver's rotor jumps here directly, out of context.
+    let survivorTitle: String
+    let onMerge: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Same `AnyLayout` swap as `FirstUpStrip.layout`/`TripCard.topLayout`
+    /// — the label and the "Merge" button have no room to sit side by side
+    /// at accessibility Dynamic Type sizes.
+    private var layout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.sm))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.sm))
+    }
+
+    var body: some View {
+        layout {
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.amberInk)
+                    .padding(.top, 1)
+                    .accessibilityHidden(true)
+                Text("Same dates as the trip above")
+                    .font(Typo.body(weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+            }
+            // Combine only the informational icon+text pair into one
+            // VoiceOver stop — same "combine only the informational
+            // subtree" rule `ItineraryTabView.conflictBanner`'s own doc
+            // comment states; "Merge" below stays its own, separately
+            // reachable control. Combining a `Button` into a `.combine`d
+            // parent would swallow its distinct tap/rotor target, the exact
+            // regression this split avoids.
+            .accessibilityElement(children: .combine)
+            // `Spacer` is HStack-only (same reasoning as `TripCard
+            // .topLayout`'s identical guard) — inside the VStack variant it
+            // would expand vertically and blow out this row's height.
+            if !dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: Spacing.sm)
+            }
+            // Ink-filled compact pill — the exact recipe `ItineraryTabView
+            // .conflictBanner`'s "Review stays" already established for
+            // this app's "heads up + a recourse" banner shape (P2.1):
+            // `Palette.paper` on `Palette.ink` measures ~16.2:1 light /
+            // ~16.1:1 dark (independently computed from `Tokens.swift`'s
+            // hex values), reused rather than re-derived.
+            Button("Merge", action: onMerge)
+                .font(Typo.body(13, weight: .semibold))
+                .foregroundStyle(Palette.paper)
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+                .background(Palette.ink, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Capsule())
+                .buttonStyle(.plain)
+                .accessibilityLabel("Merge into \(survivorTitle)")
+        }
+        .padding(Spacing.md)
+        // `Palette.ink` on `Palette.amberSoft` (the text above) measures
+        // ~14.4:1 light / ~10.9:1 dark — same already-audited pairing as
+        // `SettingsView.conversionPromptFeatureCard`/`ItineraryTabView
+        // .conflictBanner`, reused unchanged.
+        .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                .stroke(Palette.amber.opacity(0.3), lineWidth: 1)
+        }
+    }
+}
+
 /// P5.4: "been" register row — muted, no gradient hero/avatars/countdown,
 /// per the roadmap's "without this discipline a 2019 trip shouts as loudly
 /// as the live one." `HomeView` wraps this in the tap `Button` (mirrors

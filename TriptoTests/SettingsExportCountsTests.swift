@@ -3,8 +3,8 @@ import XCTest
 @testable import Tripto
 
 /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): the Export row's "N trips · M items"
-/// subtitle — pure pluralization, same convention `SettingsView`'s own
-/// (private) `importSummary(_:)` already uses for the import-result alert.
+/// subtitle — pure pluralization, same convention `ImportResultSheet`'s own
+/// `subtitleText`/`primaryActionText` statics use for the import-result sheet.
 final class SettingsExportCountsTests: XCTestCase {
     func testSingularTripAndItem() {
         XCTAssertEqual(SettingsView.exportCountsText(tripCount: 1, itemCount: 1), "1 trip \u{00B7} 1 item")

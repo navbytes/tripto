@@ -153,6 +153,14 @@ struct TripArchiveTripSkip: Equatable {
     var tripId: String
     var title: String
     var reason: TripSkipReason
+    /// P6.1 (docs/UX_REDESIGN_ROADMAP.md): the LOCAL trip this archive row
+    /// already matches, when `reason == .alreadyImported` — backs the
+    /// import-result sheet's "Open trip" recourse so the view never has to
+    /// re-derive which of §5's two idempotence rules matched. `nil` for
+    /// every other skip reason, and defaulted so every existing call site/
+    /// fixture predating this field keeps compiling unchanged (same
+    /// purely-additive convention as `ItineraryItemDTO.source`'s doc comment).
+    var existingLocalTripId: UUID?
 }
 
 struct TripArchiveItemSkip: Equatable {
@@ -591,7 +599,19 @@ enum TripArchiveMapper {
             // occurrence is cancelled/dateless would consume the slot and
             // wrongly block a LATER, genuinely valid occurrence.
             guard !existingTripIds.contains(tripUUID), !matchesLocalTripByRawId, !seenTripUUIDs.contains(tripUUID) else {
-                report.tripSkips.append(.init(tripId: tripIdString, title: displayTitle, reason: .alreadyImported))
+                // P6.1: `existingLocalTripId` backs the result sheet's "Open
+                // trip" recourse — whichever of §5's two idempotence rules
+                // matched IS the already-imported local trip; a same-archive
+                // repeat (caught by `seenTripUUIDs` alone) matches neither
+                // and correctly gets no recourse (there's nothing to open —
+                // this exact row hasn't actually been imported at all).
+                let existingLocalTripId: UUID? = matchesLocalTripByRawId
+                    ? UUID(uuidString: tripIdString)
+                    : (existingTripIds.contains(tripUUID) ? tripUUID : nil)
+                report.tripSkips.append(.init(
+                    tripId: tripIdString, title: displayTitle, reason: .alreadyImported,
+                    existingLocalTripId: existingLocalTripId
+                ))
                 continue
             }
             if (rawTrip.status ?? "").lowercased() == "cancelled" {

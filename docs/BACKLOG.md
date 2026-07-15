@@ -5,7 +5,7 @@ current server-side privacy phase**. Owner-gated launch steps live in
 [RELEASE_READINESS.md](RELEASE_READINESS.md) — this file is the working
 backlog of things we chose to defer, not re-list.
 
-Last updated: 2026-07-14 (§A2 ✅ email-import pipeline go-live complete; §E2/E3 archived, §E superseded by Phase 2).
+Last updated: 2026-07-15 (§F added — UX redesign Phase 6's fenced items). Prior: 2026-07-14 (§A2 ✅ email-import pipeline go-live complete; §E2/E3 archived, §E superseded by Phase 2).
 
 ---
 
@@ -70,6 +70,51 @@ which is what makes E1 cheap.
   grandparents; a PDF adds offline-print but little else. Skip unless users ask.
 - **~~Declined — generic file-based trip *import*.~~** ✅ **SUPERSEDED 2026-07-13.**
   ~~Loading a whole trip from an exported file means owning a versioned trip-file format, malformed-input handling, schema migration, and RLS-safe insertion with conflict-merge — high cost for a feature no one has requested.~~ Owner-observed migration demand (25-trip archive) triggered the revisit. Replaced by deterministic Archive v1 import: Settings → "Import trips" (JSON, `docs/IMPORT_FORMAT.md`), on-device, no AI/consent, idempotent re-import, tz-resolving with UUIDv5 deduplication. Design and implementation in Phase 2 of `ROADMAP.md`; the E1/E2 revisit trigger has fired.
+
+## F. UX redesign — fenced items (Phase 6, docs/UX_REDESIGN_ROADMAP.md)
+
+The redesign program's own fence list ("Fenced out of this program," top of
+`UX_REDESIGN_ROADMAP.md`) pushed these out of scope; captured here per that
+doc's own instruction ("filed in BACKLOG.md, not silently dropped"). Not
+ranked — pick up by demand, same as section E.
+
+- **F1 — `ItemStatus.cancelled` + "Import anyway."** The archive-import
+  result sheet (P6.1, `ImportResultSheet.swift`) can only offer a recourse a
+  user can actually act on; a cancelled-trip skip has none today because the
+  schema has nowhere to import a cancelled trip *into* —
+  `Models/Enums.swift`'s `ItemStatus` is `suggested`/`confirmed` only, and
+  trips carry no status column at all. Needs a backend enum/schema change
+  before "Import anyway" (mockup note 4) is buildable.
+- **F2 — Undated trips.** Same shape of gap: an archive trip with no start
+  date is skipped (`TripSkipReason.noStartDate`) with no "Add dates"
+  recourse (mockup note 4), because `trips.start_date`/`end_date` are `not
+  null` — there's nowhere to persist a trip while its dates are unknown.
+  Needs a schema change (nullable dates, or a distinct "draft" trip shape)
+  before this is buildable client-side.
+- **F3 — Cross-trip traveller identity.** P6.3 dedupes `trip_profiles` rows
+  *within one trip* only (normalized display name — `ProfileDedupe.swift`).
+  Recognizing "this is the same Grandma across 20 different trips" needs a
+  person entity that outlives any single trip's `trip_profiles` row — a real
+  backend concept this schema doesn't have today, not a client-side
+  heuristic. The mockup's own reference (import-result note 3, "43
+  travellers... share a name or email across trips") is this exact case;
+  not built — P6.1's result sheet has no cross-trip travellers-smell banner
+  at all (P6.3 covers the within-trip case, surfaced per-trip on Share).
+- **F4 — Archive export item-scope verification.** Flagged, not fixed: like
+  P6.2's trip-merge (which explicitly pulls both trips before moving
+  anything — nt lesson YEFXVP), `SettingsView.exportArchive()` fetches
+  straight from the local SwiftData mirror, which is **trip-scoped** —
+  itinerary items/packing only enter it via `pullTrip` (opening the trip),
+  never via `pullHome` (Home's own list pull). A trip never opened this
+  session may export with zero items even though the server has them,
+  understating the archive for exactly the trips a "back up everything"
+  user is least likely to have opened recently. Needs verification (does
+  export need to pull every trip first?) and, if confirmed, a fix — out of
+  this phase's scope.
+- **F5 — Multi-stop trips.** Out of the redesign program per BUILD_PLAN §2
+  (v1 scope); unchanged by Phase 6.
+- **F6 — Home-timezone setting.** A user-set "home" zone (for a "was I home
+  or away" framing) — out of the redesign program; unchanged by Phase 6.
 
 ---
 

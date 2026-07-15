@@ -70,6 +70,9 @@ struct ShareTripView: View {
     /// consent isn't on record yet, same reasoning as those two.
     @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
     @State private var hasFetchedImportAddress = false
+    /// P6.3 (docs/UX_REDESIGN_ROADMAP.md): the traveller-dedupe banner's
+    /// "Review" destination.
+    @State private var isPresentingDedupeReview = false
 
     /// `shareLinkRow`'s `ShareLink` icon — glyph+container scaled together
     /// (this view owns the whole row, no external layout contract on its
@@ -102,6 +105,7 @@ struct ShareTripView: View {
             // demoted/utility area as the public link.
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 peopleSection
+                dedupeBanner
                 inviteSection
                 publicLinkSection
                 forwardBookingEmailsRow
@@ -148,6 +152,13 @@ struct ShareTripView: View {
                 onSave: { name, color in updateProfile(profile, displayName: name, avatarColor: color) },
                 onDelete: { deleteProfile(profile) }
             )
+        }
+        // P6.3 (docs/UX_REDESIGN_ROADMAP.md): the dedupe banner's "Review"
+        // destination.
+        .sheet(isPresented: $isPresentingDedupeReview) {
+            ProfileDedupeReviewSheet(pairs: duplicateProfilePairs) { survivor, duplicate in
+                Task { await mergeDuplicateProfiles(survivor: survivor, duplicate: duplicate) }
+            }
         }
         .confirmationDialog(
             "Make \(memberPendingOrganizerConfirm.map(displayName) ?? "this person") an organizer?",
@@ -285,6 +296,19 @@ struct ShareTripView: View {
     /// creation; rendered here so the list is ready the moment it does.
     private var unlinkedProfiles: [TripProfile] {
         tripProfiles.filter { $0.linkedUserId == nil }.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// P6.3 (docs/UX_REDESIGN_ROADMAP.md): within-this-trip traveller
+    /// duplicates — `tripProfiles` is already trip-scoped by this view's
+    /// own `@Query` filter (`init` above), so there is nothing cross-trip
+    /// this can ever see (that identity problem is explicitly fenced,
+    /// docs/BACKLOG.md). Not gated on "was this just imported" — a general,
+    /// always-on detection over whatever profiles exist on the trip right
+    /// now is simpler than tracking a one-shot post-import flag, and
+    /// correctly also catches a manually-added duplicate (e.g. "Mom" added
+    /// twice by accident), not just an import-created one.
+    private var duplicateProfilePairs: [ProfileDedupe.Pair] {
+        ProfileDedupe.duplicatePairs(in: tripProfiles)
     }
 
     private enum PersonRow: Identifiable {
@@ -704,6 +728,52 @@ struct ShareTripView: View {
 
             addProfileButton
             whoCanDoWhatDisclosure
+        }
+    }
+
+    /// P6.3 (docs/UX_REDESIGN_ROADMAP.md): a quiet, organizer-only heads-up
+    /// — mirrors `ItineraryTabView.conflictBanner`'s exact "amber-wash
+    /// notice + a compact ink-filled pill action" recipe (P2.1), the
+    /// closest existing precedent in this app for "detected a probably-
+    /// accidental duplicate, offer a review." Organizer-only: merging
+    /// re-points `item_assignees`/`packing_items` and deletes a
+    /// `trip_profiles` row, which is organizer-only RLS
+    /// (`unlinkedProfileRow`'s own doc comment: "confirmed live") — showing
+    /// an action neither other role could complete would be a dead end.
+    @ViewBuilder
+    private var dedupeBanner: some View {
+        if isOrganizer, !duplicateProfilePairs.isEmpty {
+            let count = duplicateProfilePairs.count
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Image(systemName: "person.2.badge.gearshape")
+                        .foregroundStyle(Palette.amberInk)
+                        .padding(.top, 1)
+                        .accessibilityHidden(true)
+                    Text(count == 1
+                        ? "1 name looks like the same person \u{2014} Review"
+                        : "\(count) names look like the same person \u{2014} Review")
+                        .font(Typo.body(weight: .bold))
+                        .foregroundStyle(Palette.ink)
+                }
+                .accessibilityElement(children: .combine)
+
+                Button("Review") { isPresentingDedupeReview = true }
+                    .font(Typo.body(13, weight: .semibold))
+                    .foregroundStyle(Palette.paper)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                    .background(Palette.ink, in: Capsule())
+                    .frame(minHeight: 44)
+                    .contentShape(Capsule())
+                    .buttonStyle(.plain)
+            }
+            .padding(Spacing.md)
+            // Same already-audited pairing `ImportResultSheet`/
+            // `ItineraryTabView.conflictBanner` reuse: `Palette.ink` on
+            // `Palette.amberSoft` ~14.4:1 light / ~10.9:1 dark; `Palette
+            // .paper` on `Palette.ink` (the button) ~16.2:1 / ~16.1:1.
+            .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
         }
     }
 
@@ -1192,6 +1262,50 @@ struct ShareTripView: View {
         toast = "Removed from trip"
     }
 
+    /// P6.3 (docs/UX_REDESIGN_ROADMAP.md): the dedupe review sheet's
+    /// confirmed "Merge". `ProfileDedupe.merge` does the SwiftData work
+    /// (re-point `item_assignees`/packing, delete `duplicate`'s
+    /// `trip_profiles` row); this method supplies the context, the pull
+    /// closure, and the outbox enqueue — same split every merge/dedupe
+    /// helper in this phase uses (`TripMerge`/`HomeView.performMerge`).
+    /// The final `trip_profiles` delete mirrors `deleteProfile` above's
+    /// exact enqueue shape — no new server call shape, just driven from
+    /// here instead of that method directly (this is a different row: the
+    /// DUPLICATE, not necessarily one the user tapped "Remove" on).
+    @MainActor
+    private func mergeDuplicateProfiles(survivor: TripProfile, duplicate: TripProfile) async {
+        let survivorId = survivor.id
+        let duplicateId = duplicate.id
+        guard let result = await ProfileDedupe.merge(
+            survivorId: survivorId, duplicateId: duplicateId, tripId: tripId, modelContext: modelContext,
+            // Same trip-scoped-mirror rule as `TripMerge`/`HomeDuplication`
+            // — `item_assignees` (like itinerary items/packing) enters the
+            // local mirror only via `pullTrip`. `TripView`'s own `onAppear`
+            // already schedules this for the CURRENTLY open trip, but this
+            // screen is only ever reached from inside one, so a defensive
+            // direct pull costs nothing and removes any doubt.
+            ensureTripLoaded: { await syncEngine?.pullTrip(tripId) }
+        ) else {
+            toast = "Couldn\u{2019}t merge \u{2014} try again."
+            return
+        }
+
+        for itemId in result.itemIdsToUnassignFromDuplicate {
+            await syncEngine?.enqueueDeleteItemAssignee(itemId: itemId, profileId: duplicateId, tripId: tripId)
+        }
+        for itemId in result.itemIdsToAssignToSurvivor {
+            await syncEngine?.enqueueUpsert(
+                table: .itemAssignees, rowId: ItemAssignee.compositeId(itemId: itemId, profileId: survivorId),
+                tripId: tripId, payload: ItemAssigneeDTO(itemId: itemId, profileId: survivorId)
+            )
+        }
+        for packingItem in result.repointedPackingItems {
+            await syncEngine?.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: tripId, payload: packingItem.toDTO())
+        }
+        await syncEngine?.enqueueDelete(table: .tripProfiles, rowId: duplicateId, tripId: tripId)
+        toast = "Merged into \(survivor.displayName)"
+    }
+
     // MARK: - DEBUG verify-drill autopilot
 
     #if DEBUG
@@ -1226,3 +1340,113 @@ struct ShareTripView: View {
 
 // Fix-round D2: `RolePickerSheet` (the pre-P4.1 role-change sheet) deleted —
 // zero call sites since the inline chip `Menu` (`memberRow`) replaced it.
+
+/// P6.3 (docs/UX_REDESIGN_ROADMAP.md): `dedupeBanner`'s "Review" destination
+/// — one row per detected pair, Merge (confirm-gated here — this
+/// permanently deletes a `trip_profiles` row, same "destructive ops MUST be
+/// confirm-gated" contract every other delete on this screen already
+/// follows) or Keep both. "Keep both" only dismisses the pair for this
+/// sheet visit (`dismissedIds`, local `@State`) — nothing persists, so an
+/// unmerged pair resurfaces the next time this sheet opens, same as
+/// `ItineraryTabView`'s own conflict banner staying up until the
+/// underlying data actually changes.
+private struct ProfileDedupeReviewSheet: View {
+    let pairs: [ProfileDedupe.Pair]
+    let onMerge: (TripProfile, TripProfile) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var dismissedIds: Set<UUID> = []
+    @State private var pairPendingConfirm: ProfileDedupe.Pair?
+
+    /// Same `AnyLayout` swap `DuplicateTripStrip`/`TripCard.topLayout`
+    /// already use — a label plus two buttons has no room to sit side by
+    /// side at accessibility Dynamic Type sizes.
+    private var rowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.sm))
+            : AnyLayout(HStackLayout(spacing: Spacing.md))
+    }
+
+    private var visiblePairs: [ProfileDedupe.Pair] {
+        pairs.filter { !dismissedIds.contains($0.id) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if visiblePairs.isEmpty {
+                    Text("Nothing left to review.")
+                        .foregroundStyle(Palette.slate)
+                } else {
+                    ForEach(visiblePairs) { pair in
+                        row(pair)
+                    }
+                }
+            }
+            .navigationTitle("Possible duplicates")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Merge these two?",
+            isPresented: Binding(
+                get: { pairPendingConfirm != nil },
+                set: { isPresented in if !isPresented { pairPendingConfirm = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Merge", role: .destructive) {
+                if let pair = pairPendingConfirm { onMerge(pair.survivor, pair.duplicate) }
+                pairPendingConfirm = nil
+            }
+            Button("Cancel", role: .cancel) { pairPendingConfirm = nil }
+        } message: {
+            if let pair = pairPendingConfirm {
+                Text(
+                    "\u{201C}\(pair.duplicate.displayName)\u{201D} will be removed \u{2014} their plans and packing "
+                        + "tasks move to \u{201C}\(pair.survivor.displayName)\u{201D}. This can\u{2019}t be undone."
+                )
+            }
+        }
+    }
+
+    private func row(_ pair: ProfileDedupe.Pair) -> some View {
+        rowLayout {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(pair.survivor.displayName) & \(pair.duplicate.displayName)")
+                    .font(Typo.body(weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                Text("Same name")
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
+            }
+            // One VoiceOver stop for the label pair; both buttons stay
+            // their own, separately reachable controls (same "combine only
+            // the informational part" rule `DuplicateTripStrip`/
+            // `ItineraryTabView.conflictBanner` already use).
+            .accessibilityElement(children: .combine)
+            // `Spacer` is HStack-only (same reasoning as `TripCard
+            // .topLayout`'s identical guard) — inside the VStack variant it
+            // would expand vertically and blow out this row's height.
+            if !dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: Spacing.sm)
+            }
+            HStack(spacing: Spacing.lg) {
+                Button("Keep both") { dismissedIds.insert(pair.id) }
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                    .frame(minHeight: 44)
+                Button("Merge") { pairPendingConfirm = pair }
+                    .font(Typo.body(Typo.Size.caption, weight: .bold))
+                    .foregroundStyle(Palette.ink)
+                    .frame(minHeight: 44)
+            }
+        }
+        .padding(.vertical, Spacing.xs)
+    }
+}
