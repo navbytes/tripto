@@ -31,6 +31,19 @@ struct SettingsView: View {
     /// change it, the one asymmetry between "my own avatar" and "a kid's/
     /// grandparent's avatar" as the same conceptual object.
     @State private var avatarColor = ""
+    /// P8a (avatar photos): mirrors `avatarColor`'s own draft-until-Save
+    /// shape — the picker's own upload runs immediately (there's no
+    /// realistic way to defer the actual bytes upload until "Save"), but
+    /// the `Profile.avatarPath` row write + sync enqueue wait for the same
+    /// explicit "Save changes" tap `displayName`/`avatarColor` already do.
+    @State private var avatarPath: String?
+    /// `displayName`/`avatarColor` use "still empty" as their own "not yet
+    /// seeded from `myProfile`" signal, but `nil` is `avatarPath`'s legitimate
+    /// "no photo" value too — this flag is the unambiguous version of that
+    /// same signal, so seeding runs exactly once (see `.onAppear`/`.onChange`
+    /// below) and a deliberate "Remove photo" is never mistaken for "not
+    /// seeded yet" and clobbered by a later reactive re-fill.
+    @State private var hasSeededAvatarPath = false
     @State private var toast: String?
     @State private var isPresentingDeleteConfirm = false
     @State private var isDeletingAccount = false
@@ -82,7 +95,13 @@ struct SettingsView: View {
         !avatarColor.isEmpty && avatarColor != (myProfile?.avatarColor ?? "")
     }
 
-    private var isProfileChanged: Bool { isNameChanged || isColorChanged }
+    /// P8a: same "widen isProfileChanged" reasoning as `isColorChanged`'s own
+    /// doc comment, for the photo row now above it.
+    private var isPhotoChanged: Bool {
+        hasSeededAvatarPath && avatarPath != myProfile?.avatarPath
+    }
+
+    private var isProfileChanged: Bool { isNameChanged || isColorChanged || isPhotoChanged }
 
     /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): backs the Export row's real "N
     /// trips · M items" subtitle. Fix-round N1: `modelContext.fetchCount`
@@ -104,24 +123,26 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Profile") {
-                HStack(spacing: Spacing.md) {
-                    Circle()
-                        .fill(AvatarColor.color(named: avatarColor.isEmpty ? "slate" : avatarColor))
-                        .frame(width: 52, height: 52)
-                        .overlay {
-                            Text(initials(from: displayName))
-                                .font(Typo.display(18))
-                                .foregroundStyle(.white)
-                        }
-                        // Decorative live preview — the name field and the
-                        // color picker's own selection state below already
-                        // convey this.
-                        .accessibilityHidden(true)
-                    TextField("Display name", text: $displayName)
-                        .font(Typo.body(weight: .semibold))
-                        .disabled(isDeletingAccount)
-                }
+                // P8a: replaces the old decorative-only preview circle —
+                // this is now the one avatar representation on this screen,
+                // upgraded to show/manage a real photo (plan D6: "photo row
+                // above the existing AvatarColorPicker"), same position the
+                // old circle held (leading the Name field).
+                AvatarPhotoPicker(
+                    initial: initials(from: displayName),
+                    colorName: avatarColor.isEmpty ? "slate" : avatarColor,
+                    avatarPath: $avatarPath,
+                    uploaderUserId: authManager.userId,
+                    toast: $toast,
+                    diameter: 52
+                )
+                .disabled(isDeletingAccount)
+                .opacity(isDeletingAccount ? 0.5 : 1)
                 .padding(.vertical, Spacing.xs)
+
+                TextField("Display name", text: $displayName)
+                    .font(Typo.body(weight: .semibold))
+                    .disabled(isDeletingAccount)
 
                 // UX audit finding 9: same `AvatarColorPicker`
                 // `TripProfileFormSheet` uses for a non-app profile — the
@@ -314,16 +335,23 @@ struct SettingsView: View {
             if avatarColor.isEmpty {
                 avatarColor = myProfile?.avatarColor ?? ""
             }
+            seedAvatarPathIfNeeded()
         }
         // Covers a brand-new sign-in: `myProfile` can still be nil at
         // `.onAppear` (the first `pullHome()` hasn't landed yet) — this
         // fills the field reactively the moment it arrives, but only while
         // the field is still untouched, so it never clobbers something the
-        // user already started typing.
+        // user already started typing. `displayName` is always non-empty
+        // for a real profile (the backend's `handle_new_user` trigger seeds
+        // it), so this is also the reliable "myProfile just arrived" signal
+        // `seedAvatarPathIfNeeded()` piggybacks on below — `avatarPath`
+        // itself has no such non-nil guarantee to key off (no photo is a
+        // legitimate value), so it can't watch its own DTO field the same way.
         .onChange(of: myProfile?.displayName) { _, newValue in
             if displayName.isEmpty, let newValue {
                 displayName = newValue
             }
+            seedAvatarPathIfNeeded()
         }
         // UX audit finding 9: same reactive fill as the name field above,
         // for the same brand-new-sign-in race.
@@ -340,6 +368,11 @@ struct SettingsView: View {
             }
         }
         .onChange(of: avatarColor) { _, _ in
+            if nameSaveError != nil {
+                nameSaveError = nil
+            }
+        }
+        .onChange(of: avatarPath) { _, _ in
             if nameSaveError != nil {
                 nameSaveError = nil
             }
@@ -529,6 +562,15 @@ struct SettingsView: View {
         return first.isEmpty ? "?" : first.prefix(1).uppercased()
     }
 
+    /// P8a: seeds `avatarPath` from `myProfile` exactly once — see
+    /// `hasSeededAvatarPath`'s own doc comment for why this can't reuse the
+    /// "still empty" trick `displayName`/`avatarColor` use.
+    private func seedAvatarPathIfNeeded() {
+        guard !hasSeededAvatarPath, let myProfile else { return }
+        avatarPath = myProfile.avatarPath
+        hasSeededAvatarPath = true
+    }
+
     private var appVersionString: String {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "\u{2014}"
@@ -539,16 +581,21 @@ struct SettingsView: View {
     /// UX audit finding 9: widened from the original `saveDisplayName()` to
     /// also persist a changed `avatarColor` — one save affordance for both
     /// fields in the Profile section, same as `TripProfileFormSheet`'s
-    /// single "Save changes" covering its name+color pair.
+    /// single "Save changes" covering its name+color pair. P8a: widened
+    /// again for `avatarPath` — the actual upload already happened (via
+    /// `AvatarPhotoPicker`, atomically, before `avatarPath` ever changed),
+    /// so this only ever writes a path that's already live in the bucket.
     private func saveProfile() {
         guard let profile = myProfile else { return }
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let nameChanged = !trimmed.isEmpty && trimmed != profile.displayName
         let colorChanged = !avatarColor.isEmpty && avatarColor != profile.avatarColor
-        guard nameChanged || colorChanged else { return }
+        let photoChanged = hasSeededAvatarPath && avatarPath != profile.avatarPath
+        guard nameChanged || colorChanged || photoChanged else { return }
         nameSaveError = nil
         if nameChanged { profile.displayName = trimmed }
         if colorChanged { profile.avatarColor = avatarColor }
+        if photoChanged { profile.avatarPath = avatarPath }
         profile.updatedAt = .now
         // F2: mirrors `TripFormView`'s F6 do/catch — a failed write used to
         // still claim "Name updated" via a silent `try?`. Signed-out edits
@@ -564,7 +611,16 @@ struct SettingsView: View {
         let dto = profile.toDTO()
         let id = profile.id
         Task { await syncEngine?.enqueueUpsert(table: .profiles, rowId: id, tripId: nil, payload: dto) }
-        toast = nameChanged && colorChanged ? "Profile updated" : (nameChanged ? "Name updated" : "Avatar color updated")
+        let changedCount = [nameChanged, colorChanged, photoChanged].filter { $0 }.count
+        if changedCount > 1 {
+            toast = "Profile updated"
+        } else if nameChanged {
+            toast = "Name updated"
+        } else if colorChanged {
+            toast = "Avatar color updated"
+        } else {
+            toast = "Photo updated"
+        }
     }
 
     /// Apple 5.1.1(v) account deletion. Routes through the `delete-account`

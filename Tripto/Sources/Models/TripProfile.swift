@@ -13,6 +13,13 @@ final class TripProfile {
     var tripId: UUID
     var displayName: String
     var avatarColor: String
+    /// `trip_profiles.avatar_path` — see `Profile.avatarPath`'s doc comment
+    /// for the path-not-URL/nullable/additive reasoning, identical here.
+    /// Uploaded by whichever organizer is editing this profile (their own
+    /// linked one, or any no-account kid/grandparent's) — `AvatarStorage`'s
+    /// owner-folder path always keys off the *uploader's* `auth.uid()`, not
+    /// this row's (possibly absent, for a no-account profile) `linkedUserId`.
+    var avatarPath: String?
     var linkedUserId: UUID?
     var createdAt: Date
 
@@ -21,6 +28,7 @@ final class TripProfile {
         tripId: UUID,
         displayName: String,
         avatarColor: String,
+        avatarPath: String? = nil,
         linkedUserId: UUID?,
         createdAt: Date
     ) {
@@ -28,6 +36,7 @@ final class TripProfile {
         self.tripId = tripId
         self.displayName = displayName
         self.avatarColor = avatarColor
+        self.avatarPath = avatarPath
         self.linkedUserId = linkedUserId
         self.createdAt = createdAt
     }
@@ -43,6 +52,10 @@ struct TripProfileDTO: Codable, Sendable, Equatable {
     var tripId: UUID
     var displayName: String
     var avatarColor: String
+    /// See `TripProfile.avatarPath`'s doc comment; defaulted for the same
+    /// "absent server column / plain memberwise init" reasons as
+    /// `ProfileDTO.avatarPath`.
+    var avatarPath: String?
     var linkedUserId: UUID?
     var createdAt: Date
 }
@@ -54,6 +67,7 @@ extension TripProfile {
             tripId: dto.tripId,
             displayName: dto.displayName,
             avatarColor: dto.avatarColor,
+            avatarPath: dto.avatarPath,
             linkedUserId: dto.linkedUserId,
             createdAt: dto.createdAt
         )
@@ -63,6 +77,7 @@ extension TripProfile {
         tripId = dto.tripId
         displayName = dto.displayName
         avatarColor = dto.avatarColor
+        avatarPath = dto.avatarPath
         linkedUserId = dto.linkedUserId
         createdAt = dto.createdAt
     }
@@ -73,6 +88,7 @@ extension TripProfile {
             tripId: tripId,
             displayName: displayName,
             avatarColor: avatarColor,
+            avatarPath: avatarPath,
             linkedUserId: linkedUserId,
             createdAt: createdAt
         )

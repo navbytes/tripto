@@ -17,7 +17,11 @@ struct TripProfileFormSheet: View {
     }
 
     let mode: Mode
-    let onSave: (_ displayName: String, _ avatarColor: String) -> Void
+    /// P8a: widened to carry `avatarPath` alongside the existing pair —
+    /// still just values, the caller (`ShareTripView`) still owns every
+    /// SwiftData/sync write, this sheet still never touches
+    /// `modelContext`/`SyncEngine` itself.
+    let onSave: (_ displayName: String, _ avatarColor: String, _ avatarPath: String?) -> Void
     /// `nil` when adding (there's nothing to delete yet); non-nil in edit
     /// mode. Callers gate whether edit mode is even reachable to organizers
     /// only (`trip_profiles_update`/`_delete` RLS, confirmed live: organizer
@@ -25,8 +29,23 @@ struct TripProfileFormSheet: View {
     var onDelete: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    /// P8a: the only new environment dependency this sheet needs — read-only,
+    /// same lightweight ambient-environment reference every other form sheet
+    /// in the app already grabs (`SettingsView`, `TripView`, ...), not the
+    /// "SwiftData/sync write" this sheet's own doc comment is about. Needed
+    /// only to know whose owner-folder an uploaded photo goes under
+    /// (`AvatarStorage`'s own doc comment) — never to gate whether this
+    /// sheet itself is reachable.
+    @Environment(AuthManager.self) private var authManager
     @State private var displayName: String
     @State private var avatarColor: String
+    /// P8a: `TripProfile` (unlike `SettingsView`'s async-pulled `Profile`) is
+    /// already in hand synchronously in edit mode (`mode.edit(profile)`), so
+    /// this seeds directly here — no "seeded yet?" race/flag needed the way
+    /// `SettingsView.hasSeededAvatarPath` is for its own async-arriving
+    /// profile.
+    @State private var avatarPath: String?
+    @State private var toast: String?
     @State private var isPresentingDeleteConfirm = false
     /// UX audit finding 4: gates the "Discard changes?" confirmation on
     /// Cancel/swipe-dismiss — same guard `TripFormView`/`AddItemSheet`
@@ -34,15 +53,18 @@ struct TripProfileFormSheet: View {
     /// form sheets that had been skipping it.
     @State private var showDiscardConfirm = false
 
-    /// The name/color this sheet opened with, so `hasChanges` can tell an
-    /// untouched form from a dirty one — same role as
+    /// The name/color/photo this sheet opened with, so `hasChanges` can tell
+    /// an untouched form from a dirty one — same role as
     /// `TripFormView.initialValues`. In add mode the color starts at
     /// whatever random swatch the sheet opened with (below), not a fixed
     /// default, so accepting that random pick isn't itself "dirty."
     private let initialDisplayName: String
     private let initialAvatarColor: String
+    private let initialAvatarPath: String?
 
-    init(mode: Mode, onSave: @escaping (String, String) -> Void, onDelete: (() -> Void)? = nil) {
+    init(
+        mode: Mode, onSave: @escaping (String, String, String?) -> Void, onDelete: (() -> Void)? = nil
+    ) {
         self.mode = mode
         self.onSave = onSave
         self.onDelete = onDelete
@@ -51,13 +73,17 @@ struct TripProfileFormSheet: View {
             let randomColor = AvatarColorPicker.swatches.randomElement() ?? "sky"
             _displayName = State(initialValue: "")
             _avatarColor = State(initialValue: randomColor)
+            _avatarPath = State(initialValue: nil)
             initialDisplayName = ""
             initialAvatarColor = randomColor
+            initialAvatarPath = nil
         case .edit(let profile):
             _displayName = State(initialValue: profile.displayName)
             _avatarColor = State(initialValue: profile.avatarColor)
+            _avatarPath = State(initialValue: profile.avatarPath)
             initialDisplayName = profile.displayName
             initialAvatarColor = profile.avatarColor
+            initialAvatarPath = profile.avatarPath
         }
     }
 
@@ -69,9 +95,13 @@ struct TripProfileFormSheet: View {
     }
 
     /// UX audit finding 4: whether either field has moved from what the
-    /// sheet opened with.
+    /// sheet opened with. P8a: widened for `avatarPath` — a picked-then-
+    /// uploaded-but-not-yet-saved photo is discardable exactly like a typed-
+    /// but-not-saved name (the uploaded object itself is simply left as an
+    /// orphan, same v1 policy `AvatarStorage`'s doc comment already accepts
+    /// for a replaced photo).
     private var hasChanges: Bool {
-        displayName != initialDisplayName || avatarColor != initialAvatarColor
+        displayName != initialDisplayName || avatarColor != initialAvatarColor || avatarPath != initialAvatarPath
     }
 
     private func cancelTapped() {
@@ -89,24 +119,25 @@ struct TripProfileFormSheet: View {
                 Rectangle().fill(Palette.mist).frame(height: 1)
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
-                        HStack {
-                            Spacer(minLength: 0)
-                            Circle()
-                                .fill(AvatarColor.color(named: avatarColor))
-                                .frame(width: 64, height: 64)
-                                .overlay {
-                                    Text(initials)
-                                        .font(Typo.display(22))
-                                        .foregroundStyle(.white)
-                                }
-                            Spacer(minLength: 0)
-                        }
+                        // P8a: replaces the old decorative-only, centered
+                        // preview circle — same position (above Name), now
+                        // the one real photo-management row (plan D6:
+                        // "photo row above the existing AvatarColorPicker").
+                        // Left-aligned (its own trailing `Spacer` fills the
+                        // rest of the row for the Change/Remove buttons),
+                        // same layout `SettingsView`'s identical row uses,
+                        // rather than centered like the old plain circle —
+                        // there are real interactive buttons attached now,
+                        // not just a static preview. The uploader is always
+                        // the ACTING organizer editing this profile, not this
+                        // profile's own (possibly absent, for a no-account
+                        // kid/grandparent) `linkedUserId` — see
+                        // `AvatarStorage`'s doc comment.
+                        AvatarPhotoPicker(
+                            initial: initials, colorName: avatarColor, avatarPath: $avatarPath,
+                            uploaderUserId: authManager.userId, toast: $toast, diameter: 64
+                        )
                         .padding(.top, Spacing.sm)
-                        // Decorative live preview — the Name field and the
-                        // Color picker's own selection state below already
-                        // convey this; nothing here is information VoiceOver
-                        // needs on its own.
-                        .accessibilityHidden(true)
 
                         FormTextField(label: "Name", text: $displayName, placeholder: "Meera, Grandma\u{2026}")
 
@@ -150,6 +181,11 @@ struct TripProfileFormSheet: View {
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
         }
+        // P8a: reuses the app's one toast vocabulary for an upload failure
+        // (brief: "handle upload failure with the existing Toast
+        // vocabulary") — this sheet's own, same as every other screen that
+        // toasts (`Toast.swift`'s doc comment: "not a global center").
+        .toastOverlay($toast)
         .confirmationDialog(
             "Remove \(displayName.isEmpty ? "this person" : displayName) from the trip?",
             isPresented: $isPresentingDeleteConfirm,
@@ -202,7 +238,7 @@ struct TripProfileFormSheet: View {
 
     private var saveButton: some View {
         Button {
-            onSave(displayName.trimmingCharacters(in: .whitespacesAndNewlines), avatarColor)
+            onSave(displayName.trimmingCharacters(in: .whitespacesAndNewlines), avatarColor, avatarPath)
             dismiss()
         } label: {
             Text(isEditing ? "Save changes" : "Add to trip")

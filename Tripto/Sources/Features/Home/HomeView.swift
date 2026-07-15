@@ -1296,7 +1296,10 @@ struct HomeView: View {
                 AvatarStack.Person(
                     id: profile.id,
                     initial: initials(from: profile.displayName),
-                    colorName: profile.avatarColor
+                    colorName: profile.avatarColor,
+                    // P8a: threads the photo through — `AvatarStack` itself
+                    // is the one place it actually renders.
+                    avatarPath: profile.avatarPath
                 )
             }
     }

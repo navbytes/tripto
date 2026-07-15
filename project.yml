@@ -31,6 +31,15 @@ packages:
   Supabase:
     url: https://github.com/supabase/supabase-swift
     from: 2.50.0
+  # P8a (avatar photos, `.claude/company/ux-redesign/handoffs/P8-images-plan.md`
+  # D6): the project's second SPM package ever, client-approved (Q1) —
+  # `LazyImage` + `DataCache` gives the offline-cache behavior `AsyncImage`/
+  # `URLCache` can't. `Nuke`/`NukeUI` are two of Nuke's four library
+  # products (its README: "Nuke (core), NukeUI, NukeExtensions, NukeVideo")
+  # — only these two are needed (pipeline/cache config + `LazyImage`).
+  Nuke:
+    url: https://github.com/kean/Nuke
+    from: 13.0.0
 
 targets:
   Tripto:
@@ -48,6 +57,10 @@ targets:
     dependencies:
       - package: Supabase
         product: Supabase
+      - package: Nuke
+        product: Nuke
+      - package: Nuke
+        product: NukeUI
       # PLAN-signature-layer.md §D6: embeds the widget extension into the
       # app bundle. `embed: true` is the default here (parent is `type:
       # application`) but written explicitly anyway (research §5) — a

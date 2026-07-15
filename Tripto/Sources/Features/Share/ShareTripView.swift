@@ -144,14 +144,16 @@ struct ShareTripView: View {
             .presentationDetents([.medium])
         }
         .sheet(isPresented: $isPresentingAddProfile) {
-            TripProfileFormSheet(mode: .add) { name, color in
-                addProfile(displayName: name, avatarColor: color)
+            TripProfileFormSheet(mode: .add) { name, color, avatarPath in
+                addProfile(displayName: name, avatarColor: color, avatarPath: avatarPath)
             }
         }
         .sheet(item: $editingProfile) { profile in
             TripProfileFormSheet(
                 mode: .edit(profile),
-                onSave: { name, color in updateProfile(profile, displayName: name, avatarColor: color) },
+                onSave: { name, color, avatarPath in
+                    updateProfile(profile, displayName: name, avatarColor: color, avatarPath: avatarPath)
+                },
                 onDelete: { deleteProfile(profile) }
             )
         }
@@ -1263,11 +1265,11 @@ struct ShareTripView: View {
 
     // MARK: - Non-app profiles (M4 §2/§5.3)
 
-    private func addProfile(displayName: String, avatarColor: String) {
+    private func addProfile(displayName: String, avatarColor: String, avatarPath: String?) {
         guard !displayName.isEmpty else { return }
         let profile = TripProfile(
             id: UUID(), tripId: tripId, displayName: displayName, avatarColor: avatarColor,
-            linkedUserId: nil, createdAt: .now
+            avatarPath: avatarPath, linkedUserId: nil, createdAt: .now
         )
         modelContext.insert(profile)
         try? modelContext.save()
@@ -1277,10 +1279,11 @@ struct ShareTripView: View {
         toast = "\(displayName) added"
     }
 
-    private func updateProfile(_ profile: TripProfile, displayName: String, avatarColor: String) {
+    private func updateProfile(_ profile: TripProfile, displayName: String, avatarColor: String, avatarPath: String?) {
         guard !displayName.isEmpty else { return }
         profile.displayName = displayName
         profile.avatarColor = avatarColor
+        profile.avatarPath = avatarPath
         try? modelContext.save()
         let dto = profile.toDTO()
         let id = profile.id

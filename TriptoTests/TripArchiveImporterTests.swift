@@ -280,4 +280,26 @@ final class TripArchiveImporterTests: XCTestCase {
         XCTAssertEqual(report.tripSkips.first?.reason, .noStartDate)
         XCTAssertTrue(try context.fetch(FetchDescriptor<Trip>()).isEmpty)
     }
+
+    /// P8a (avatar photos): the archive format has no per-traveller photo
+    /// field (`docs/IMPORT_FORMAT.md` §2's `travellers` is a bare
+    /// `[string]`, and stays that way — a storage path is meaningless
+    /// outside this project, so it was never a candidate for the portable
+    /// migration format). This pins the additive, intentional result: an
+    /// imported traveller always gets `avatarPath == nil`, same as any other
+    /// brand-new `TripProfile` with no photo, never a stale/foreign path.
+    func testImportedTravellerProfileHasNoAvatarPath() async throws {
+        let context = makeContext()
+        let userId = UUID()
+        let trip = makeTrip(id: "photo-trip", travellers: ["Asha"])
+        let data = try TripArchiveExporter.encode(makeDocument(trips: [trip]))
+
+        let outcome = await TripArchiveImporter.importArchive(data: data, modelContext: context, syncEngine: nil, userId: userId)
+        guard case .success = outcome else {
+            return XCTFail("expected success, got \(outcome)")
+        }
+
+        let profile = try XCTUnwrap(try context.fetch(FetchDescriptor<TripProfile>()).first)
+        XCTAssertNil(profile.avatarPath)
+    }
 }
