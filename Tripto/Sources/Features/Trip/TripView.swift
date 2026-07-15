@@ -713,7 +713,7 @@ struct TripView: View {
             // Finding 5 (§6.5 44pt floor): applied after the pill's own
             // 32pt frame so the compact visual stays exactly as-is — this
             // only grows the invisible tappable band around it, same
-            // recipe as `AddItemFormSections.nextDayChip`.
+            // recipe as `AddItemFormSections.assigneeChipToggle`.
             .frame(minHeight: 44)
             .contentShape(Capsule())
         }

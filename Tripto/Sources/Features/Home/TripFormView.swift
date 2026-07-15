@@ -81,7 +81,7 @@ struct TripFormView: View {
     /// P4.4: `true` once the user has tapped Shuffle at least once — an
     /// explicit choice, so later `countryCode` edits stop live-reseeding the
     /// cover out from under them. Same "nil/false auto, explicit override
-    /// wins" shape as `AddItemSheet.arrivalDayOffsetOverride`. Stays `false`
+    /// wins" shape as `AddItemSheet.arrivesTime`. Stays `false`
     /// for the whole life of an `.edit` sheet (the `.onChange` below is
     /// gated on `!isEditing` too, so an existing trip's stored cover is
     /// never silently re-seeded either way).
