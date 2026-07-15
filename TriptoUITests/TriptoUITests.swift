@@ -213,18 +213,21 @@ final class TriptoUITests: XCTestCase {
         XCTAssertEqual(row.value as? String, "Packed", "tapping the row should check it off")
     }
 
-    // MARK: - Paste-to-import entry point (ShareTripView)
+    // MARK: - Paste-to-import entry point (AddItemSheet, P3.5 + P4.2)
     //
-    // A second, deliberately-kept-separate entry point beside
-    // `TripView.pasteImportPill` below: `ShareTripView`'s "Or paste text
-    // instead" button next to the email-import address card. Not one of
-    // the three tabs the TI-3 consistency pass targeted (Share is its own
-    // screen), so it kept its own trigger — reachable on the
-    // already-seeded (non-empty) demo trip via `-uitestOpenShare`.
-    func testPasteImportEntryPointFromShare() {
-        let app = launch(["-uitestOpenShare"])
-        let pasteButton = app.buttons["Or paste text instead"]
-        XCTAssertTrue(pasteButton.waitForExistence(timeout: 30), "Share screen / paste entry point never appeared")
+    // Used to cover `ShareTripView`'s "Or paste text instead" button next to
+    // its email-import address card. Phase 4 (docs/UX_REDESIGN_ROADMAP.md
+    // P4.2) moved the whole "get data in" cluster (paste OR forward-by-
+    // email) off Share entirely, onto the Add sheet's own `pasteFirstBanner`
+    // (P3.5) — retargeted here rather than deleted, so this suite keeps a
+    // second, deliberately-kept-separate entry point covered besides
+    // `TripView.pasteImportPill` below. `pasteFirstBanner` matches by
+    // `accessibilityIdentifier`, not visible text — `.accessibilityElement(
+    // children: .combine)` concatenates its title/subtitle into one label.
+    func testPasteImportEntryPointFromAddSheet() {
+        let app = launch(["-uitestOpenAdd"])
+        let pasteButton = app.buttons["pasteFirstBanner"]
+        XCTAssertTrue(pasteButton.waitForExistence(timeout: 30), "Add sheet's paste-banner entry point never appeared")
         pasteButton.tap()
 
         XCTAssertTrue(
@@ -393,6 +396,174 @@ final class TriptoUITests: XCTestCase {
         app.keyboards.buttons["return"].tap()
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "add-item-flight-disclosure", of: app)
+    }
+
+    // MARK: - Double-tap "Start from a booking email instead": exactly one
+    // trip, not one per tap
+    //
+    // P4.4 hardening: unlike `AddItemSheet.save()` (fix-round D2, see
+    // `testDoubleTapSaveCreatesAtMostOneFlightItem` above), `TripFormView
+    // .save()`'s create branch has no `isSaving`-style reentrancy guard —
+    // `canSubmit`/`.disabled(!canSubmit)` only reflects whether the form
+    // *fields* are valid, not whether a save is already mid-flight, so
+    // nothing here stops a second synchronous `save()` between the first
+    // tap's SwiftData insert and the sheet-chain transition that eventually
+    // makes the button unhittable. This pins the desired behavior — a real
+    // regression to fix in `TripFormView.save()`, not this test, if it fails.
+
+    func testDoubleTapStartFromBookingEmailCreatesExactlyOneTrip() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty"]
+        app.launch()
+        // Not `app.staticTexts["Lisbon"]`: `HomeInitialTab.resolve` can open
+        // Home on either Upcoming or Past depending on what's already in the
+        // (cross-launch-persistent, `-simulateOffline`) local store — e.g. a
+        // previous run of this very test leaving an Upcoming trip behind —
+        // so the seeded (Past-dated) Lisbon trip isn't a reliable "Home has
+        // loaded" signal here. The Upcoming/Past `SegmentedControl` is fixed
+        // chrome above the trip `List` (unlike `planNewTripRow`, the list's
+        // own last row — pushed off-screen, and so not yet instantiated by
+        // SwiftUI's lazy `List`, once enough trips accumulate across
+        // repeated local runs of this same test), so it renders regardless
+        // of scroll position or which tab is showing.
+        XCTAssertTrue(app.buttons["Upcoming"].waitForExistence(timeout: 30), "Home never loaded")
+
+        // `planNewTripRow` is the list's own last row — scroll to it rather
+        // than assume it's already on-screen, same bounded-swipe technique
+        // `testPackingAddAndCheckOff` uses for the same reason.
+        let planNewTripButton = app.buttons["Plan a new trip"]
+        for _ in 0..<15 where !planNewTripButton.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(planNewTripButton.waitForExistence(timeout: 10), "'Plan a new trip' row never scrolled into view")
+        planNewTripButton.tap()
+        let titleField = app.textFields["Lisbon"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 10), "New-trip sheet never appeared")
+        titleField.tap()
+        // Unique per run — same reasoning as `testDoubleTapSaveCreatesAtMostOneFlightItem`'s
+        // `flightNo`/`testPackingAddAndCheckOff`'s `label`.
+        let uniqueTitle = "ZZ Booking Chain " + UUID().uuidString.prefix(8)
+        titleField.typeText(uniqueTitle)
+        // `tripNameField`'s `.submitLabel(.done)` (unlike `AddItemSheet`'s
+        // plain-return fields the other double-tap test above dismisses)
+        // renders a "Done" key, not "return".
+        app.keyboards.buttons["Done"].tap()
+
+        let bookingEmailButton = app.buttons["Start from a booking email instead"]
+        XCTAssertTrue(bookingEmailButton.exists)
+        bookingEmailButton.doubleTap()
+
+        // Whatever got created is already durably saved to the local
+        // SwiftData store the instant each `save()` call runs (synchronous,
+        // before any sheet transition) — terminating and relaunching reads
+        // back that same on-disk state without needing to navigate out of
+        // however many chained sheets the (possibly doubled) saves left
+        // presented, and sidesteps `TripFormView` and `AddItemSheet` both
+        // rendering their own same-labeled "Cancel" `SheetHeader` button
+        // simultaneously in the accessibility tree (ambiguous to query).
+        let pasteBanner = app.buttons["pasteFirstBanner"]
+        XCTAssertTrue(pasteBanner.waitForExistence(timeout: 10), "chained AddItemSheet never appeared")
+        app.terminate()
+        // Lets the simulator finish tearing down the old process before
+        // asking for a new one — this machine's `xcodebuild test` runs have
+        // shown general launch/relaunch slowness independent of this test
+        // (matches the P4 handoff's own noted pre-existing flakiness).
+        Thread.sleep(forTimeInterval: 1.0)
+        app.launch()
+        // Same fixed-chrome reasoning as the first wait above (not
+        // `Plan a new trip`/`Lisbon`) — a generous 60s timeout for the same
+        // reason as the settle sleep above.
+        XCTAssertTrue(app.buttons["Upcoming"].waitForExistence(timeout: 60), "Home never reappeared after relaunch")
+        // Explicitly select Upcoming — where the newly created trip(s)
+        // actually live, being dated today — rather than depending on
+        // `HomeInitialTab.resolve` already having landed there.
+        app.buttons["Upcoming"].tap()
+
+        // `TripCard` is `.accessibilityElement(children: .ignore)` with one
+        // combined label starting with the title (`HomeView.swift`'s
+        // `tripList`, `TripCard.accessibilityLabel`) — same CONTAINS-on-
+        // `.buttons` technique as the flight double-tap test above, for the
+        // same reason (the card is wrapped in a `Button`, not independently
+        // queryable as a `.staticText`). Scrolled for, same reason as
+        // `planNewTripButton` above: repeated local runs of this same test
+        // accumulate trips in the (cross-launch-persistent) local store, and
+        // this one might not be the newest (hence not the first) row.
+        let matchQuery = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", uniqueTitle))
+        for _ in 0..<15 where matchQuery.count == 0 {
+            app.swipeUp()
+        }
+        XCTAssertEqual(
+            matchQuery.count, 1,
+            "double-tapping \u{2018}Start from a booking email instead\u{2019} should create exactly one trip, not one per tap"
+        )
+    }
+
+    // MARK: - P4 milestone screenshots (docs/UX_REDESIGN_ROADMAP.md Phase 4:
+    // Share reorder, Settings data-section polish, New-trip cover) — same
+    // "config-agnostic test, appearance/Dynamic Type flipped from OUTSIDE
+    // between separate invocations" recipe as `testCaptureItineraryScreen`
+    // above (see the Tester report for the exact `xcrun simctl ui`
+    // commands). Only Share needs all three variants (default light/dark +
+    // AX3); Settings and New-trip only need one capture each per the brief.
+
+    /// Reaches `ShareTripView` via `HomeView`'s existing `-uitestOpenShare`
+    /// autopilot hook (no new hook added) — chained onto `-uitestOpenFirstTrip`
+    /// via the shared `launch(_:)` helper, since that hook requires the trip
+    /// screen already pushed (`path.count == 1`).
+    ///
+    /// Scrolls down to a fixed fraction of the screen — at the default type
+    /// size (both the light and dark captures) this comfortably fits the
+    /// tail of the people list (role chips included), the invite section,
+    /// the public-link Toggle row, and "Forward booking emails" all
+    /// together. At AX3 specifically, the same content is too tall for any
+    /// one scroll position to fit all of it — this lands on the public-link
+    /// Toggle and "Forward booking emails" fully legible (with the invite
+    /// section above them), trading off the people list/role chip, which
+    /// scrolls out of frame first; see the Tester report for the exact
+    /// tradeoff and the other positions tried.
+    func testCaptureShareScreen() {
+        let app = launch(["-uitestOpenShare"])
+        XCTAssertTrue(app.navigationBars["Share this trip"].waitForExistence(timeout: 30), "Share screen never appeared")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "share", of: app)
+    }
+
+    /// `-uitestOpenSettings` (`HomeView`'s existing hook) requires an empty
+    /// nav path, so this launches without `-uitestOpenFirstTrip` rather than
+    /// through the shared `launch(_:)` helper.
+    func testCaptureSettingsScreen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestOpenSettings"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30), "Settings screen never appeared")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "settings", of: app)
+    }
+
+    /// No autopilot hook exists for the New-trip sheet (nor is one needed —
+    /// `planNewTripRow`'s "Plan a new trip" is a plain, always-reachable
+    /// button on a freshly-seeded Home). Stays on Home rather than the
+    /// shared `launch(_:)` helper's `-uitestOpenFirstTrip`.
+    func testCaptureNewTripScreen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 30), "Home never showed the seeded trip")
+        app.buttons["Plan a new trip"].tap()
+        let titleField = app.textFields["Lisbon"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 10), "New-trip sheet never appeared")
+        // The sheet auto-focuses this field ~0.5s after appearing (`.task`'s
+        // create-mode-only delayed focus) — dismiss the keyboard it raises
+        // so the cover/shuffle section isn't partly covered by it.
+        if app.keyboards.buttons["Done"].waitForExistence(timeout: 2) {
+            app.keyboards.buttons["Done"].tap()
+        }
+        app.swipeUp()
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "newtrip", of: app)
     }
 
     private func attachScreenshot(named name: String, of app: XCUIApplication) {

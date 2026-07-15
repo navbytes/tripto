@@ -167,6 +167,14 @@ struct AddItemSheet: View {
     /// Phase 3 (P3.5): `pasteFirstBanner`'s own sub-sheet — opens the exact
     /// same `PasteImportSheet` every other entry point uses, untouched.
     @State private var isPresentingPasteImport = false
+    /// Phase 4 (P4.2, docs/UX_REDESIGN_ROADMAP.md): the email-import address
+    /// card, relocated here from `ShareTripView` — "getting data in" (paste
+    /// OR forward-by-email) is one cluster now, next to `pasteFirstBanner`,
+    /// not split across screens. Same `LoadState`/consent shape every other
+    /// call site (`ItineraryTabView.importTeaser`, which stays put) already
+    /// uses — see `importAddressCard`'s doc comment.
+    @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
+    @State private var hasFetchedImportAddress = false
     /// Finding 3: gates the "Discard changes?" confirmation on cancel/swipe-
     /// dismiss, same as `TripFormView`.
     @State private var showDiscardConfirm = false
@@ -499,12 +507,18 @@ struct AddItemSheet: View {
                             unverifiedSenderCallout
                         }
 
-                        // Phase 3 (P3.5): paste-first, then the type rail —
-                        // both add-mode only (an edit already has its own
-                        // booking's data; re-pasting would create a second,
-                        // unrelated item, not fill this one in).
+                        // Phase 3 (P3.5)/Phase 4 (P4.2): paste-first, then
+                        // the email-import card, then the type rail — all
+                        // add-mode only (an edit already has its own
+                        // booking's data; re-pasting/re-importing would
+                        // create a second, unrelated item, not fill this one
+                        // in). Paste + forward-by-email is one "get data in"
+                        // cluster now (P4.2 moved the card here from
+                        // `ShareTripView` — getting data in \u{2260} getting
+                        // people in).
                         if !isEditing {
                             pasteFirstBanner
+                            importAddressCard
                             categorySelector
                         }
 
@@ -533,6 +547,11 @@ struct AddItemSheet: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .task { seedAssigneesIfNeeded() }
+        // P4.2: `myRole` (below) is `@Query`-derived and can still be empty
+        // on first render (mirrors `ShareTripView`'s identical `.task(id:
+        // myRole)` — see that view's matching doc comment for why a plain
+        // one-shot `.task` isn't enough here).
+        .task(id: myRole) { await fetchImportAddressIfNeeded() }
         .onAppear {
             #if DEBUG
             // Verify-drill autopilot: preselect the Transport category so the
@@ -718,6 +737,68 @@ struct AddItemSheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        // `.combine` concatenates the title/subtitle `Text`s into one
+        // label, so matching by (partial) visible text is unreliable here —
+        // same reasoning `categoryTile`'s own `accessibilityIdentifier`
+        // doc comment already gives. `TriptoUITests
+        // .testPasteImportEntryPointFromAddSheet` is the one reader.
+        .accessibilityIdentifier("pasteFirstBanner")
+    }
+
+    /// Phase 4 (P4.2, docs/UX_REDESIGN_ROADMAP.md): the email-import address
+    /// card, moved here from `ShareTripView` — getting data in (paste or
+    /// forward-by-email) is this sheet's job now, not the people-and-links
+    /// Share screen's (`ItineraryTabView`'s own copy stays put, unaffected).
+    /// Same consent gating and AI-disclosure copy as before, moved verbatim
+    /// — `ImportAddressCard` itself is untouched. Gated on
+    /// `ItemPermissions.canAdd`, same reasoning as `ShareTripView.importCard`
+    /// had: `get_or_create_trip_import_address` requires trip membership, so
+    /// fetching for a viewer/signed-out visitor would just fail/spin behind
+    /// a sheet they can't normally reach anyway.
+    @ViewBuilder
+    private var importAddressCard: some View {
+        if ItemPermissions.canAdd(role: myRole) {
+            ImportAddressCard(state: importLoadState) { address in
+                onToast(ClipboardFeedback.copy(address, label: "Import address"))
+            } onRetry: {
+                retryImportAddressFetch()
+            } onConsentGranted: {
+                grantEmailImportConsentAndFetch()
+            }
+        }
+    }
+
+    /// Same one-shot-per-visit shape as `ShareTripView.fetchImportAddressIfNeeded()`
+    /// (identical reasoning: `myRole` is `@Query`-derived and can still be
+    /// empty on first render, so `.task(id: myRole)` above re-invokes this on
+    /// every change rather than firing once; `hasFetchedImportAddress` is
+    /// only ever set `true` once a fetch has actually been attempted).
+    private func fetchImportAddressIfNeeded() async {
+        guard ItemPermissions.canAdd(role: myRole), !hasFetchedImportAddress else { return }
+        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
+        hasFetchedImportAddress = true
+        await fetchImportAddress()
+    }
+
+    /// The actual RPC call, split out so `retryImportAddressFetch()` can
+    /// re-run it without re-triggering `hasFetchedImportAddress`'s guard.
+    private func fetchImportAddress() async {
+        do {
+            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: tripId))
+        } catch {
+            importLoadState = .failed
+        }
+    }
+
+    private func retryImportAddressFetch() {
+        importLoadState = .loading
+        Task { await fetchImportAddress() }
+    }
+
+    private func grantEmailImportConsentAndFetch() {
+        EmailImportConsent.grant()
+        hasFetchedImportAddress = true
+        retryImportAddressFetch()
     }
 
     /// Findings 2 & 7: the CTA-adjacent guidance line, mirroring

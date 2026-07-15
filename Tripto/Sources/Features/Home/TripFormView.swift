@@ -62,6 +62,14 @@ struct TripFormView: View {
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// P4.4 (docs/UX_REDESIGN_ROADMAP.md): this sheet had no toast surface
+    /// of its own before — needed now that "Start from a booking email
+    /// instead" can chain into `AddItemSheet`, which reports back through an
+    /// `onToast` closure the way every other host of that sheet already
+    /// wires one.
+    @State private var toast: String?
 
     @State private var title: String
     @State private var destination: String
@@ -70,6 +78,14 @@ struct TripFormView: View {
     @State private var endDate: Date
     @State private var tripType: TripType
     @State private var coverGradientKey: String
+    /// P4.4: `true` once the user has tapped Shuffle at least once — an
+    /// explicit choice, so later `countryCode` edits stop live-reseeding the
+    /// cover out from under them. Same "nil/false auto, explicit override
+    /// wins" shape as `AddItemSheet.arrivalDayOffsetOverride`. Stays `false`
+    /// for the whole life of an `.edit` sheet (the `.onChange` below is
+    /// gated on `!isEditing` too, so an existing trip's stored cover is
+    /// never silently re-seeded either way).
+    @State private var hasManuallyShuffledCover = false
 
     /// F6: surfaced above the CTA when `modelContext.save()` throws, instead
     /// of the old silent `try?` — the save simply stops, nothing is
@@ -115,6 +131,31 @@ struct TripFormView: View {
     /// UX audit finding 8: gates the "Delete trip" confirmation — same
     /// dialog copy Home's own swipe/context-menu delete uses.
     @State private var isPresentingDeleteConfirm = false
+    /// Fix-round D4: `save()`'s create branch had no reentrancy guard, the
+    /// same hole P3 fixed in `AddItemSheet.save()` (`isSaving`) — a fast
+    /// double-tap (of either the "Create trip" CTA or, worse, "Start from a
+    /// booking email instead") could fire a second synchronous `save()`
+    /// before the first tap's insert/dismiss (or sheet-chain transition,
+    /// for the booking-email path) makes the button unhittable. Same shape
+    /// as `AddItemSheet.isSaving`: set synchronously as `save()`'s first
+    /// statement, released on every early return, guards both branches.
+    @State private var isSaving = false
+    /// P4.4: set right before `save()` by `bookingEmailSecondaryAction` —
+    /// `save()`'s create branch reads this to also populate
+    /// `tripForBookingImport` instead of (not in addition to) its normal
+    /// immediate `dismiss()`. Create-mode only; edit-mode never sets it.
+    /// Fix-round D3: reset back to `false` on every one of `save()`'s
+    /// create-branch early returns (`.signedOut`, `.writeFailed`) — left
+    /// `true`, a signed-out or failed attempt would make a *later*, distinct
+    /// plain "Create trip" tap wrongly chain into `AddItemSheet` too.
+    @State private var isCreatingForBookingImport = false
+    /// P4.4: non-nil right after "Start from a booking email instead"
+    /// successfully creates the trip — presents `AddItemSheet` (the exact
+    /// P4.2 paste-or-forward cluster) for it. `onDismiss` on that sheet is
+    /// this form's own cue to finally dismiss itself (see `body`), so the
+    /// user lands back on Home once they're done with the booking, not on a
+    /// technically-already-saved "New trip" sheet still sitting underneath.
+    @State private var tripForBookingImport: Trip?
 
     /// UX audit finding 4: set whenever `startDate`'s `.onChange` silently
     /// snapped `endDate` forward to keep the range valid, so a caption can
@@ -138,6 +179,12 @@ struct TripFormView: View {
         case title
     }
     @FocusState private var focusedField: FocusField?
+
+    /// P4.4 (docs/UX_REDESIGN_ROADMAP.md): the cover preview's Shuffle
+    /// button — sized to the 44pt floor at the base Dynamic Type size
+    /// (unlike the mockup's 32pt icon button) and scaling up from there.
+    @ScaledMetric(relativeTo: .body) private var shuffleButtonSide: CGFloat = 44
+    @ScaledMetric(relativeTo: .body) private var shuffleIconSize: CGFloat = 16
 
     /// The three tokens `CoverGradient` defines (`"default"` is just an
     /// alias for `dusk`, not a fourth option) — `dusk` is pre-selected for
@@ -286,6 +333,7 @@ struct TripFormView: View {
                         tripTypeSection
                         coverSection
                         ctaSection
+                        bookingEmailSecondaryAction
                         // UX audit finding 8: edit-mode only, see
                         // `deleteSection`'s doc comment.
                         if isEditing {
@@ -298,6 +346,18 @@ struct TripFormView: View {
             }
             .background(Palette.paper)
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .toastOverlay($toast)
+        // P4.4: "Start from a booking email instead" — `save()`'s create
+        // branch populates `tripForBookingImport` instead of dismissing (see
+        // that property's doc comment); `onDismiss` here is what actually
+        // closes this form once the chained `AddItemSheet` is done.
+        .sheet(item: $tripForBookingImport, onDismiss: { dismiss() }) { trip in
+            AddItemSheet(
+                tripId: trip.id, tripTitle: trip.title, editing: nil,
+                tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy,
+                onToast: { message in toast = message }
+            )
         }
         .background(
             // Finding 5: surfaces the same "Discard changes?" dialog Cancel
@@ -330,6 +390,14 @@ struct TripFormView: View {
             if saveError?.isClearedByEditing == true {
                 saveError = nil
             }
+        }
+        // P4.4: live-reseeds the cover preview as the only field that can
+        // actually drive it changes — create-mode only, and only until the
+        // user has taken an explicit Shuffle turn (see
+        // `hasManuallyShuffledCover`'s doc comment).
+        .onChange(of: countryCode) { _, newValue in
+            guard !isEditing, !hasManuallyShuffledCover else { return }
+            coverGradientKey = Self.seededGradientKey(countryCode: newValue, destination: destination)
         }
         // Finding 4: only error-toned CTA guidance is announced — see
         // `ctaGuidance`'s doc comment for why the advisory blank-title copy
@@ -456,22 +524,51 @@ struct TripFormView: View {
         }
     }
 
+    /// P4.4 (docs/UX_REDESIGN_ROADMAP.md): replaces the three swatch circles
+    /// with one destination-seeded preview (reusing `CoverGradient` — the
+    /// same three tokens `TripCard` itself renders covers from, no new color
+    /// system) plus a Shuffle button. `coverGradientKey` still drives it —
+    /// only this section's *control* changed, not the stored value's shape.
     private var coverSection: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             sectionHeading("Cover")
-            HStack(spacing: Spacing.md) {
-                ForEach(Self.gradientOptions, id: \.self) { key in
-                    gradientSwatch(key)
-                }
-                Spacer()
+            ZStack(alignment: .topTrailing) {
+                CoverGradient.from(key: coverGradientKey)
+                    .frame(height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: Radii.cover, style: .continuous))
+                    // Decorative swatch — `shuffleButton`'s own label speaks
+                    // for this whole preview.
+                    .accessibilityHidden(true)
+                shuffleButton
+                    .padding(Spacing.sm)
             }
             .padding(.vertical, Spacing.xs)
-            // UX audit cycle 2 finding 4: every other section already has a
-            // helper line under its control — Cover was the one section
-            // missing it.
-            Text("Sets the cover on your trip card.")
+            Text("Sets the cover on your trip card. Tap shuffle for a different one.")
                 .helperTextStyle()
         }
+    }
+
+    private var shuffleButton: some View {
+        Button {
+            withAnimation(Motion.m(.snappy, reduceMotion: reduceMotion)) {
+                hasManuallyShuffledCover = true
+                coverGradientKey = Self.shuffledGradientKey(current: coverGradientKey)
+            }
+        } label: {
+            Image(systemName: "shuffle")
+                .font(.system(size: shuffleIconSize, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: shuffleButtonSide, height: shuffleButtonSide)
+                // `Palette.coverPillFill` — the same black-38% fill
+                // `TripCard`'s own glass pills use over a cover gradient,
+                // already measured ~5.5:1–16:1 for white across all three
+                // gradients' lightest stops (`PaletteExtras.coverPillFill`'s
+                // doc comment), reused rather than a new opacity value.
+                .background(Palette.coverPillFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Shuffle cover")
+        .accessibilityHint("Picks a different cover gradient")
     }
 
     private var ctaSection: some View {
@@ -518,7 +615,43 @@ struct TripFormView: View {
                     .shadow(color: canSubmit ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
-            .disabled(!canSubmit)
+            .disabled(!canSubmit || isSaving)
+        }
+    }
+
+    /// P4.4 (docs/UX_REDESIGN_ROADMAP.md): create-mode only — an edit sheet's
+    /// trip already exists, so there's nothing left to "start from". Reuses
+    /// (doesn't duplicate) the exact P4.2 paste-or-forward surface: tapping
+    /// this runs the ordinary, validation-gated `save()` (same `canSubmit`
+    /// gate as "Create trip") with `isCreatingForBookingImport` set, which
+    /// redirects `save()`'s usual immediate `dismiss()` into presenting
+    /// `AddItemSheet` for the just-created trip instead (see
+    /// `tripForBookingImport`'s doc comment).
+    @ViewBuilder
+    private var bookingEmailSecondaryAction: some View {
+        if !isEditing {
+            Button {
+                isCreatingForBookingImport = true
+                save()
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "sparkles")
+                        .accessibilityHidden(true)
+                    Text("Start from a booking email instead")
+                        .font(Typo.body(weight: .semibold))
+                }
+                .foregroundStyle(canSubmit ? Palette.ink : Palette.slate)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.md)
+                .contentShape(RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                        .stroke(Palette.mist, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSubmit || isSaving)
+            .padding(.top, Spacing.xs)
         }
     }
 
@@ -611,23 +744,34 @@ struct TripFormView: View {
         canonicalGradientKey(current) != canonicalGradientKey(initial)
     }
 
-    private func gradientSwatch(_ key: String) -> some View {
-        let isSelected = Self.canonicalGradientKey(coverGradientKey) == key
-        return Button {
-            coverGradientKey = key
-        } label: {
-            CoverGradient.from(key: key)
-                .frame(width: 44, height: 44)
-                .clipShape(Circle())
-                .overlay {
-                    Circle()
-                        .stroke(Palette.ink, lineWidth: isSelected ? 3 : 0)
-                        .padding(-3)
-                }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(key.capitalized) gradient")
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    /// P4.4: the cover preview's destination-seeded default. Deliberately
+    /// NOT `String.hashValue`/`Hashable.hash(into:)` — Swift's `Hasher` is
+    /// randomly re-seeded every process launch (hash-flooding protection),
+    /// so the same destination would render a different cover every cold
+    /// start. This is a plain deterministic byte-sum checksum instead,
+    /// indexed into the same three keys `gradientOptions` already exposes —
+    /// no new color system. Blank input (a brand-new, untouched create
+    /// sheet — `destination` has no visible field to type into any more,
+    /// see the `FocusField` doc comment above, but a `Prefill`/duplicated
+    /// trip can still carry one) keeps today's "dusk" default.
+    static func seededGradientKey(countryCode: String, destination: String) -> String {
+        let seed = (countryCode + destination).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !seed.isEmpty else { return "dusk" }
+        let checksum = seed.utf8.reduce(0) { $0 &+ Int($1) }
+        return gradientOptions[checksum % gradientOptions.count]
+    }
+
+    /// The Shuffle button's re-roll — cycles to the next of the three
+    /// options rather than a true random pick, so it's always visibly
+    /// different from the current one (a random pick can repeat the same
+    /// gradient back to back, reading as "the button did nothing") and stays
+    /// deterministic for tests. `canonicalGradientKey` first, so shuffling
+    /// from an unknown/legacy key (e.g. `"default"`) still steps from a real
+    /// position in `gradientOptions`.
+    static func shuffledGradientKey(current: String) -> String {
+        let currentIndex = gradientOptions.firstIndex(of: canonicalGradientKey(current)) ?? 0
+        let nextIndex = (currentIndex + 1) % gradientOptions.count
+        return gradientOptions[nextIndex]
     }
 
     // MARK: - Actions
@@ -641,7 +785,8 @@ struct TripFormView: View {
     }
 
     private func save() {
-        guard isValid else { return }
+        guard isValid, !isSaving else { return }
+        isSaving = true
         saveError = nil
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         // Whitespace-only pasted destinations shouldn't persist as visible
@@ -654,6 +799,8 @@ struct TripFormView: View {
         case .create:
             guard let userId = authManager.userId else {
                 saveError = .signedOut
+                isSaving = false
+                isCreatingForBookingImport = false
                 return
             }
             let trip = Trip(
@@ -687,12 +834,20 @@ struct TripFormView: View {
                 try modelContext.save()
             } catch {
                 saveError = .writeFailed
+                isSaving = false
+                isCreatingForBookingImport = false
                 return
             }
             let dto = trip.toDTO()
             let tripId = trip.id
             Task { await syncEngine?.enqueueUpsert(table: .trips, rowId: tripId, tripId: tripId, payload: dto) }
             onSaved?(trip, .saved)
+            // P4.4: redirects the trailing `dismiss()` below into presenting
+            // `AddItemSheet` for this trip instead — see
+            // `tripForBookingImport`'s doc comment.
+            if isCreatingForBookingImport {
+                tripForBookingImport = trip
+            }
 
         case .edit(let trip):
             trip.title = trimmedTitle
@@ -708,6 +863,7 @@ struct TripFormView: View {
                 try modelContext.save()
             } catch {
                 saveError = .writeFailed
+                isSaving = false
                 return
             }
             let dto = trip.toDTO()
@@ -723,7 +879,19 @@ struct TripFormView: View {
         }
 
         didSaveSuccessfully.toggle()
-        dismiss()
+        // P4.4: `tripForBookingImport` only ever gets set on the
+        // `.create`+`isCreatingForBookingImport` path above — every other
+        // save (including every `.edit`) dismisses immediately, unchanged.
+        if tripForBookingImport == nil {
+            dismiss()
+        } else {
+            // The chained `AddItemSheet` covers this view instead of
+            // dismissing it (`body`'s `.sheet(item: $tripForBookingImport)`)
+            // — release the reentrancy guard same as `AddItemSheet.save
+            // (andDismiss: false)` does, so this instance stays consistent
+            // rather than permanently "mid-save" underneath the child sheet.
+            isSaving = false
+        }
     }
 
     /// UX audit finding 8: local delete + enqueue, same shape as
