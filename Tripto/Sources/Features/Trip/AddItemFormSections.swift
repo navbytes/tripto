@@ -75,8 +75,23 @@ extension AddItemSheet {
                 // capped at one boolean day. The day badge on the preview
                 // above is purely computed from these two real instants —
                 // there's nothing left here to toggle.
-                LabeledDatePicker(label: "Arrival date", date: $arrivalDate, displayedComponents: .date)
-                LabeledDatePicker(label: "Arrives", date: arrivesTimeBinding, displayedComponents: .hourAndMinute)
+                //
+                // P7e (round-2 re-audit item 1): both pickers need *some*
+                // concrete value to display (see `arrivesTimeBinding`'s doc
+                // comment), which read as already-set to an attentive user
+                // even though `hasSetArrival` was still `false` underneath.
+                // Gated behind `arrivalPlaceholderRow` until the first tap —
+                // same `FormTextField` label-above-box vocabulary, but an
+                // honest "nothing chosen yet" in place of a value. Never
+                // shown once editing an item with a real arrival, since
+                // `hasSetArrival` is already `true` from `init` there.
+                if hasSetArrival {
+                    LabeledDatePicker(label: "Arrival date", date: $arrivalDate, displayedComponents: .date)
+                    LabeledDatePicker(label: "Arrives", date: arrivesTimeBinding, displayedComponents: .hourAndMinute)
+                } else {
+                    arrivalPlaceholderRow(label: "Arrival date", placeholder: "Set arrival date", identifier: "arrivalDatePlaceholder")
+                    arrivalPlaceholderRow(label: "Arrives", placeholder: "Set arrival time", identifier: "arrivesTimePlaceholder")
+                }
                 if !fromIATA.trimmingCharacters(in: .whitespaces).isEmpty
                     && !toIATA.trimmingCharacters(in: .whitespaces).isEmpty
                     && !flightEndAfterStart {
@@ -424,9 +439,67 @@ extension AddItemSheet {
     /// real write lands through this binding's `set`), not this fallback.
     var arrivesTimeBinding: Binding<Date> {
         Binding(
-            get: { arrivesTime ?? departsTime.addingTimeInterval(2 * 3600) },
+            get: { arrivesTime ?? Self.defaultArrivalTime(departsTime: departsTime) },
             set: { arrivesTime = $0 }
         )
+    }
+
+    /// The fallback formula above, pulled out to a pure `static func`
+    /// (mirroring `flightInstants`/`returnLegFields`'s own "pure function
+    /// computes, the view applies it" split) so `AddItemSheetArrival
+    /// PresentationTests` can pin it without a live view. Also
+    /// `arrivalPlaceholderRow`'s own reveal action reads this — same value
+    /// the picker already displayed before P7e's fix, so tapping the
+    /// placeholder for the first time never jumps to a different time than
+    /// what was already on screen.
+    static func defaultArrivalTime(departsTime: Date) -> Date {
+        departsTime.addingTimeInterval(2 * 3600)
+    }
+
+    /// P7e (round-2 re-audit item 1): the "Arrival date"/"Arrives" rows'
+    /// unset presentation — same label-above-box shape as `FormTextField`,
+    /// but a `Button` showing `placeholder` in place of a value rather than
+    /// an editable field, since there's nothing to edit until arrival is
+    /// actually set. Tapping either row (both route here) writes
+    /// `arrivesTimeBinding`'s own existing fallback default into
+    /// `arrivesTime` — the exact value the picker already displayed before
+    /// this fix — which flips `hasSetArrival` true and swaps both rows to
+    /// the real pickers in the same render pass. Save semantics are
+    /// unchanged: this write only ever happens from this explicit tap, never
+    /// implicitly, so a form nobody touches here still saves `endsAt == nil`
+    /// (P7c contract).
+    private func arrivalPlaceholderRow(label: String, placeholder: String, identifier: String) -> some View {
+        Button {
+            arrivesTime = arrivesTimeBinding.wrappedValue
+        } label: {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(label)
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                Text(placeholder)
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm + 2)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5
+                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                            .stroke(Palette.mist, lineWidth: 1)
+                    }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // Same `.combine` + identifier recipe as `pasteFirstBanner`/
+        // `importAddressCardTeaser` (both a `Button` wrapping more than one
+        // `Text`) — one VoiceOver stop for the caption + placeholder
+        // together, matched in XCUITest by this stable identifier rather
+        // than by (partial) visible text, same reasoning those two give.
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Double tap to set")
+        .accessibilityIdentifier(identifier)
     }
 }
 
