@@ -374,6 +374,15 @@ final class TriptoUITests: XCTestCase {
         // outside the popover at any Dynamic Type size.
         app.staticTexts["Add to Lisbon"].tap()
 
+        // P7 re-audit (round 2): the fix this scene now proves — route/
+        // airline/departure are all filled but `arrivesTime` is still `nil`
+        // (`hasSetArrival == false`), so the boarding-pass preview above
+        // must render route-only (no duration/day badge), not a fabricated
+        // arrival. Captured BEFORE the "Arrival date"/"Arrives" pickers
+        // below are touched, which is what would flip `hasSetArrival` true.
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "add-item-flight-preview-route-only", of: app)
+
         // P7c: the old boolean "+1 day" chip is gone — arrival is now an
         // explicit "Arrival date" picker plus its own "Arrives" time, and
         // the preview stays route-only (no duration/day badge) until a real
