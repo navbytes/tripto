@@ -701,8 +701,18 @@ enum TripArchiveMapper {
     /// import doesn't render every card identically.
     private static let coverOptions = ["dusk", "plum", "moss"]
 
+    /// Reviewer D1 (P6.5 verify wave): a `CoverGradientGenerator` key is a
+    /// genuine, distinct cover too, not just the three curated names —
+    /// mirrors `TripFormView.canonicalGradientKey`'s identical "valid
+    /// generated key survives as itself" rule, so an exported `gen:` cover
+    /// round-trips through re-import instead of silently rewriting to a
+    /// rotated curated one.
     private static func resolvedCover(_ raw: String?, fallbackIndex: Int) -> String {
-        if let raw, coverOptions.contains(raw.lowercased()) { return raw.lowercased() }
+        if let raw {
+            let lowered = raw.lowercased()
+            if coverOptions.contains(lowered) { return lowered }
+            if CoverGradientGenerator.parsedHues(lowered) != nil { return lowered }
+        }
         return coverOptions[fallbackIndex % coverOptions.count]
     }
 
