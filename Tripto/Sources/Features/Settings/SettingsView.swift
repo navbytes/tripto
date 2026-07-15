@@ -19,6 +19,10 @@ struct SettingsView: View {
     /// actual pull+push, unchanged.
     @Environment(AppRouter.self) private var appRouter
     @Environment(\.dismiss) private var dismiss
+    /// UX P6.5: the toggle side of `HomeView`'s "been" reveal row — device-
+    /// local (see the section's own doc comment below), read/written
+    /// through the shared key so the two views can't drift apart.
+    @AppStorage(HomePastTripsVisibility.appStorageKey) private var showPastTrips = true
 
     @State private var displayName = ""
     /// UX audit finding 9: the signed-in user's own avatar color, editable
@@ -143,6 +147,18 @@ struct SettingsView: View {
                         .foregroundStyle(Palette.rose)
                         .accessibilityAddTraits(.updatesFrequently)
                 }
+            }
+
+            // UX P6.5 (`.claude/company/ux-redesign/DECISIONS.md`
+            // 2026-07-15): device-local, deliberately not synced — every
+            // device gets its own choice, same reasoning a Mail/Photos
+            // "hide" preference would use. `HomeView` reads the same
+            // `HomePastTripsVisibility.appStorageKey` for the reveal row.
+            Section {
+                Toggle("Show past trips", isOn: $showPastTrips)
+            } footer: {
+                Text("Hide finished trips from the Home list.")
+                    .font(Typo.body(Typo.Size.caption))
             }
 
             // P4.3 (docs/UX_REDESIGN_ROADMAP.md): "Your data" moves above

@@ -300,3 +300,32 @@ enum HomeBeenSummary {
         return "\(month) \u{00B7} \(days) day\(days == 1 ? "" : "s") \u{00B7} \(itemCount) item\(itemCount == 1 ? "" : "s")"
     }
 }
+
+// MARK: - Register "been" — "Show past trips" setting (UX P6.5)
+
+/// `.claude/company/ux-redesign/DECISIONS.md` 2026-07-15 "Client additions
+/// mid-P7": a device-local `@AppStorage` preference (deliberately not
+/// synced — every device gets its own choice) that collapses the entire
+/// "been" register into one quiet reveal row instead of hiding it with no
+/// trace, so turning it off never reads as data loss. Both `SettingsView`
+/// (the toggle) and `HomeView` (the row) read the SAME key via this one
+/// constant, so the two can't drift apart on a typo'd string literal.
+enum HomePastTripsVisibility {
+    static let appStorageKey = "showPastTrips"
+
+    /// `false` whenever there's nothing to hide (zero past trips) even if
+    /// the setting itself is off — an empty archive has no row to
+    /// collapse, same as `HomeView`'s existing "been" section only
+    /// rendering at all once `beenTrips` is non-empty.
+    static func shouldShowHiddenRow(showPastTrips: Bool, beenCount: Int) -> Bool {
+        !showPastTrips && beenCount > 0
+    }
+
+    /// "N past trips hidden" — `HomeView`'s reveal row combines this with
+    /// "Show" into one VoiceOver stop (count + the action, per the P6.5
+    /// brief) the same way `BeenRow`'s own label above combines a trip's
+    /// title with its subtitle.
+    static func hiddenRowText(beenCount: Int) -> String {
+        "\(beenCount) past trip\(beenCount == 1 ? "" : "s") hidden"
+    }
+}

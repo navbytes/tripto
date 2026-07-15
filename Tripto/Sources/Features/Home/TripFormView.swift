@@ -552,7 +552,10 @@ struct TripFormView: View {
         Button {
             withAnimation(Motion.m(.snappy, reduceMotion: reduceMotion)) {
                 hasManuallyShuffledCover = true
-                coverGradientKey = Self.shuffledGradientKey(current: coverGradientKey)
+                // P6.5: real entropy at the call site — `nextShuffledGradientKey`
+                // itself stays a deterministic, testable function of it (see
+                // that method's own doc comment).
+                coverGradientKey = Self.nextShuffledGradientKey(current: coverGradientKey, seed: .random(in: .min ... .max))
             }
         } label: {
             Image(systemName: "shuffle")
@@ -723,9 +726,17 @@ struct TripFormView: View {
     /// legacy key (including the schema's own `"default"` alias) still maps
     /// onto a real swatch rather than leaving the row with nothing lit.
     /// Exposed as `static` for tests.
+    ///
+    /// P6.5: a valid generated key (`CoverGradientGenerator.decode` can
+    /// parse it) is preserved as itself rather than folded into `"dusk"` —
+    /// it's a genuine, distinct cover, not a legacy/unknown one, and
+    /// `isCoverGradientChanged` below needs two different generated covers
+    /// to keep reading as a change. Only a key that's neither a curated
+    /// name nor valid generator syntax still falls back to `"dusk"`.
     static func canonicalGradientKey(_ key: String) -> String {
         let lowered = key.lowercased()
-        return gradientOptions.contains(lowered) ? lowered : "dusk"
+        if gradientOptions.contains(lowered) { return lowered }
+        return CoverGradientGenerator.parsedHues(lowered) != nil ? lowered : "dusk"
     }
 
     /// UX audit finding 6: `hasChanges` should compare gradients by what
@@ -772,6 +783,22 @@ struct TripFormView: View {
         let currentIndex = gradientOptions.firstIndex(of: canonicalGradientKey(current)) ?? 0
         let nextIndex = (currentIndex + 1) % gradientOptions.count
         return gradientOptions[nextIndex]
+    }
+
+    /// P6.5: what the Shuffle button actually calls now — mixes fresh
+    /// `CoverGradientGenerator` rolls in with the three curated classics
+    /// (`shuffledGradientKey`, unchanged, still exactly the old cycling
+    /// behavior and still covered by its own tests) rather than replacing
+    /// them, so a user after one of the three recognizable looks can still
+    /// reach it by shuffling. `seed` is real entropy at the call site; one
+    /// in four rolls (`seed % 4 == 0`) steps to the next curated classic,
+    /// the other three generate a brand-new random gradient — this
+    /// function itself stays a deterministic, testable function of `seed`.
+    static func nextShuffledGradientKey(current: String, seed: UInt64) -> String {
+        guard seed.isMultiple(of: 4) else {
+            return CoverGradientGenerator.generate(seed: seed)
+        }
+        return shuffledGradientKey(current: current)
     }
 
     // MARK: - Actions

@@ -149,14 +149,18 @@ public enum CoverGradient {
     public static let defaultGradient = dusk
 
     /// Resolves a `cover_gradient` token key to a gradient, falling back to
-    /// the default when the key is missing or not recognized.
+    /// the default when the key is missing or not recognized. UX P6.5: anything
+    /// that doesn't match a curated key above is handed to
+    /// `CoverGradientGenerator.decode` (PaletteExtras.swift — hand-written,
+    /// never touched by this script) for the seeded-generator key format;
+    /// `nil` there (unknown/malformed) still falls back to the default here.
     public static func from(key: String?) -> LinearGradient {
         switch key?.lowercased() {
         case "dusk": return dusk
         case "plum": return plum
         case "moss": return moss
         case "default": return defaultGradient
-        default: return defaultGradient
+        default: return CoverGradientGenerator.decode(key) ?? defaultGradient
         }
     }
 }

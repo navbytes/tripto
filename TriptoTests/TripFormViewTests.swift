@@ -263,4 +263,49 @@ final class TripFormViewTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - P6.5: canonicalGradientKey preserves a valid generated key
+    // (a genuine, distinct cover) instead of folding it into "dusk" the way
+    // an unknown/legacy key still does.
+
+    func testCanonicalGradientKeyPreservesAValidGeneratedKey() {
+        let key = "gen:v1:120,45"
+        XCTAssertEqual(TripFormView.canonicalGradientKey(key), key)
+    }
+
+    func testCanonicalGradientKeyFallsBackToDuskForAMalformedGeneratedKey() {
+        XCTAssertEqual(TripFormView.canonicalGradientKey("gen:v1:400,45"), "dusk")
+    }
+
+    func testIsCoverGradientChangedTrueForTwoDifferentGeneratedKeys() {
+        XCTAssertTrue(TripFormView.isCoverGradientChanged(current: "gen:v1:10,20", initial: "gen:v1:30,40"))
+    }
+
+    func testIsCoverGradientChangedFalseForTheSameGeneratedKeyTwice() {
+        XCTAssertFalse(TripFormView.isCoverGradientChanged(current: "gen:v1:10,20", initial: "gen:v1:10,20"))
+    }
+
+    // MARK: - P6.5: nextShuffledGradientKey — Shuffle's actual behavior,
+    // mixing fresh `CoverGradientGenerator` rolls with the three curated
+    // classics (`shuffledGradientKey`, unchanged, still covered above).
+
+    func testNextShuffledGradientKeyGeneratesWhenSeedIsNotAMultipleOfFour() {
+        let key = TripFormView.nextShuffledGradientKey(current: "dusk", seed: 1)
+        XCTAssertTrue(key.hasPrefix("gen:v1:"))
+    }
+
+    func testNextShuffledGradientKeyStepsToTheNextCuratedClassicEveryFourthSeed() {
+        XCTAssertEqual(
+            TripFormView.nextShuffledGradientKey(current: "dusk", seed: 4),
+            TripFormView.shuffledGradientKey(current: "dusk")
+        )
+        XCTAssertEqual(TripFormView.nextShuffledGradientKey(current: "dusk", seed: 4), "plum")
+    }
+
+    func testNextShuffledGradientKeyIsDeterministicForTheSameSeed() {
+        XCTAssertEqual(
+            TripFormView.nextShuffledGradientKey(current: "moss", seed: 99),
+            TripFormView.nextShuffledGradientKey(current: "moss", seed: 99)
+        )
+    }
 }

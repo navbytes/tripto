@@ -584,4 +584,28 @@ final class HomeRegistersTests: XCTestCase {
         let expectedMonth = start.formatted(.dateTime.month(.abbreviated))
         XCTAssertEqual(text, "\(expectedMonth) \u{00B7} 1 day \u{00B7} 2 items")
     }
+
+    // MARK: - HomePastTripsVisibility (UX P6.5 "Show past trips" setting)
+
+    func testShouldShowHiddenRowWhenSettingIsOffAndTherePastTrips() {
+        XCTAssertTrue(HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: false, beenCount: 3))
+    }
+
+    func testShouldShowHiddenRowFalseWhenSettingIsOn() {
+        XCTAssertFalse(HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: true, beenCount: 3))
+    }
+
+    /// The brief's own callout: the hidden-count row must not appear when
+    /// there are zero past trips, regardless of the setting.
+    func testShouldShowHiddenRowFalseWhenThereAreZeroPastTripsEvenIfSettingIsOff() {
+        XCTAssertFalse(HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: false, beenCount: 0))
+    }
+
+    func testHiddenRowTextSingularizes() {
+        XCTAssertEqual(HomePastTripsVisibility.hiddenRowText(beenCount: 1), "1 past trip hidden")
+    }
+
+    func testHiddenRowTextPluralizes() {
+        XCTAssertEqual(HomePastTripsVisibility.hiddenRowText(beenCount: 2), "2 past trips hidden")
+    }
 }
