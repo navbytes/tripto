@@ -381,7 +381,31 @@ struct HomeView: View {
         }
 
         var targetTripId = trips.first?.id
-        if arguments.contains("-uitestSeedIfEmpty"), trips.isEmpty {
+        // P7b suite-health fix (p7-shots/MANIFEST.md "Suite health"): a
+        // showcase flag names an EXACT fixture (`DemoSeeder.seed`'s own
+        // `-uitestSeedRegisterShowcase`/`-uitestSeedNextRegisterShowcase`/
+        // `-uitestSeedP6TrustShowcase` checks), but `seed()` early-returns
+        // the moment a trip named "Lisbon" already exists, skipping every
+        // showcase call below that guard (`DemoSeeder.swift`'s own doc
+        // comment). A full-class `TriptoUITests` run shares one persistent
+        // app install/store across test methods, so whichever test seeds
+        // first leaves "Lisbon" behind — `trips.isEmpty` below is then false
+        // for every later test, so a DIFFERENT showcase flag on a later
+        // launch silently never seeds at all (confirmed as exactly the
+        // showcase-dependent 7/27 failures a full-class run reproduces;
+        // every test passes in isolation, fresh-install, per the manifest).
+        // Wiping first makes a showcase-flagged launch behave identically
+        // regardless of run order. Every launch in this suite passes
+        // `-simulateOffline`, so `resetLocalStore()`'s own re-pull never
+        // fires (its early-return right after the wipe) — this stays exactly
+        // as hermetic/no-network as the rest of the suite.
+        let showcaseFlags = ["-uitestSeedRegisterShowcase", "-uitestSeedNextRegisterShowcase", "-uitestSeedP6TrustShowcase"]
+        let needsShowcaseReset = arguments.contains("-uitestSeedIfEmpty") && !trips.isEmpty
+            && showcaseFlags.contains { arguments.contains($0) }
+        if needsShowcaseReset {
+            await syncEngine?.resetLocalStore()
+        }
+        if arguments.contains("-uitestSeedIfEmpty"), trips.isEmpty || needsShowcaseReset {
             targetTripId = await DemoSeeder.seed(modelContext: modelContext, syncEngine: syncEngine, authManager: authManager)
         }
         if arguments.contains("-uitestOpenFirstTrip"), let targetTripId, path.isEmpty {
@@ -542,8 +566,19 @@ struct HomeView: View {
     /// the exact same loading/settled signal `HomeEmptyPlaceholder.resolve`
     /// already uses for the trips list itself, so the two can't disagree
     /// about whether this session has "settled" yet.
+    ///
+    /// P7b craft-audit fix: that P5 fix-round still missed a THIRD settled
+    /// case — offline with no cached profile. `pullHome()` no-ops while
+    /// offline, so `hasCompletedInitialHomePull` can never flip true there
+    /// either, and the skeleton stayed up forever on exactly that
+    /// combination (every `home-*` P7 screenshot). Delegates to
+    /// `HomeGreetingLoading.isStillLoading` (`HomeRegisters.swift`), which
+    /// now also settles on `isOffline` — see that function's own doc comment.
     private var isProfileStillLoading: Bool {
-        myDisplayName == nil && authManager.userId != nil && !syncStatus.hasCompletedInitialHomePull
+        HomeGreetingLoading.isStillLoading(
+            hasDisplayName: myDisplayName != nil, isSignedIn: authManager.userId != nil,
+            hasCompletedInitialHomePull: syncStatus.hasCompletedInitialHomePull, isOffline: syncStatus.isOffline
+        )
     }
 
     // MARK: - List

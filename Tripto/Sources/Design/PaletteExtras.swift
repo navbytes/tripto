@@ -97,6 +97,22 @@ public extension Palette {
             ? UIColor(hex: "#000000")
             : UIColor(hex: "#1A1B2E")
     })
+
+    /// CTA "glow" shadow tint for a primary amber-filled button in its
+    /// enabled state — P7b craft audit: three near-duplicate ad-hoc
+    /// `Palette.amber.opacity(...)` shadow literals with no shared name
+    /// (`TripFormView`'s "Create trip" and `AddItemSheet`'s "Add" at `.45`,
+    /// `Fab`'s add button at `.55`), most visible as a halo in dark mode —
+    /// unlike `shadow` above, this color itself doesn't change with the
+    /// theme (same fixed hex as `Palette.amber` in both), but a warm glow
+    /// genuinely reads as far more prominent against a dark backdrop than
+    /// against `Palette.paper`'s light-mode cream, which is what the finding
+    /// actually caught. Named here as the one vocabulary for that effect,
+    /// `Color`-only like `shadow` (callers keep supplying their own
+    /// `.opacity(...)`/radius/y). Not yet adopted at those three call sites
+    /// — outside this pass's file scope (Home/PaletteExtras only); switch
+    /// them to this token instead of a fourth literal.
+    static let amberGlow = amber
 }
 
 // Hand-written companion to the generated `CoverGradient` (Tokens.swift).
