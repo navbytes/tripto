@@ -133,4 +133,123 @@ final class CoverGradientGeneratorTests: XCTestCase {
         UIColor(color).getHue(nil, saturation: nil, brightness: &brightness, alpha: nil)
         XCTAssertLessThanOrEqual(brightness, 0.91 + 0.01)
     }
+
+    // MARK: - Locale invariance (P6.5 harden brief: the key format must not
+    // depend on `Locale.current`) -- unlike `Double`/`NumberFormatter`,
+    // Swift's plain `Int(String)` parse and `Int` string interpolation never
+    // consult locale, so there's no live decimal-comma/grouping/digit-script
+    // risk here as long as `generate`/`parsedHues` stay built on plain `Int`,
+    // never a `Double` or `NumberFormatter` detour. This pins that structural
+    // guarantee directly against the key text rather than trying to
+    // force-swap the process's ambient `Locale.current` (not reliably
+    // possible from inside a running XCTest without a relaunch) -- German
+    // (`de_DE`, the brief's own "non-dot-decimal" example) is exactly the
+    // comma-as-decimal-separator locale this would catch if a future change
+    // ever routed a hue through locale-aware formatting.
+
+    func testGeneratedKeyBodyIsAlwaysPlainASCIIDigitsAndCommaAcrossManySeeds() {
+        let seeds: [UInt64] = [0, 1, 42, 200, 359, 360, 999_999, .max]
+        for seed in seeds {
+            let key = CoverGradientGenerator.generate(seed: seed)
+            let body = key.dropFirst(CoverGradientGenerator.prefix.count)
+            XCTAssertTrue(
+                !body.isEmpty && body.allSatisfy { $0 == "," || ("0"..."9").contains($0) },
+                "seed \(seed) produced a key with non-ASCII-digit characters: \(key)"
+            )
+        }
+    }
+
+    /// The brief's own example locale (`de_DE` -- comma as the DECIMAL
+    /// separator, `.` as the thousands separator): formatting these same hue
+    /// integers through an actual German `NumberFormatter` produces
+    /// byte-identical text to the plain digits already in the key at this
+    /// magnitude (0...359 never reaches a thousands grouping, and German
+    /// still uses Latin digits) -- so no locale can currently make this
+    /// format render differently, which is what makes today's bare
+    /// `Int`/`String` implementation already locale-safe.
+    func testHueIntegersFormatIdenticallyUnderAGermanLocale() {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        for hue in [0, 9, 42, 200, 359] {
+            XCTAssertEqual(formatter.string(from: NSNumber(value: hue)), String(hue), "hue \(hue)")
+        }
+    }
+
+    // MARK: - Hostile keys from another device/app version (P6.5 harden
+    // brief): every one of these must fall back (`decode` -> `nil`,
+    // `CoverGradient.from(key:)` -> the default gradient) rather than crash --
+    // values another (older/newer, or hand-edited) client could plausibly
+    // have written to the shared `Trip.cover_gradient` column.
+
+    func testDecodeNeverCrashesAndAlwaysFallsBackForHostileKeysFromAnotherDevice() {
+        let hostileKeys = [
+            "gen:v1:999,-5", // both hues out of the documented 0...359 range
+            "gen:v1:", // empty body -- no comma, no hues at all
+            "gen:v1:NaN,12", // non-numeric first hue
+            "gen:v2:10,20", // a future/foreign version -- must not be misread as v1
+            "gen:v1:10,20,30,40" // extra stops
+        ]
+        for key in hostileKeys {
+            XCTAssertNil(CoverGradientGenerator.decode(key), key)
+            // `CoverGradient.from(key:)` is the one seam every render site
+            // actually goes through -- proving it completes (doesn't trap)
+            // for every hostile key is the real "never crashes" guarantee;
+            // reaching the assertion above for the NEXT key in this loop is
+            // itself proof this call didn't crash the process.
+            _ = CoverGradient.from(key: key)
+        }
+    }
+
+    // MARK: - Property sweep (P6.5 harden brief: "500-roll"): every generated
+    // key round-trips exactly and every decoded stop sits inside the
+    // documented S/V bands, across many rolls -- not just the hand-picked
+    // seeds above. Seeds are a deterministic spread (a fixed multiplicative
+    // step across `UInt64`), not `UInt64.random`, so a failure is
+    // reproducible from the printed seed alone and this suite never gains a
+    // flaky, non-deterministic test -- the same "no hidden randomness"
+    // discipline `TripFormViewTests`' own `seededGradientKey` tests already
+    // document a preference for.
+    func testFiveHundredRollsRoundTripExactlyAndStayWithinTheDocumentedBands() {
+        for i in 0..<500 {
+            let seed = UInt64(i) &* 2_654_435_761 // Knuth multiplicative spread
+            let key = CoverGradientGenerator.generate(seed: seed)
+            let hues = CoverGradientGenerator.parsedHues(key)
+            XCTAssertEqual(hues?.0, Int(seed % 360), "seed \(seed)")
+            XCTAssertEqual(hues?.1, Int((seed / 360) % 360), "seed \(seed)")
+            guard let (hue1, hue2) = hues else { continue }
+            XCTAssertNotNil(CoverGradientGenerator.decode(key), "seed \(seed)")
+
+            assertStopWithinBands(
+                hue: hue1, saturation: CoverGradientGenerator.stop1Saturation,
+                brightness: CoverGradientGenerator.stop1Brightness, seed: seed
+            )
+            assertStopWithinBands(
+                hue: hue2, saturation: CoverGradientGenerator.stop2Saturation,
+                brightness: CoverGradientGenerator.stop2Brightness, seed: seed
+            )
+        }
+    }
+
+    /// Reads a `stopColor(...)` result back via `UIColor` (same technique as
+    /// `testStop1ColorAtItsBrightestHueNeverExceedsTheBrightnessCap` above)
+    /// and checks both saturation and brightness sit inside the given band,
+    /// with the same `0.01` float slack that existing test already uses for
+    /// an HSB round trip.
+    private func assertStopWithinBands(
+        hue: Int, saturation: ClosedRange<Double>, brightness: ClosedRange<Double>, seed: UInt64,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let color = CoverGradientGenerator.stopColor(hue: hue, saturation: saturation, brightness: brightness)
+        var actualSaturation: CGFloat = 0
+        var actualBrightness: CGFloat = 0
+        UIColor(color).getHue(nil, saturation: &actualSaturation, brightness: &actualBrightness, alpha: nil)
+        XCTAssertTrue(
+            actualSaturation >= saturation.lowerBound - 0.01 && actualSaturation <= saturation.upperBound + 0.01,
+            "seed \(seed) hue \(hue): saturation \(actualSaturation) outside \(saturation)", file: file, line: line
+        )
+        XCTAssertTrue(
+            actualBrightness >= brightness.lowerBound - 0.01 && actualBrightness <= brightness.upperBound + 0.01,
+            "seed \(seed) hue \(hue): brightness \(actualBrightness) outside \(brightness)", file: file, line: line
+        )
+    }
 }

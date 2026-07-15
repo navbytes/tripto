@@ -1178,6 +1178,53 @@ final class TripArchiveTests: XCTestCase {
         XCTAssertEqual(secondReport.tripSkips.first?.reason, .alreadyImported)
     }
 
+    /// P6.5 harden: a trip carrying a `CoverGradientGenerator` key
+    /// (`"gen:v1:<hue1>,<hue2>"`, PaletteExtras.swift) is a genuine,
+    /// legitimately-stored `Trip.cover_gradient` value now, same as the
+    /// three curated names -- `TripFormView.canonicalGradientKey` already
+    /// treats a valid one as "a real, distinct cover," not an
+    /// unknown/legacy key to fold away. `TripArchiveExporter.archiveTrip`
+    /// writes `trip.coverGradient` straight through, so a real trip's
+    /// generated cover really can appear in an exported archive. This
+    /// pins whether re-importing that exact export (a "restore a backup on
+    /// a fresh device" pass -- `existingTripIds: []`, no rule-(b)/(a) match)
+    /// preserves it byte for byte, the same way every other field on this
+    /// same round trip already does.
+    func testExportThenImportRoundTripPreservesAGeneratedCoverGradientKey() throws {
+        let tripId = UUID()
+        let generatedCover = CoverGradientGenerator.generate(seed: 777)
+        let trip = TestFixtures.makeTrip(
+            id: tripId, title: "Lisbon",
+            startDate: utc.date(from: DateComponents(year: 2026, month: 5, day: 14))!,
+            endDate: utc.date(from: DateComponents(year: 2026, month: 5, day: 20))!,
+            coverGradient: generatedCover
+        )
+        let exported = TripArchiveExporter.composeDocument(trips: [trip], items: [], profiles: [])
+        let data = try TripArchiveExporter.encode(exported)
+        let reDecoded = try TripArchiveMapper.decode(data)
+
+        // The generated key survives the encode/decode wire round trip
+        // itself untouched -- confirms any loss below is `resolvedCover`'s
+        // own rotation, not a JSON coding detour.
+        XCTAssertEqual(reDecoded.trips.first?.cover, generatedCover)
+
+        let (prepared, _) = TripArchiveMapper.map(document: reDecoded, existingTripIds: [])
+        // KNOWN GAP (not a testability issue -- a real behavior pin): see
+        // `resolvedCover`'s `coverOptions` allow-list (`TripArchive.swift`)
+        // -- it only recognizes the three curated names, so a generated key
+        // reads as "unrecognized" and gets silently replaced by the
+        // fallback rotation, exactly like `testUnknownCoverFallsBackToAStableRotationByTripIndex`
+        // already proves for `"not-a-real-gradient"` above. Restoring an
+        // export that carries a generated cover currently renders a
+        // DIFFERENT (curated, rotated) cover than the trip actually had.
+        // `XCTExpectFailure` keeps this a live tripwire (fails loudly, not
+        // silently, the moment it's fixed) rather than a silently-wrong
+        // green assertion -- same convention as `ProfileDedupeTests`' own
+        // now-fixed `XCTExpectFailure` gap before D1 landed.
+        XCTExpectFailure("resolvedCover's coverOptions allow-list predates the P6.5 generator and doesn't recognize a gen: key yet")
+        XCTAssertEqual(prepared.first?.coverGradient, generatedCover)
+    }
+
     // MARK: - Test helpers
 
     private func makeDocument(trips: [ArchiveTrip]) -> ArchiveDocument {

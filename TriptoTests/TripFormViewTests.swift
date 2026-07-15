@@ -308,4 +308,39 @@ final class TripFormViewTests: XCTestCase {
             TripFormView.nextShuffledGradientKey(current: "moss", seed: 99)
         )
     }
+
+    // MARK: - P6.5 harden: does Shuffle ever repeat the same key twice in a
+    // row? The two branches have DIFFERENT guarantees -- pinning both rather
+    // than assuming one blanket "never repeats" contract for the whole
+    // function.
+
+    /// The "1-in-4 classic" branch (`seed.isMultiple(of: 4)`) always steps to
+    /// `shuffledGradientKey`, which cycles `(currentIndex + 1) %
+    /// gradientOptions.count` -- with 3 options, `nextIndex` can never equal
+    /// `currentIndex`, so this branch alone provably never repeats the
+    /// current curated key.
+    func testNextShuffledGradientKeyOnTheClassicBranchNeverRepeatsTheCurrentCuratedKey() {
+        for key in ["dusk", "plum", "moss"] {
+            let next = TripFormView.nextShuffledGradientKey(current: key, seed: 4) // 4.isMultiple(of: 4) -> classic branch
+            XCTAssertNotEqual(next, key, "current \(key)")
+        }
+    }
+
+    /// The other 3-in-4 branch is a PURE function of `seed` alone --
+    /// `CoverGradientGenerator.generate(seed:)` never reads `current`, so
+    /// nothing excludes it from reproducing `current` verbatim. This is not
+    /// a defect: real entropy (`UInt64.random(in:)`) makes the same `UInt64`
+    /// recurring back to back astronomically unlikely, and the docs on
+    /// `nextShuffledGradientKey` never actually promise otherwise. Pinned
+    /// here as the function's real (weaker) contract, since the brief calls
+    /// out checking rather than assuming this.
+    func testNextShuffledGradientKeyOnTheRandomBranchCanReproduceTheCurrentKeyIfTheSameSeedRecurs() {
+        let seed: UInt64 = 5 // not a multiple of 4 -> the fresh-random-roll branch
+        let generated = TripFormView.nextShuffledGradientKey(current: "dusk", seed: seed)
+        XCTAssertTrue(generated.hasPrefix("gen:v1:"), "sanity: seed 5 must take the generate branch")
+        XCTAssertEqual(
+            TripFormView.nextShuffledGradientKey(current: generated, seed: seed), generated,
+            "the random branch has no guard against reproducing `current` when the same seed recurs"
+        )
+    }
 }
