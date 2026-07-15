@@ -194,4 +194,31 @@ final class TripArchiveExporterTests: XCTestCase {
         XCTAssertFalse(json.contains("photo.jpg"))
         XCTAssertFalse(json.lowercased().contains("avatar_path"))
     }
+
+    /// P8b (photo trip covers): same reasoning as the traveller `avatarPath`
+    /// test above, for the trip's OWN cover photo/credit this time —
+    /// `cover_image_path` is a storage path meaningless outside this
+    /// project, and `cover_credit_name`/`cover_credit_url` name a specific
+    /// upload this app made; none of the three belong in a portable,
+    /// cross-app migration format any LLM can generate
+    /// (`docs/IMPORT_FORMAT.md`'s own "frozen v1" contract). `ArchiveTrip`'s
+    /// `cover` key stays exactly what it was pre-P8b: the gradient token
+    /// only.
+    func testTripCoverPhotoAndCreditNeverLeakIntoTheExportedArchive() throws {
+        let trip = TestFixtures.makeTrip(startDate: .now, endDate: .now)
+        trip.coverImagePath = "\(UUID().uuidString)/cover-photo.jpg"
+        trip.coverCreditName = "Priya Sharma"
+        trip.coverCreditUrl = "https://www.pexels.com/photo/12345"
+
+        let document = TripArchiveExporter.composeDocument(trips: [trip], items: [], profiles: [])
+        XCTAssertEqual(document.trips.first?.cover, "dusk")
+
+        let encoded = try TripArchiveExporter.encode(document)
+        let json = try XCTUnwrap(String(data: encoded, encoding: .utf8))
+        XCTAssertFalse(json.contains("cover-photo.jpg"))
+        XCTAssertFalse(json.contains("Priya Sharma"))
+        XCTAssertFalse(json.contains("pexels.com"))
+        XCTAssertFalse(json.lowercased().contains("cover_image_path"))
+        XCTAssertFalse(json.lowercased().contains("cover_credit"))
+    }
 }

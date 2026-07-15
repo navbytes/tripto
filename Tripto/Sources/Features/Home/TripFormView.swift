@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftData
 import SwiftUI
 
@@ -86,6 +87,17 @@ struct TripFormView: View {
     /// gated on `!isEditing` too, so an existing trip's stored cover is
     /// never silently re-seeded either way).
     @State private var hasManuallyShuffledCover = false
+    /// P8b (photo trip covers): mirrors `AvatarPhotoPicker`'s own draft-
+    /// until-Save shape (identical to `SettingsView.avatarPath`/
+    /// `TripProfileFormSheet.avatarPath`) — the upload itself runs
+    /// immediately on pick (there's no realistic way to defer the actual
+    /// bytes), but the trip row's `coverImagePath` write + sync enqueue wait
+    /// for this sheet's own explicit Create/Save tap, same as every other
+    /// field here. Seeded from `trip.coverImagePath` in edit mode, `nil` for
+    /// a brand-new create-mode trip (see `init` below).
+    @State private var coverImagePath: String?
+    @State private var coverPickerItem: PhotosPickerItem?
+    @State private var isUploadingCoverPhoto = false
 
     /// F6: surfaced above the CTA when `modelContext.save()` throws, instead
     /// of the old silent `try?` — the save simply stops, nothing is
@@ -203,6 +215,11 @@ struct TripFormView: View {
         var endDate: Date
         var tripType: TripType
         var coverGradientKey: String
+        /// P8b: a brand-new create-mode trip has no photo yet (`Prefill`
+        /// doesn't carry one over on duplicate either — see
+        /// `TripDuplication.prefill`), so this is only ever non-nil seeded
+        /// from an `.edit` trip.
+        var coverImagePath: String?
     }
     private let initialValues: InitialValues
 
@@ -228,10 +245,11 @@ struct TripFormView: View {
             _endDate = State(initialValue: seed.endDate)
             _tripType = State(initialValue: seed.tripType)
             _coverGradientKey = State(initialValue: seed.coverGradientKey)
+            _coverImagePath = State(initialValue: nil)
             initialValues = InitialValues(
                 title: seed.title, destination: seed.destination, countryCode: seed.countryCode,
                 startDate: seed.startDate, endDate: seed.endDate,
-                tripType: seed.tripType, coverGradientKey: seed.coverGradientKey
+                tripType: seed.tripType, coverGradientKey: seed.coverGradientKey, coverImagePath: nil
             )
         case .edit(let trip):
             _title = State(initialValue: trip.title)
@@ -241,10 +259,11 @@ struct TripFormView: View {
             _endDate = State(initialValue: trip.endDate)
             _tripType = State(initialValue: trip.tripType)
             _coverGradientKey = State(initialValue: trip.coverGradient)
+            _coverImagePath = State(initialValue: trip.coverImagePath)
             initialValues = InitialValues(
                 title: trip.title, destination: trip.destination, countryCode: trip.countryCode,
                 startDate: trip.startDate, endDate: trip.endDate,
-                tripType: trip.tripType, coverGradientKey: trip.coverGradient
+                tripType: trip.tripType, coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath
             )
         }
     }
@@ -293,6 +312,24 @@ struct TripFormView: View {
             || calendar.startOfDay(for: endDate) != calendar.startOfDay(for: initialValues.endDate)
             || tripType != initialValues.tripType
             || Self.isCoverGradientChanged(current: coverGradientKey, initial: initialValues.coverGradientKey)
+            // P8b: a picked-then-uploaded-but-not-yet-saved photo (or a
+            // "Remove photo" tap) is discardable exactly like a typed-but-
+            // not-saved title — the uploaded object itself is simply left as
+            // an orphan, same v1 policy `CoverStorage`'s doc comment accepts.
+            || coverImagePath != initialValues.coverImagePath
+    }
+
+    /// P8b: read-only in this phase — nothing here ever writes a non-nil
+    /// value (P8c's Pexels search flow will); only rendered when editing an
+    /// existing trip that already has both (see `coverSection`).
+    private var coverCreditName: String? {
+        if case .edit(let trip) = mode { return trip.coverCreditName }
+        return nil
+    }
+
+    private var coverCreditUrl: String? {
+        if case .edit(let trip) = mode { return trip.coverCreditUrl }
+        return nil
     }
 
     /// F6: the live snapshot `.onChange` diffs against `initialValues`
@@ -303,7 +340,8 @@ struct TripFormView: View {
     private var currentValues: InitialValues {
         InitialValues(
             title: title, destination: destination, countryCode: countryCode,
-            startDate: startDate, endDate: endDate, tripType: tripType, coverGradientKey: coverGradientKey
+            startDate: startDate, endDate: endDate, tripType: tripType, coverGradientKey: coverGradientKey,
+            coverImagePath: coverImagePath
         )
     }
 
@@ -398,6 +436,13 @@ struct TripFormView: View {
         .onChange(of: countryCode) { _, newValue in
             guard !isEditing, !hasManuallyShuffledCover else { return }
             coverGradientKey = Self.seededGradientKey(countryCode: newValue, destination: destination)
+        }
+        // P8b: `PhotosPicker`'s own selection, not a submit button — a new
+        // pick fires this the moment the system picker dismisses, same
+        // `.onChange(of: pickerItem)` shape as `AvatarPhotoPicker`.
+        .onChange(of: coverPickerItem) { _, newItem in
+            guard let newItem else { return }
+            Task { await uploadCoverPhoto(newItem) }
         }
         // Finding 4: only error-toned CTA guidance is announced — see
         // `ctaGuidance`'s doc comment for why the advisory blank-title copy
@@ -522,22 +567,133 @@ struct TripFormView: View {
     /// same three tokens `TripCard` itself renders covers from, no new color
     /// system) plus a Shuffle button. `coverGradientKey` still drives it —
     /// only this section's *control* changed, not the stored value's shape.
+    ///
+    /// P8b: gains a "Choose a photo"/"Remove photo" row below the gradient
+    /// preview (plan D6/D1) — the two controls are independent, not a
+    /// toggle: Shuffle keeps changing `coverGradientKey` even while a photo
+    /// is active (it's simply not visible until the photo is removed, same
+    /// "photo layers over the gradient, never replaces it" contract as
+    /// every other render site).
     private var coverSection: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             sectionHeading("Cover")
             ZStack(alignment: .topTrailing) {
-                CoverGradient.from(key: coverGradientKey)
+                CoverImage(coverGradientKey: coverGradientKey, coverImagePath: coverImagePath)
                     .frame(height: 96)
                     .clipShape(RoundedRectangle(cornerRadius: Radii.cover, style: .continuous))
-                    // Decorative swatch — `shuffleButton`'s own label speaks
-                    // for this whole preview.
+                    // Decorative — `shuffleButton`'s own label speaks for the
+                    // gradient; a photo here is equally decorative (brief:
+                    // "cover photo decorative — title carries meaning"), same
+                    // contract as `AvatarPhotoCircle`.
                     .accessibilityHidden(true)
                 shuffleButton
                     .padding(Spacing.sm)
+                if isUploadingCoverPhoto {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(Spacing.sm)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                }
             }
             .padding(.vertical, Spacing.xs)
-            Text("Sets the cover on your trip card. Tap shuffle for a different one.")
+            Text("Sets the cover on your trip card. Tap shuffle for a different one, or choose your own photo below.")
                 .helperTextStyle()
+            coverPhotoPickerRow
+            coverPhotoCreditLine
+        }
+    }
+
+    /// "Choose a photo"/"Change photo" + (once set) "Remove photo" — same
+    /// pill/44pt-target styling as `AvatarPhotoPicker`'s identical pair, not
+    /// reused directly: that component is a fixed-diameter CIRCLE preview
+    /// (one profile-photo shape everywhere), while this section's own
+    /// preview is the wide gradient card above: `AvatarPhotoPicker`'s actual
+    /// preview half doesn't fit here, only its button recipe does.
+    private var coverPhotoPickerRow: some View {
+        HStack(spacing: Spacing.md) {
+            PhotosPicker(selection: $coverPickerItem, matching: .images) {
+                Text(coverImagePath == nil ? "Choose a photo" : "Change photo")
+                    .font(Typo.body(Typo.Size.caption, weight: .bold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.md)
+                    .background(Palette.amber, in: Capsule())
+                    // P8a fix-round D2 lesson: `.contentShape` must come
+                    // AFTER `.frame(minHeight:)`, never before — reversed,
+                    // the frame's own padding becomes a dead zone.
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .disabled(isUploadingCoverPhoto)
+
+            if coverImagePath != nil {
+                Button(role: .destructive) {
+                    coverImagePath = nil
+                } label: {
+                    Text("Remove photo")
+                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                        .foregroundStyle(Palette.rose)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .disabled(isUploadingCoverPhoto)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// P8c render slot (brief: "build the render slot now so P8c is
+    /// copy-only") — this phase never writes a non-nil credit, so this never
+    /// renders today; once P8c's Pexels search flow starts writing
+    /// `coverCreditName`/`coverCreditUrl`, it appears with zero further UI
+    /// work. Gated on `coverImagePath == initialValues.coverImagePath` (not
+    /// just the credit fields being present) — mid-session, the moment the
+    /// user picks a different photo or removes it, `save()` is about to
+    /// clear the ORIGINAL photo's credit (see that method's own comment), so
+    /// this must stop crediting it immediately too, rather than keep
+    /// pointing at a photo that's no longer even selected.
+    @ViewBuilder
+    private var coverPhotoCreditLine: some View {
+        if coverImagePath == initialValues.coverImagePath,
+            let coverCreditName, let coverCreditUrl, let creditURL = URL(string: coverCreditUrl) {
+            Link(destination: creditURL) {
+                Text("Photo by \(coverCreditName) on Pexels")
+                    .font(Typo.body(10.5))
+                    .foregroundStyle(Palette.slate)
+                    .underline()
+                    .frame(minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+        }
+    }
+
+    private func uploadCoverPhoto(_ item: PhotosPickerItem) async {
+        guard let userId = authManager.userId else {
+            toast = "Sign in first, then try again."
+            return
+        }
+        isUploadingCoverPhoto = true
+        defer {
+            isUploadingCoverPhoto = false
+            coverPickerItem = nil // lets re-picking the same asset re-trigger `.onChange`
+        }
+        do {
+            // Never `type: Image.self` — see `AvatarPhotoPicker.upload`'s
+            // identical doc comment: that would skip straight past
+            // `ImageProcessing`'s own downsample step.
+            guard let rawData = try await item.loadTransferable(type: Data.self) else {
+                toast = "Couldn\u{2019}t read that photo. Try another."
+                return
+            }
+            let jpeg = try await ImageProcessing.downsampledJPEG(rawData, maxPixelSize: ImageProcessing.coverMaxPixelSize)
+            // Atomic (brief): `coverImagePath` only ever changes on a
+            // SUCCESSFUL upload — a thrown error below leaves it (and thus
+            // whatever was rendering, an existing photo or the bare
+            // gradient) untouched, and this `do` falls straight to the
+            // `catch`'s toast.
+            let path = try await CoverStorage.upload(jpeg, for: userId)
+            coverImagePath = path
+        } catch {
+            toast = "Couldn\u{2019}t upload that photo. Try again."
         }
     }
 
@@ -844,7 +1000,14 @@ struct TripFormView: View {
                 createdBy: userId,
                 createdAt: .now,
                 updatedAt: .now,
-                updatedBy: nil
+                updatedBy: nil,
+                // P8b: atomic by construction — `coverImagePath` only ever
+                // holds a path once `uploadCoverPhoto` has already awaited a
+                // SUCCESSFUL `CoverStorage.upload`; a brand-new trip with no
+                // photo picked keeps this `nil`, same as before P8b.
+                // `coverCreditName`/`coverCreditUrl` are never set on
+                // create — a new trip can't already have a Pexels credit.
+                coverImagePath: coverImagePath
             )
             modelContext.insert(trip)
 
@@ -886,6 +1049,19 @@ struct TripFormView: View {
             trip.endDate = normalizedEnd
             trip.tripType = tripType
             trip.coverGradient = coverGradientKey
+            trip.coverImagePath = coverImagePath
+            // P8c render-slot correctness (brief: this phase never WRITES a
+            // credit, but must keep the invariant sound ahead of P8c): a
+            // credit names one specific photo, so it must never survive
+            // whatever replaced or removed that photo. Compared against
+            // `initialValues.coverImagePath` (what this sheet actually
+            // opened with), not the trip's own live property, so re-saving
+            // with the SAME photo (every other field only) leaves an
+            // existing Pexels credit untouched.
+            if coverImagePath != initialValues.coverImagePath {
+                trip.coverCreditName = nil
+                trip.coverCreditUrl = nil
+            }
             trip.updatedAt = .now
             trip.updatedBy = authManager.userId
             do {

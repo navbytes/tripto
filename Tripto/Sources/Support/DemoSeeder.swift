@@ -309,20 +309,21 @@ enum DemoSeeder {
     /// derives to, with a synthetic in-memory image — `AvatarPhotoCircle`'s
     /// `LazyImage(url:)` then finds a cache hit and renders it with zero
     /// network involved. Deliberately the MEMORY cache, never the on-disk
-    /// `DataCache` `AvatarImagePipeline` also configures — `DataCache`'s
+    /// `DataCache` `AppImagePipeline` also configures — `DataCache`'s
     /// own writes are staged and flushed asynchronously (confirmed against
     /// its own source, `Caching/DataCache.swift`), so priming it here has
     /// no guarantee of finishing before this process ends; called fresh on
     /// EVERY launch instead (see this function's call site, before `seed`'s
     /// own idempotence guard) sidesteps that entirely — cheap, since it's
-    /// just an in-memory dictionary write. `AvatarImagePipeline.configured`
+    /// just an in-memory dictionary write. `AppImagePipeline.configured`
+    /// (P8b: renamed from `AvatarImagePipeline` — same one shared pipeline)
     /// is force-referenced FIRST so the `DataCache`-backed pipeline swap
     /// (which replaces `ImagePipeline.shared` wholesale) has already
     /// happened before this primes it — priming the stock default pipeline
     /// instead would be silently discarded the moment any
     /// `AvatarPhotoCircle` first renders and triggers the swap.
     private static func primeAvatarShowcaseImageCache(userId: UUID) {
-        _ = AvatarImagePipeline.configured
+        _ = AppImagePipeline.configured
         guard let photo = syntheticAvatarPhoto() else { return }
         for path in [avatarShowcaseOwnPhotoPath(userId: userId), avatarShowcaseAshaPhotoPath] {
             if let url = AvatarStorage.publicURL(for: path) {

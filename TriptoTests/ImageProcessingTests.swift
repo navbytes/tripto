@@ -382,4 +382,25 @@ final class ImageProcessingTests: XCTestCase {
             outputExif?[kCGImagePropertyExifDateTimeOriginal], "the original Exif field must never survive into the uploaded JPEG"
         )
     }
+
+    /// P8b: the same stripping guarantee, at the COVER bound (~1600px) this
+    /// time, not just the avatar default (512px) the test above pins. The
+    /// stripping is a side effect of re-encoding through a decoded `CGImage`
+    /// regardless of `maxPixelSize` — this confirms that holds at the other
+    /// real call site's bound too, not just the one the pipeline happened to
+    /// be built against first.
+    func testDownsampledJPEGStripsGPSAndExifMetadataAtTheCoverSizeBoundToo() async throws {
+        let input = makeJPEGDataWithGPSAndExif(width: 2000, height: 1500)
+        let inputProperties = try XCTUnwrap(propertiesOf(input), "fixture setup sanity check, not the pipeline itself")
+        XCTAssertNotNil(inputProperties[kCGImagePropertyGPSDictionary], "fixture must actually carry GPS metadata")
+
+        let output = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: ImageProcessing.coverMaxPixelSize)
+        let outputProperties = try XCTUnwrap(propertiesOf(output))
+        XCTAssertNil(outputProperties[kCGImagePropertyGPSDictionary], "GPS metadata must never survive into the uploaded cover JPEG")
+        let outputExif = outputProperties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        XCTAssertNil(
+            outputExif?[kCGImagePropertyExifDateTimeOriginal],
+            "the original Exif field must never survive into the uploaded cover JPEG"
+        )
+    }
 }

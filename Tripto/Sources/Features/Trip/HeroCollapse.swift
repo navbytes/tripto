@@ -420,7 +420,11 @@ struct TripHeroView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            CoverGradient.from(key: trip.coverGradient)
+            // P8b: `CoverImage` layers a photo (if `trip.coverImagePath` is
+            // set) over the same `CoverGradient.from(key:)` this rendered
+            // pre-P8b — the `textScrim` overlay right below is unchanged and
+            // composites over whichever of the two actually shows through.
+            CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
                 // Finding 3: swapped the flat 8%-black scrim for the same
                 // bottom-anchored `textScrim` `TripCard` uses for the
                 // identical white-text-on-gradient problem (clear until 35%

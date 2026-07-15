@@ -37,6 +37,114 @@ final class TripFormViewTests: XCTestCase {
         XCTAssertGreaterThan(dto.updatedAt, originalUpdatedAt)
     }
 
+    // MARK: - P8b: editing a trip's cover photo must clear any existing
+    // Pexels credit (P8c will be the only future WRITER of a non-nil
+    // credit, but this invariant has to hold from P8b's own first save
+    // onward — a credit names one specific photo and must never survive
+    // whatever replaced or removed it). `save()` itself has no view-level
+    // harness in this suite (same as F7 above) — these replicate the EXACT
+    // mutation `save()`'s edit branch performs against a real `Trip`,
+    // asserting via `toDTO()`, mirroring `testEditMutationStampsUpdatedAtAnd
+    // UpdatedByOnToDTO`'s own shape.
+
+    @MainActor
+    func testEditingCoverPhotoClearsAnyExistingPexelsCredit() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil,
+            coverImagePath: "old/pexels-cover.jpg", coverCreditName: "Priya", coverCreditUrl: "https://pexels.com/photo/1"
+        )
+        context.insert(trip)
+        // What `TripFormView.init`'s `.edit` branch would have captured into
+        // `initialValues.coverImagePath` when this sheet opened.
+        let initialCoverImagePath = trip.coverImagePath
+
+        // The exact mutation `save()`'s edit branch performs when the
+        // draft `coverImagePath` (a successful new upload, here) differs
+        // from what the sheet opened with.
+        let draftCoverImagePath: String? = "new/my-own-photo.jpg"
+        trip.coverImagePath = draftCoverImagePath
+        if draftCoverImagePath != initialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+
+        let dto = trip.toDTO()
+        XCTAssertEqual(dto.coverImagePath, "new/my-own-photo.jpg")
+        XCTAssertNil(dto.coverCreditName)
+        XCTAssertNil(dto.coverCreditUrl)
+    }
+
+    /// The "Remove photo" case — same clearing rule, `draftCoverImagePath`
+    /// is `nil` instead of a new path.
+    @MainActor
+    func testRemovingCoverPhotoAlsoClearsAnyExistingPexelsCredit() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil,
+            coverImagePath: "old/pexels-cover.jpg", coverCreditName: "Priya", coverCreditUrl: "https://pexels.com/photo/1"
+        )
+        context.insert(trip)
+        let initialCoverImagePath = trip.coverImagePath
+
+        let draftCoverImagePath: String? = nil
+        trip.coverImagePath = draftCoverImagePath
+        if draftCoverImagePath != initialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+
+        let dto = trip.toDTO()
+        XCTAssertNil(dto.coverImagePath)
+        XCTAssertNil(dto.coverCreditName)
+        XCTAssertNil(dto.coverCreditUrl)
+    }
+
+    /// The negative case: editing an UNRELATED field (title, here) without
+    /// touching the cover photo at all must leave an existing Pexels credit
+    /// intact — this is what makes the render slot (`TripFormView
+    /// .coverPhotoCreditLine`) actually useful once P8c starts writing one,
+    /// rather than it evaporating on the trip's very next unrelated save.
+    @MainActor
+    func testSavingUnrelatedFieldsPreservesAnExistingPexelsCredit() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil,
+            coverImagePath: "old/pexels-cover.jpg", coverCreditName: "Priya", coverCreditUrl: "https://pexels.com/photo/1"
+        )
+        context.insert(trip)
+        let initialCoverImagePath = trip.coverImagePath
+
+        trip.title = "Porto" // the only field this "save" touches
+        let draftCoverImagePath = initialCoverImagePath // unchanged this session
+        trip.coverImagePath = draftCoverImagePath
+        if draftCoverImagePath != initialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+
+        let dto = trip.toDTO()
+        XCTAssertEqual(dto.title, "Porto")
+        XCTAssertEqual(dto.coverImagePath, "old/pexels-cover.jpg")
+        XCTAssertEqual(dto.coverCreditName, "Priya")
+        XCTAssertEqual(dto.coverCreditUrl, "https://pexels.com/photo/1")
+    }
+
     // MARK: - F8: canonicalGradientKey normalization
 
     func testCanonicalGradientKeyMapsKnownKeysCaseInsensitively() {

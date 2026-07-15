@@ -158,10 +158,11 @@ struct HeroFlightOverlay: View {
 
 /// The animating clone. Gradient + scrim + title survive the whole flight
 /// (§D1: the anatomy `TripCard`/`TripHeroView` already share -- both render
-/// `CoverGradient.from(key:)` + `textScrim` + a bottom-leading white
-/// `Typo.display(30)` title at the *same* font size in both end states, so
-/// the title never needs to visually rescale, only the frame around it
-/// does); the card-only garnish (status/pending pills, avatars, meta row,
+/// `CoverImage` (P8b: gradient, or a photo layered over it -- `from(key:)`
+/// pre-P8b) + `textScrim` + a bottom-leading white `Typo.display(30)` title
+/// at the *same* font size in both end states, so the title never needs to
+/// visually rescale, only the frame around it does); the card-only garnish
+/// (status/pending pills, avatars, meta row,
 /// and — P5 fix-round item 12 — the register's own extra content) fades out
 /// first, since neither the flight nor the hero has anywhere for any of it
 /// to land. Only ever mounted at non-accessibility text sizes
@@ -214,7 +215,7 @@ private struct HeroFlightClone: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            CoverGradient.from(key: trip.coverGradient)
+            CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
             CoverGradient.textScrim
 
             VStack(alignment: .leading, spacing: 0) {

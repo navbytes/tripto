@@ -303,6 +303,29 @@ final class TripArchiveImporterTests: XCTestCase {
         XCTAssertNil(profile.avatarPath)
     }
 
+    /// P8b (photo trip covers): same reasoning as the traveller `avatarPath`
+    /// test above, for the trip's own cover — the archive format has no
+    /// `cover_image_path`/`cover_credit_name`/`cover_credit_url` fields
+    /// (`docs/IMPORT_FORMAT.md` §2's `cover` is a bare gradient-token
+    /// string, and stays that way), so an imported trip always gets these
+    /// three `nil`, same as any other brand-new `Trip` with no photo.
+    func testImportedTripHasNoCoverImagePathOrCredit() async throws {
+        let context = makeContext()
+        let userId = UUID()
+        let trip = makeTrip(id: "cover-trip")
+        let data = try TripArchiveExporter.encode(makeDocument(trips: [trip]))
+
+        let outcome = await TripArchiveImporter.importArchive(data: data, modelContext: context, syncEngine: nil, userId: userId)
+        guard case .success = outcome else {
+            return XCTFail("expected success, got \(outcome)")
+        }
+
+        let storedTrip = try XCTUnwrap(try context.fetch(FetchDescriptor<Trip>()).first)
+        XCTAssertNil(storedTrip.coverImagePath)
+        XCTAssertNil(storedTrip.coverCreditName)
+        XCTAssertNil(storedTrip.coverCreditUrl)
+    }
+
     /// P8a: every test above builds its `ArchiveTrip`/`ArchiveDocument`
     /// fixtures through the CURRENT app's own `Codable` structs/encoder —
     /// which would trivially "support" a genuinely pre-P8a archive even if
@@ -364,6 +387,12 @@ final class TripArchiveImporterTests: XCTestCase {
 
         let trip = try XCTUnwrap(try context.fetch(FetchDescriptor<Trip>()).first)
         XCTAssertEqual(trip.title, "Okinawa")
+        // P8b: same "hand-authored legacy JSON, independent of today's own
+        // encoder" regression net, extended to the trip's own cover — a
+        // pre-P8b (and pre-P8a) archive has no cover-photo data of any kind.
+        XCTAssertNil(trip.coverImagePath, "a pre-P8b archive has no cover photo to import")
+        XCTAssertNil(trip.coverCreditName)
+        XCTAssertNil(trip.coverCreditUrl)
         let profiles = try context.fetch(FetchDescriptor<TripProfile>())
         XCTAssertEqual(Set(profiles.map(\.displayName)), ["Asha", "Kiran"])
         XCTAssertTrue(profiles.allSatisfy { $0.avatarPath == nil }, "a pre-P8a archive has no avatar data to import")
