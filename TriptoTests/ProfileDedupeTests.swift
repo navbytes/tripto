@@ -25,6 +25,23 @@ final class ProfileDedupeTests: XCTestCase {
         XCTAssertEqual(pairs.first?.duplicate.id, newer.id)
     }
 
+    /// D1: survivor tie-break is `createdAt` then `id` (matches
+    /// `HomeTripOrdering.ahead`'s own compound-key discipline) — two rows
+    /// written in the exact same instant (e.g. a bulk import) must still
+    /// resolve deterministically, not depend on `Dictionary`-grouping order.
+    func testEqualCreatedAtBreaksTheSurvivorTieByIdAscending() {
+        let tripId = UUID()
+        let same = Date(timeIntervalSince1970: 0)
+        let a = profile(tripId: tripId, name: "Sam", createdAt: same)
+        let b = profile(tripId: tripId, name: "Sam", createdAt: same)
+        let expectedSurvivor = [a, b].min { $0.id.uuidString < $1.id.uuidString }!
+
+        let forward = ProfileDedupe.duplicatePairs(in: [a, b])
+        let reversed = ProfileDedupe.duplicatePairs(in: [b, a])
+        XCTAssertEqual(forward.first?.survivor.id, expectedSurvivor.id)
+        XCTAssertEqual(reversed.first?.survivor.id, expectedSurvivor.id, "input order must not change which profile survives")
+    }
+
     func testDifferentNamesAreNeverPaired() {
         let tripId = UUID()
         let a = profile(tripId: tripId, name: "Mom")
@@ -97,18 +114,14 @@ final class ProfileDedupeTests: XCTestCase {
         )
     }
 
-    /// KNOWN GAP (flagged in the handoff, not fixed here — this file is
-    /// test-only): `duplicatePairs` chooses the survivor by `createdAt`
-    /// alone, with no regard for `TripProfile.linkedUserId`. A profile
-    /// linked to a real signed-in account member can therefore be chosen as
-    /// the DUPLICATE — and deleted by `merge` — if it happens to have been
-    /// created after its unlinked namesake. That's a real account
-    /// disconnect, not just a display nit: `ShareTripView.duplicateProfilePairs`
-    /// passes ALL profiles through unfiltered, so nothing upstream guards
-    /// against it either. `XCTExpectFailure` documents the desired contract
-    /// and keeps CI green until this is fixed; delete the wrapper (leaving
-    /// the assertion) the day survivor selection prefers `linkedUserId != nil`.
-    func testLinkedProfileShouldSurviveOverAnUnlinkedNewerNamesake() {
+    /// D1 FIXED (was an `XCTExpectFailure`-wrapped known gap — security/
+    /// reviewer/tester converged on this as a HIGH data-loss risk):
+    /// `duplicatePairs` now excludes every `linkedUserId != nil` profile
+    /// BEFORE grouping, so a linked profile can never be offered as either
+    /// side of a pair — not "the linked one always wins," but "the linked
+    /// one is invisible to this function." With only one (unlinked)
+    /// profile left, there's nothing to pair it with.
+    func testALinkedProfileIsNeverPairedWithAnUnlinkedNamesake() {
         let tripId = UUID()
         let unlinkedOlder = profile(tripId: tripId, name: "Mom", createdAt: Date(timeIntervalSince1970: 0))
         let linkedNewer = TripProfile(
@@ -116,14 +129,28 @@ final class ProfileDedupeTests: XCTestCase {
             linkedUserId: UUID(), createdAt: Date(timeIntervalSince1970: 100)
         )
 
-        XCTExpectFailure("""
-        KNOWN BUG: survivor is chosen by createdAt only (ProfileDedupe.swift's own `duplicatePairs`), \
-        so an account-linked profile can lose a merge to an older unlinked one. File a card; delete this \
-        expectation once linkedUserId is preferred.
-        """) {
-            let pairs = ProfileDedupe.duplicatePairs(in: [unlinkedOlder, linkedNewer])
-            XCTAssertEqual(pairs.first?.survivor.id, linkedNewer.id, "the account-linked profile must survive a merge")
-        }
+        XCTAssertTrue(
+            ProfileDedupe.duplicatePairs(in: [unlinkedOlder, linkedNewer]).isEmpty,
+            "a linked profile is excluded from detection entirely — the unlinked namesake has no eligible partner left"
+        )
+    }
+
+    /// D1's other named manifestation: two DISTINCT, both-linked real
+    /// account members who happen to share a display name must never be
+    /// offered as a dedupe pair either — sharing a name is common (family
+    /// members) and is not evidence they're the same person once both sides
+    /// are real accounts.
+    func testTwoDistinctLinkedProfilesSharingANameAreNeverPaired() {
+        let tripId = UUID()
+        let linkedA = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Sam", avatarColor: "amber",
+            linkedUserId: UUID(), createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let linkedB = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Sam", avatarColor: "moss",
+            linkedUserId: UUID(), createdAt: Date(timeIntervalSince1970: 100)
+        )
+        XCTAssertTrue(ProfileDedupe.duplicatePairs(in: [linkedA, linkedB]).isEmpty)
     }
 
     // MARK: - merge
@@ -219,5 +246,31 @@ final class ProfileDedupeTests: XCTestCase {
             survivorId: UUID(), duplicateId: UUID(), tripId: UUID(), modelContext: context, ensureTripLoaded: {}
         )
         XCTAssertNil(result)
+    }
+
+    /// D1 defense in depth: `merge` itself refuses to delete a linked
+    /// profile, independent of `duplicatePairs`'s own exclusion — a second,
+    /// cheap guard directly at the destructive mutation so no future caller
+    /// bypassing `duplicatePairs` could still delete a real account member.
+    @MainActor
+    func testMergeRefusesToDeleteALinkedDuplicateProfile() async throws {
+        let context = ModelContext(AppSchema.makeContainer(inMemory: true))
+        let tripId = UUID()
+        let survivor = profile(tripId: tripId, name: "Mom")
+        let linkedDuplicate = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Mom", avatarColor: "moss",
+            linkedUserId: UUID(), createdAt: .now
+        )
+        context.insert(survivor)
+        context.insert(linkedDuplicate)
+        try context.save()
+
+        let result = await ProfileDedupe.merge(
+            survivorId: survivor.id, duplicateId: linkedDuplicate.id, tripId: tripId, modelContext: context, ensureTripLoaded: {}
+        )
+
+        XCTAssertNil(result, "merge must refuse a linked profile even if asked directly")
+        let profiles = try context.fetch(FetchDescriptor<TripProfile>())
+        XCTAssertEqual(profiles.count, 2, "nothing was deleted")
     }
 }

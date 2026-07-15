@@ -229,6 +229,12 @@ struct DuplicateTripStrip: View {
     /// accessibility label (see below) so the action still names its
     /// target if VoiceOver's rotor jumps here directly, out of context.
     let survivorTitle: String
+    /// D6 (reviewer, MED — silent dead button): true while ANY merge is
+    /// already pending anywhere on Home (this strip's own, or a different
+    /// pair's) — `HomeView` passes `mergeCountdown != nil` unconditionally
+    /// to every strip. Dims + disables "Merge" rather than leaving a second
+    /// tap silently swallowed with no visible feedback.
+    var isMergePending = false
     let onMerge: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -284,6 +290,12 @@ struct DuplicateTripStrip: View {
                 .contentShape(Capsule())
                 .buttonStyle(.plain)
                 .accessibilityLabel("Merge into \(survivorTitle)")
+                // D6: `.disabled()` alone doesn't dim a manually-styled
+                // `.plain`-button label (`ShareTripView.roleBadgeLabel`'s own
+                // finding-5 doc comment) — both together, so a blocked tap
+                // reads as blocked rather than silently doing nothing.
+                .opacity(isMergePending ? 0.5 : 1)
+                .disabled(isMergePending)
         }
         .padding(Spacing.md)
         // `Palette.ink` on `Palette.amberSoft` (the text above) measures

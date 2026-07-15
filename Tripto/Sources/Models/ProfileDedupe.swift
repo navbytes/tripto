@@ -40,13 +40,33 @@ enum ProfileDedupe {
     /// to one trip — callers pass a trip-filtered `TripProfile` list, same
     /// as `ShareTripView`'s own `@Query`). A group of 3+ profiles sharing a
     /// name yields one pair per non-survivor, all pointing at the same
-    /// (earliest) survivor — chosen deterministically so the UI/tests don't
-    /// depend on dictionary-grouping order.
+    /// (earliest, id-tie-broken) survivor — chosen deterministically so the
+    /// UI/tests don't depend on dictionary-grouping order.
+    ///
+    /// D1 (security+reviewer+tester, HIGH): a `TripProfile` with
+    /// `linkedUserId != nil` belongs to a real signed-in account member —
+    /// this dedupe feature exists for the account-LESS "traveller" rows
+    /// (BUILD_PLAN §3.3), and must never pair (let alone delete, via
+    /// `merge` below) a linked profile: pairing two genuinely distinct
+    /// linked people who happen to share a display name is exactly as
+    /// wrong as deleting one, so the filter runs BEFORE grouping — a linked
+    /// profile is invisible to this function, full stop, not merely
+    /// ineligible to be chosen as the loser. Enforced here (not just at the
+    /// call site — `ShareTripView.duplicateProfilePairs` feeds every
+    /// profile on the trip unfiltered) so no future caller can reintroduce
+    /// the bug by forgetting a filter it doesn't know it needs.
     static func duplicatePairs(in profiles: [TripProfile]) -> [Pair] {
-        let groups = Dictionary(grouping: profiles) { normalizedKey($0) }
+        let unlinked = profiles.filter { $0.linkedUserId == nil }
+        let groups = Dictionary(grouping: unlinked) { normalizedKey($0) }
         var pairs: [Pair] = []
         for (key, group) in groups where !key.isEmpty && group.count > 1 {
-            let sorted = group.sorted { $0.createdAt < $1.createdAt }
+            // `id` breaks a `createdAt` tie (two rows written in the same
+            // instant, e.g. a bulk import) — same "compound key, not a
+            // single lucky field" discipline `HomeTripOrdering.ahead`'s own
+            // `(startDate, endDate, id)` fix just applied.
+            let sorted = group.sorted { lhs, rhs in
+                lhs.createdAt == rhs.createdAt ? lhs.id.uuidString < rhs.id.uuidString : lhs.createdAt < rhs.createdAt
+            }
             guard let survivor = sorted.first else { continue }
             for duplicate in sorted.dropFirst() {
                 pairs.append(Pair(survivor: survivor, duplicate: duplicate))
@@ -102,6 +122,13 @@ enum ProfileDedupe {
         guard let duplicateProfile = (try? modelContext.fetch(FetchDescriptor<TripProfile>(
             predicate: #Predicate<TripProfile> { $0.id == duplicateId }
         )))?.first else { return nil }
+        // D1 defense in depth: `duplicatePairs` already excludes linked
+        // profiles from ever being offered as a pair, but this is the
+        // actual DELETE — a second, independent guard right at the
+        // destructive mutation itself costs two lines and means no future
+        // caller can delete a real account member's profile even by
+        // constructing a `merge` call that bypasses `duplicatePairs`.
+        guard duplicateProfile.linkedUserId == nil else { return nil }
 
         let oldAssignees = (try? modelContext.fetch(FetchDescriptor<ItemAssignee>(
             predicate: #Predicate<ItemAssignee> { $0.profileId == duplicateId }

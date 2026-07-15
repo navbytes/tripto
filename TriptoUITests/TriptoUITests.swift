@@ -706,6 +706,12 @@ final class TriptoUITests: XCTestCase {
         attachScreenshot(named: "home-merge-strip", of: app)
 
         mergeButton.tap()
+        // D3(b) (P6 fix round): "Merge" now opens a confirmation dialog
+        // BEFORE the countdown starts — tap through it first.
+        let confirmButton = app.buttons["Merge"]
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5), "merge confirmation dialog never appeared")
+        confirmButton.tap()
+
         let undoButton = app.buttons["Undo"]
         XCTAssertTrue(undoButton.waitForExistence(timeout: 5), "merge countdown toast never appeared")
         attachScreenshot(named: "merge-countdown-toast", of: app)
@@ -739,5 +745,25 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Possible duplicates"].waitForExistence(timeout: 5), "dedupe review sheet never presented")
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "dedupe-review-sheet", of: app)
+    }
+
+    /// N2 (P6 fix round): Settings → `ImportResultSheet` (P6.1), reached via
+    /// `-uitestOpenSettings` (existing `HomeView` hook) + the new, additive
+    /// `-uitestOpenImportResult` (`SettingsView`'s own hook) rather than a
+    /// real archive-file import — `.fileImporter`'s system document picker
+    /// isn't drivable the way an in-app sheet is. Deliberately omits
+    /// `-uitestOpenFirstTrip`: `-uitestOpenSettings`'s own guard
+    /// (`path.isEmpty`) only fires when nothing else has already pushed
+    /// onto Home's path first.
+    func testCaptureSettingsImportResultSheet() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestOpenSettings", "-uitestOpenImportResult"
+        ]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Import complete"].waitForExistence(timeout: 30), "ImportResultSheet never appeared")
+        XCTAssertTrue(app.staticTexts["Trips"].waitForExistence(timeout: 5), "stat tiles never appeared")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "import-result-sheet", of: app)
     }
 }

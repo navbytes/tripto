@@ -279,6 +279,18 @@ struct SettingsView: View {
             }
         }
         .toastOverlay($toast)
+        // N2 (P6 fix round): opens `ImportResultSheet` directly with a
+        // representative report — same shape as `HomeView`'s own
+        // `-uitestOpenSettings`/`-uitestOpenShare` hooks, letting a
+        // screenshot pass reach this sheet without a real archive-file
+        // import flow.
+        .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-uitestOpenImportResult") {
+                archiveImportReport = Self.uitestSampleImportReport
+            }
+            #endif
+        }
         .onAppear {
             if displayName.isEmpty {
                 displayName = myProfile?.displayName ?? ""
@@ -685,4 +697,26 @@ struct SettingsView: View {
         let itemWord = itemCount == 1 ? "item" : "items"
         return "\(tripCount) \(tripWord) \u{00B7} \(itemCount) \(itemWord)"
     }
+
+    #if DEBUG
+    /// N2 (P6 fix round): `-uitestOpenImportResult`'s fixture — a
+    /// feature-complete report (stat tiles incl. travellers, a recoverable
+    /// skip, a non-recoverable one, the zone-assumed note) so the capture
+    /// UI test shows the sheet at its most representative, not the
+    /// degraded/empty case (`ImportResultSheetTests` already covers that
+    /// case's own text mapping directly).
+    private static let uitestSampleImportReport = TripArchiveImportReport(
+        tripsImported: 20, itemsImported: 67, profilesImported: 12,
+        tripSkips: [
+            .init(tripId: "1", title: "Parents\u{2019} visit to Hong Kong", reason: .cancelled),
+            .init(tripId: "2", title: "Bangkok", reason: .alreadyImported, existingLocalTripId: UUID()),
+            .init(tripId: "3", title: "", reason: .noStartDate)
+        ],
+        itemSkips: [
+            .init(tripId: "1", tripTitle: "IndiGo booking", itemId: "i1", itemLabel: "Flight 6E204", reason: .noStartTime)
+        ],
+        zoneAssumedCount: 3,
+        droppedNotesCount: 20
+    )
+    #endif
 }

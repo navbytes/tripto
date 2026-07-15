@@ -90,6 +90,11 @@ struct HomeView: View {
     /// a time (guarded in `startMerge`), matching this app's usual single-
     /// in-flight-op convention (`isRetryingPull`, `busyShareLink`).
     @State private var mergeCountdown: MergeCountdown?
+    /// D3(b) fix round: the merge strip's tap opens this confirmation
+    /// BEFORE `startMerge`'s countdown starts — a plain tuple (not a new
+    /// named struct) since it's transient UI state read only by the one
+    /// `.confirmationDialog` below.
+    @State private var mergePendingConfirm: (shell: Trip, survivor: Trip)?
 
     @ScaledMetric(relativeTo: .caption) private var valueRowIconSize: CGFloat = 13
 
@@ -264,6 +269,31 @@ struct HomeView: View {
             } message: {
                 if let trip = tripPendingDeletion {
                     Text("This removes \u{201C}\(trip.title)\u{201D} and everything in it for everyone on the trip.")
+                }
+            }
+            // D3(b) (docs/UX_REDESIGN_ROADMAP.md P6.2 fix round): the
+            // duplicate-trip merge's explicit confirm gate, BEFORE the 6s
+            // countdown even starts — same shape as the "Delete trip"
+            // dialog right above.
+            .confirmationDialog(
+                "Merge trips?",
+                isPresented: Binding(
+                    get: { mergePendingConfirm != nil },
+                    set: { isPresented in if !isPresented { mergePendingConfirm = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Merge", role: .destructive) {
+                    if let pending = mergePendingConfirm { startMerge(shell: pending.shell, survivor: pending.survivor) }
+                    mergePendingConfirm = nil
+                }
+                Button("Cancel", role: .cancel) { mergePendingConfirm = nil }
+            } message: {
+                if let pending = mergePendingConfirm {
+                    Text(
+                        "Moves everything into \u{201C}\(pending.survivor.title)\u{201D} and deletes this trip. "
+                            + "You\u{2019}ll have a few seconds to undo \u{2014} after that, it can\u{2019}t be reversed."
+                    )
                 }
             }
             .task {
@@ -641,8 +671,19 @@ struct HomeView: View {
                 ))
 
                 if let survivor = duplicateSurvivor {
-                    DuplicateTripStrip(survivorTitle: survivor.title) {
-                        startMerge(shell: trip, survivor: survivor)
+                    // D6 (reviewer, MED — silent dead button): disabled +
+                    // visually dimmed, not just functionally blocked, while
+                    // ANY merge (this pair's own, or a different one) is
+                    // already pending — a tap that can't do anything must
+                    // never look tappable. Covers a re-tap of this SAME
+                    // strip mid-countdown too, not just a second, different
+                    // pair (`DuplicateTripStrip`'s own doc comment).
+                    DuplicateTripStrip(survivorTitle: survivor.title, isMergePending: mergeCountdown != nil) {
+                        // D3(b) (security+reviewer, MED — auto-fires with no
+                        // confirmation): "Merge" opens a confirmation dialog
+                        // first; the countdown itself only starts once the
+                        // user confirms (`mergeConfirmationDialog` below).
+                        mergePendingConfirm = (shell: trip, survivor: survivor)
                     }
                     .padding(.horizontal, Spacing.xl)
                     .padding(.bottom, Spacing.lg)
@@ -1268,23 +1309,50 @@ struct HomeView: View {
         let survivorId: UUID
         let survivorTitle: String
         let task: Task<Void, Never>
+        /// D2 fix (security+reviewer+tester, HIGH — dishonest UI): flips
+        /// to `true` at the COMMIT BOUNDARY — the one synchronous instant,
+        /// right before `performMerge` is even called, after which
+        /// cancellation can no longer be honored (see `startMerge`'s own
+        /// doc comment for exactly why). `cancelMerge`/`mergeCountdownOverlay`
+        /// both consult this so a late tap can never again show "Merge
+        /// cancelled" while the merge quietly finishes anyway.
+        var isCommitted = false
     }
 
     /// Gates both the strip's visibility (`tripList`) and the action itself
-    /// to a user who can edit BOTH trips — `isOrganizer(of:)` is already
-    /// this app's "createdBy or organizer" check (see that method's own doc
-    /// comment: a signed-out session is trivially the organizer of every
-    /// trip it can see; a signed-in session is checked against
-    /// `TripMember.role`). A merge neither role could complete would be a
-    /// dead end, same reasoning `ShareTripView`'s own organizer-gated
-    /// actions already use.
+    /// to a user who can edit BOTH trips AND whose merge won't strand a
+    /// third party (D3, security+reviewer, MED — membership-blind auto-fire):
+    /// `isOrganizer(of:)` on both (this app's existing "createdBy or
+    /// organizer" check) is necessary but not sufficient — an organizer of
+    /// BOTH trips could still delete a shell that a companion/viewer who
+    /// ISN'T on the survivor depends on. Also true when the shell's only
+    /// member is the acting user themselves (a solo trip nobody else was
+    /// ever on) — evaluated without needing the survivor's own membership
+    /// to be locally current, unlike the subset check. Recomputed fresh
+    /// every call (reads live `tripMembers`/`authManager.userId`, nothing
+    /// cached) so `startMerge` re-checking it "at action time" actually
+    /// means something, not just at render time.
     private func canMergeTrips(_ shell: Trip, _ survivor: Trip) -> Bool {
-        isOrganizer(of: shell) && isOrganizer(of: survivor)
+        guard isOrganizer(of: shell), isOrganizer(of: survivor) else { return false }
+        guard let userId = authManager.userId else {
+            // Signed-out: every visible trip is local-only and necessarily
+            // single-member (this device's own implicit organizer) — see
+            // `isOrganizer`'s own doc comment. Nothing else to check.
+            return true
+        }
+        let shellMemberIds = Set(tripMembers.filter { $0.tripId == shell.id }.map(\.userId))
+        if shellMemberIds == [userId] { return true }
+        let survivorMemberIds = Set(tripMembers.filter { $0.tripId == survivor.id }.map(\.userId))
+        return shellMemberIds.isSubset(of: survivorMemberIds)
     }
 
     /// Tapping "Merge" doesn't merge immediately — it starts a 6s countdown
     /// (`mergeCountdownOverlay`) with an "Undo" escape hatch, and only
     /// performs the real merge once that window elapses uncancelled.
+    /// `mergePendingConfirm`'s own confirmation dialog (D3) is the actual
+    /// entry point now — reached only after the user confirms — but this
+    /// re-checks `canMergeTrips` regardless, so nothing changing between
+    /// "dialog shown" and "dialog confirmed" can slip through.
     ///
     /// Scope decision (per this task's own brief, stated here since it's a
     /// real design choice, not an obvious default): a literal post-hoc undo
@@ -1299,14 +1367,33 @@ struct HomeView: View {
     /// touches the model or the network until the 6s elapse, so "Undo" is
     /// just cancelling a still-pending `Task` — trivially correct, with no
     /// reverse operation to get wrong.
+    ///
+    /// D2 fix — the seam: `Task.cancel()` only flips a flag; it can never
+    /// abort code already running, so the ORIGINAL single `Task.isCancelled`
+    /// check (right after the 6s sleep) left a real window open — a late
+    /// Undo tap landing WHILE `performMerge`'s own awaits (two `pullTrip`s +
+    /// a SwiftData save) were in flight cancelled the `Task` and showed
+    /// "Merge cancelled," but `performMerge` kept running regardless and the
+    /// completion toast overwrote it moments later. The commit boundary is
+    /// the line right here, between the cancellation check and the call to
+    /// `performMerge`: `isCommitted` flips to `true` SYNCHRONOUSLY (no
+    /// `await` between the check and the flip, so there's no interleaving
+    /// window), and `cancelMerge` refuses to do anything once it sees that
+    /// flag — so a tap that lands in that same instant is guaranteed to see
+    /// either a clean cancel (nothing started) or a no-op (already
+    /// committed), never a false "cancelled."
     private func startMerge(shell: Trip, survivor: Trip) {
         guard mergeCountdown == nil else { return }
+        guard canMergeTrips(shell, survivor) else { return }
         let shellId = shell.id
         let survivorId = survivor.id
         let survivorTitle = survivor.title
         let task = Task {
             try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
+            // The commit boundary (see this method's own doc comment) —
+            // past this line, `cancelMerge` is a no-op.
+            mergeCountdown?.isCommitted = true
             let didMerge = await performMerge(shellId: shellId, survivorId: survivorId)
             mergeCountdown = nil
             toast = didMerge
@@ -1317,7 +1404,11 @@ struct HomeView: View {
     }
 
     private func cancelMerge() {
-        mergeCountdown?.task.cancel()
+        // D2 fix: once committed, cancellation is no longer authoritative —
+        // refuse rather than lie ("Merge cancelled" while the merge quietly
+        // finishes anyway).
+        guard let pending = mergeCountdown, !pending.isCommitted else { return }
+        pending.task.cancel()
         mergeCountdown = nil
         toast = "Merge cancelled"
     }
@@ -1400,14 +1491,20 @@ struct HomeView: View {
                     Text("Merging into \(mergeCountdown.survivorTitle)\u{2026}")
                         .font(Typo.body(weight: .semibold))
                         .foregroundStyle(.white)
-                    if !dynamicTypeSize.isAccessibilitySize {
-                        Spacer(minLength: Spacing.sm)
+                    // D2 fix: once committed (past the point `cancelMerge`
+                    // can still honor a tap), "Undo" is removed rather than
+                    // left tappable-but-inert — an offer that can't do
+                    // anything is its own kind of dishonest UI.
+                    if !mergeCountdown.isCommitted {
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Spacer(minLength: Spacing.sm)
+                        }
+                        Button("Undo", action: cancelMerge)
+                            .font(Typo.body(weight: .bold))
+                            .foregroundStyle(.white)
+                            .contentShape(Rectangle())
+                            .frame(minHeight: 44)
                     }
-                    Button("Undo", action: cancelMerge)
-                        .font(Typo.body(weight: .bold))
-                        .foregroundStyle(.white)
-                        .contentShape(Rectangle())
-                        .frame(minHeight: 44)
                 }
                 .padding(.horizontal, Spacing.lg)
                 .padding(.vertical, Spacing.md)

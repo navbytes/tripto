@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import Tripto
 
@@ -85,6 +86,122 @@ final class OutboxCoalescingTests: XCTestCase {
         XCTAssertEqual(ops[0].payloadJSON, "REPOINTED-TO-SURVIVOR")
         XCTAssertEqual(ops[1].rowId, shellId)
         XCTAssertEqual(ops[1].op, .delete, "the shell trip's own delete — a distinct rowId, so it queues alongside rather than colliding")
+    }
+
+    /// D5 (reviewer, MED — zero coverage on the outbox glue): the exact op
+    /// SET `HomeView.performMerge` (+ its call to the existing `delete(_:)`)
+    /// enqueues for a real merge — one upsert per moved item/packing/profile
+    /// row, re-pointed to the SURVIVOR's `tripId`, then the shell's own
+    /// `.trips` delete. `Moved` comes from a REAL `TripMerge.execute` call
+    /// (not hand-typed), so this can't drift from what the SwiftData half
+    /// actually produces; the enqueue calls themselves mirror
+    /// `performMerge`'s own code, in order — same "SyncStore-level, no
+    /// SyncEngine/network" shape as every other test in this file.
+    @MainActor
+    func testPerformMergeOpShapeIsOneUpsertPerMovedRowThenTheShellDelete() async throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+        let store = SyncStore(modelContainer: container)
+        let shellId = UUID()
+        let survivorId = UUID()
+
+        let item = TestFixtures.makeItineraryItem(tripId: shellId, startsAt: .now)
+        let packing = PackingItem(
+            id: UUID(), tripId: shellId, label: "Sunscreen", groupKeyRaw: PackingGroupKey.shared.rawValue,
+            assigneeProfileId: nil, isDone: false, createdBy: nil, createdAt: .now, updatedAt: .now, updatedBy: nil
+        )
+        let profile = TripProfile(id: UUID(), tripId: shellId, displayName: "Grandma", avatarColor: "sky", linkedUserId: nil, createdAt: .now)
+        context.insert(item)
+        context.insert(packing)
+        context.insert(profile)
+        try context.save()
+
+        let mergeOutcome = await TripMerge.execute(
+            shellTripId: shellId, survivorTripId: survivorId, modelContext: context, ensureBothLoaded: {}
+        )
+        let moved = try XCTUnwrap(mergeOutcome)
+
+        // Mirrors `HomeView.performMerge`'s own enqueue loop, in order.
+        for movedItem in moved.items {
+            try await store.enqueueUpsert(table: .itineraryItems, rowId: movedItem.id, tripId: survivorId, payloadJSON: "{}")
+        }
+        for movedPacking in moved.packing {
+            try await store.enqueueUpsert(table: .packingItems, rowId: movedPacking.id, tripId: survivorId, payloadJSON: "{}")
+        }
+        for movedProfile in moved.profiles {
+            try await store.enqueueUpsert(table: .tripProfiles, rowId: movedProfile.id, tripId: survivorId, payloadJSON: "{}")
+        }
+        // The shell trip's own delete — `HomeView.delete(_:)`'s existing,
+        // unchanged enqueue call.
+        try await store.enqueueDelete(table: .trips, rowId: shellId, tripId: shellId)
+
+        let ops = try await store.pendingOps()
+        XCTAssertEqual(ops.count, 4, "one upsert per moved row, plus the shell's own trips delete")
+        XCTAssertEqual(Set(ops.map(\.table)), [.itineraryItems, .packingItems, .tripProfiles, .trips])
+        XCTAssertEqual(ops.filter { $0.op == .upsert }.count, 3)
+        let tripsDelete = try XCTUnwrap(ops.first { $0.table == .trips })
+        XCTAssertEqual(tripsDelete.op, .delete)
+        XCTAssertEqual(tripsDelete.rowId, shellId)
+        // Every moved row's upsert carries the SURVIVOR's tripId, not the
+        // shell's — the whole point of a merge.
+        XCTAssertTrue(ops.filter { $0.table != .trips }.allSatisfy { $0.tripId == survivorId })
+    }
+
+    /// D5: the exact op set `ShareTripView.mergeDuplicateProfiles` enqueues
+    /// — a composite-key `.itemAssignees` delete per item unassigned from
+    /// the duplicate, an `.itemAssignees` upsert per item that needed a
+    /// fresh survivor pairing, a `.packingItems` upsert per repointed row,
+    /// and one final `.tripProfiles` delete for the duplicate profile
+    /// itself. `MergeResult` comes from a REAL `ProfileDedupe.merge` call.
+    @MainActor
+    func testMergeDuplicateProfilesOpShapeIsAssigneeAndPackingOpsThenTheProfileDelete() async throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+        let store = SyncStore(modelContainer: container)
+        let tripId = UUID()
+        let survivor = TripProfile(id: UUID(), tripId: tripId, displayName: "Mom", avatarColor: "amber", linkedUserId: nil, createdAt: .now)
+        let duplicate = TripProfile(id: UUID(), tripId: tripId, displayName: "Mom", avatarColor: "moss", linkedUserId: nil, createdAt: .now)
+        context.insert(survivor)
+        context.insert(duplicate)
+        let itemId = UUID()
+        context.insert(ItemAssignee(itemId: itemId, profileId: duplicate.id))
+        try context.save()
+
+        let mergeOutcome = await ProfileDedupe.merge(
+            survivorId: survivor.id, duplicateId: duplicate.id, tripId: tripId, modelContext: context, ensureTripLoaded: {}
+        )
+        let result = try XCTUnwrap(mergeOutcome)
+
+        // Mirrors `ShareTripView.mergeDuplicateProfiles`'s own enqueue loop,
+        // in order — the `.itemAssignees` delete's payload matches what
+        // `enqueueDeleteItemAssignee` actually encodes (`ItemAssigneeSyncTests`'
+        // own convention for this one composite-key table).
+        for unassignedItemId in result.itemIdsToUnassignFromDuplicate {
+            let dto = ItemAssigneeDTO(itemId: unassignedItemId, profileId: duplicate.id)
+            let json = String(data: try JSONCoding.encoder.encode(dto), encoding: .utf8)!
+            try await store.enqueueDelete(
+                table: .itemAssignees, rowId: ItemAssignee.compositeId(itemId: unassignedItemId, profileId: duplicate.id),
+                tripId: tripId, payloadJSON: json
+            )
+        }
+        for assignedItemId in result.itemIdsToAssignToSurvivor {
+            try await store.enqueueUpsert(
+                table: .itemAssignees, rowId: ItemAssignee.compositeId(itemId: assignedItemId, profileId: survivor.id),
+                tripId: tripId, payloadJSON: "{}"
+            )
+        }
+        for packingItem in result.repointedPackingItems {
+            try await store.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: tripId, payloadJSON: "{}")
+        }
+        try await store.enqueueDelete(table: .tripProfiles, rowId: duplicate.id, tripId: tripId)
+
+        let ops = try await store.pendingOps()
+        XCTAssertEqual(ops.count, 3, "one assignee delete, one assignee upsert (repointed), one profile delete")
+        XCTAssertEqual(ops.filter { $0.table == .itemAssignees && $0.op == .delete }.count, 1)
+        XCTAssertEqual(ops.filter { $0.table == .itemAssignees && $0.op == .upsert }.count, 1)
+        let profileDelete = try XCTUnwrap(ops.first { $0.table == .tripProfiles })
+        XCTAssertEqual(profileDelete.op, .delete)
+        XCTAssertEqual(profileDelete.rowId, duplicate.id)
     }
 
     func testDistinctRowsQueueSeparateOps() async throws {

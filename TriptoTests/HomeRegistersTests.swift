@@ -41,25 +41,51 @@ final class HomeRegistersTests: XCTestCase {
         XCTAssertEqual(ahead.map(\.id), [near.id, far.id])
     }
 
-    /// Same-`startDate` trips break ties by `id`, ascending (reviewer
-    /// finding) — NOT by preserving whatever order the caller happened to
-    /// hand them in. `sorted(by:)`'s own stability alone isn't enough:
-    /// SwiftData `@Query`'s row order for ties isn't guaranteed stable
-    /// across app launches, so two DIFFERENT input orderings of the exact
-    /// same same-day trips must still land on the exact same (id-sorted)
-    /// output — proving the tie-break is a real deterministic key, not an
-    /// accident of whatever order was handed in.
-    func testAheadWithEqualStartDatesBreaksTiesByIdAscending() {
+    /// Trips tied on BOTH `startDate` AND `endDate` break ties by `id`,
+    /// ascending (reviewer finding) — NOT by preserving whatever order the
+    /// caller happened to hand them in. `sorted(by:)`'s own stability alone
+    /// isn't enough: SwiftData `@Query`'s row order for ties isn't
+    /// guaranteed stable across app launches, so two DIFFERENT input
+    /// orderings of the exact same identical-range trips must still land on
+    /// the exact same (id-sorted) output — proving the tie-break is a real
+    /// deterministic key, not an accident of whatever order was handed in.
+    /// All three share the same `end` too (P6.2 reviewer fix: `endDate` now
+    /// sits ahead of `id` in the sort key) — isolating the id dimension the
+    /// same way `testBeenWithEqualEndDatesBreaksTiesByIdAscending` already
+    /// does for `been`, rather than mixing two different sort dimensions in
+    /// one fixture.
+    func testAheadWithEqualStartAndEndDatesBreaksTiesByIdAscending() {
         let same = day(2026, 7, 20)
-        let first = trip(id: UUID(), start: same, end: day(2026, 7, 22))
-        let second = trip(id: UUID(), start: same, end: day(2026, 7, 23))
-        let third = trip(id: UUID(), start: same, end: day(2026, 7, 24))
+        let sameEnd = day(2026, 7, 24)
+        let first = trip(id: UUID(), start: same, end: sameEnd)
+        let second = trip(id: UUID(), start: same, end: sameEnd)
+        let third = trip(id: UUID(), start: same, end: sameEnd)
         let expectedIds = [first, second, third].sorted { $0.id.uuidString < $1.id.uuidString }.map(\.id)
 
         let forward = HomeTripOrdering.ahead([first, second, third]) { _ in .upcoming }
         XCTAssertEqual(forward.map(\.id), expectedIds)
         let reversed = HomeTripOrdering.ahead([third, second, first]) { _ in .upcoming }
         XCTAssertEqual(reversed.map(\.id), expectedIds, "a different input order must still land on the same id-sorted output")
+    }
+
+    /// D4 (P6.2 reviewer, HIGH-adjacent): a trip sharing only the START
+    /// date with a true duplicate pair (identical start AND end) must never
+    /// sort BETWEEN them — `TripMergeDetection.survivorByShellId`'s whole
+    /// adjacent-pair scan depends on this. Before the `endDate` sort key,
+    /// this could fail purely on `id` string luck.
+    func testATripSharingOnlyTheStartDateNeverSortsBetweenATrueDuplicatePair() throws {
+        let start = day(2026, 7, 20)
+        let pairEnd = day(2026, 7, 25)
+        let first = trip(id: UUID(), start: start, end: pairEnd)
+        let second = trip(id: UUID(), start: start, end: pairEnd)
+        // Same start, but genuinely different (shorter) trip — no relation
+        // to the pair above beyond a coincidental shared start date.
+        let other = trip(id: UUID(), start: start, end: day(2026, 7, 21))
+
+        let ahead = HomeTripOrdering.ahead([first, other, second]) { _ in .upcoming }
+        let firstIndex = try XCTUnwrap(ahead.firstIndex { $0.id == first.id })
+        let secondIndex = try XCTUnwrap(ahead.firstIndex { $0.id == second.id })
+        XCTAssertEqual(abs(firstIndex - secondIndex), 1, "the true duplicate pair must be adjacent regardless of where `other` lands")
     }
 
     /// Same tie-break, `been` side (same reviewer finding, same reasoning).
