@@ -127,3 +127,111 @@ public extension CoverGradient {
         endPoint: .bottom
     )
 }
+
+/// UX P6.5 (docs/UX_REDESIGN_ROADMAP.md; `.claude/company/ux-redesign/
+/// DECISIONS.md` 2026-07-15): many more trip covers via random generation,
+/// on top of (not replacing) the three curated `CoverGradient` tokens.
+/// `Trip.cover_gradient` is unconstrained `text` server-side — `not null
+/// default 'dusk'`, no `CHECK` (unlike e.g. `trip_type`, which has one) —
+/// so a structured non-hex key is a safe, schema-compatible thing to store;
+/// "never a raw hex value" (the column's own DB comment) is honored by
+/// encoding hues, not colors.
+///
+/// Format: `"gen:v1:<hue1>,<hue2>"` — two integers, 0...359 degrees, for the
+/// gradient's first two stops. Versioned so a future format change adds a
+/// case rather than silently reinterpreting old keys. Everything else
+/// (saturation/brightness bands, the third stop, direction) is fixed,
+/// derived from the three curated gradients' own measured HSB (via
+/// `colorsys`, hue in degrees/sat+brightness in percent) so a generated
+/// cover always reads as this app's own "dusk departure" aesthetic, never
+/// an arbitrary color:
+///   dusk (25,61,91) / (9,55,79) / (237,45,32)
+///   plum (278,32,62) / (216,49,69) / (237,43,18)
+///   moss (140,30,62) / (216,49,69) / (237,45,32)
+/// (stop1 / stop2 / stop3, in gradient order). Stop3 is nearly one fixed
+/// dark-indigo tone across all three (hue ~237°, brightness 18-32%) —
+/// reused verbatim as `Palette.indigo` (`#2D2F52`, an exact match for 2 of
+/// the 3) rather than banded/randomized.
+///
+/// `CoverGradient.from(key:)` (Tokens.swift, generated) calls `decode`
+/// for any key that isn't one of the curated names — this is the ONE seam
+/// every render site (`TripCard`, hero, "been" thumbnails, the widgets)
+/// already goes through, so none of them need to know this format exists.
+public enum CoverGradientGenerator {
+    static let prefix = "gen:v1:"
+
+    /// Stop1 (the accent corner) — observed range across the curated set
+    /// is S 30-61%, V 62-91%. Upper V bound (91%) is the cap: dusk's own
+    /// accent stop (`#E8955A`), the brightest stop across the curated set
+    /// AND the exact "lightest stop" `Palette.coverPillFill`'s own
+    /// contrast math already treats as its worst case. A generated stop1
+    /// is therefore provably never brighter than a color the existing
+    /// scrim/pill contrast audit already covers — no near-white tops.
+    static let stop1Saturation: ClosedRange<Double> = 0.30...0.61
+    static let stop1Brightness: ClosedRange<Double> = 0.62...0.91
+
+    /// Stop2 (the middle transition) — observed S 49-55%, V 69-79%; 79% is
+    /// dusk's own stop2 brightness, the curated set's max there.
+    static let stop2Saturation: ClosedRange<Double> = 0.49...0.55
+    static let stop2Brightness: ClosedRange<Double> = 0.69...0.79
+
+    /// A fresh key for the Shuffle button / a new trip's cover — `seed` is
+    /// expected to be real entropy at the call site (`UInt64.random(in:)`);
+    /// this function itself stays a deterministic, testable function of
+    /// it, same "seed in, same key out" contract as
+    /// `TripFormView.seededGradientKey`. The two hues come from different
+    /// slices of the one seed rather than two independent rolls — good
+    /// enough for a decorative gradient, and keeps this a one-argument
+    /// pure function.
+    public static func generate(seed: UInt64) -> String {
+        let hue1 = Int(seed % 360)
+        let hue2 = Int((seed / 360) % 360)
+        return "\(prefix)\(hue1),\(hue2)"
+    }
+
+    /// Decodes a `"gen:v1:<hue1>,<hue2>"` key into its gradient — `nil` for
+    /// anything else (no prefix, wrong shape, non-numeric or out-of-range
+    /// hues), so `CoverGradient.from(key:)` can fall back to the default
+    /// exactly like an unrecognized curated key already does.
+    public static func decode(_ key: String?) -> LinearGradient? {
+        guard let (hue1, hue2) = parsedHues(key) else { return nil }
+        return LinearGradient(
+            colors: [
+                stopColor(hue: hue1, saturation: stop1Saturation, brightness: stop1Brightness),
+                stopColor(hue: hue2, saturation: stop2Saturation, brightness: stop2Brightness),
+                Palette.indigo
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    /// `"gen:v1:<hue1>,<hue2>"` -> both hues (each 0...359), case-
+    /// insensitive; `nil` for anything malformed. The one parse seam
+    /// `decode` relies on for its own fallback — `internal` (not
+    /// `private`) so a test can pin "malformed -> nil" directly against
+    /// it, same access level as the rest of this generator's internals.
+    static func parsedHues(_ key: String?) -> (Int, Int)? {
+        guard let lowered = key?.lowercased(), lowered.hasPrefix(prefix) else { return nil }
+        let parts = lowered.dropFirst(prefix.count).split(separator: ",", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+            let hue1 = Int(parts[0]), let hue2 = Int(parts[1]),
+            (0...359).contains(hue1), (0...359).contains(hue2)
+        else { return nil }
+        return (hue1, hue2)
+    }
+
+    /// One hue banded into a fixed saturation/brightness range — the hue's
+    /// own position in its 0...359 span doubles as the band position
+    /// (`t`), so a single random hue drives both "which color" and "how
+    /// light/saturated," rather than spending extra seed bits on a second
+    /// independent roll for each stop.
+    static func stopColor(hue: Int, saturation: ClosedRange<Double>, brightness: ClosedRange<Double>) -> Color {
+        let t = Double(hue) / 359
+        return Color(hue: Double(hue) / 360, saturation: lerp(saturation, t), brightness: lerp(brightness, t))
+    }
+
+    static func lerp(_ range: ClosedRange<Double>, _ t: Double) -> Double {
+        range.lowerBound + (range.upperBound - range.lowerBound) * t
+    }
+}

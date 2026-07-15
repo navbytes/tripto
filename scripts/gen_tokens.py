@@ -222,7 +222,11 @@ def gen_gradients(tokens: dict) -> list[str]:
         lines.append("")
 
     lines.append("    /// Resolves a `cover_gradient` token key to a gradient, falling back to")
-    lines.append("    /// the default when the key is missing or not recognized.")
+    lines.append("    /// the default when the key is missing or not recognized. UX P6.5: anything")
+    lines.append("    /// that doesn't match a curated key above is handed to")
+    lines.append("    /// `CoverGradientGenerator.decode` (PaletteExtras.swift — hand-written,")
+    lines.append("    /// never touched by this script) for the seeded-generator key format;")
+    lines.append("    /// `nil` there (unknown/malformed) still falls back to the default here.")
     lines.append("    public static func from(key: String?) -> LinearGradient {")
     lines.append("        switch key?.lowercased() {")
     for key in array_entries:
@@ -230,7 +234,7 @@ def gen_gradients(tokens: dict) -> list[str]:
     for key, alias_name in alias_names.items():
         lines.append(f'        case "{key}": return {alias_name}')
     fallback = next(iter(alias_names.values()), next(iter(array_entries)))
-    lines.append(f"        default: return {fallback}")
+    lines.append(f"        default: return CoverGradientGenerator.decode(key) ?? {fallback}")
     lines.append("        }")
     lines.append("    }")
     lines += ["}", ""]

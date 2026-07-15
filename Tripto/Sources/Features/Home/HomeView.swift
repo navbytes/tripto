@@ -34,6 +34,12 @@ struct HomeView: View {
     /// PLAN-signature-layer.md §D1: gates the card -> hero flight (RM ->
     /// plain push, same convention as everywhere else this app checks it).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// UX P6.5: "Show past trips" — device-local, deliberately not synced
+    /// (`SettingsView`'s own `@AppStorage` on the same key is the toggle;
+    /// this is the read side that collapses the "been" register). Defaults
+    /// `true` so a fresh install/existing user sees today's unchanged
+    /// behavior until they explicitly opt to hide.
+    @AppStorage(HomePastTripsVisibility.appStorageKey) private var showPastTrips = true
 
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
@@ -693,7 +699,17 @@ struct HomeView: View {
                 }
             }
 
-            if !beenTrips.isEmpty {
+            // UX P6.5: "Show past trips" off collapses the whole archive
+            // into one quiet reveal row instead — `shouldShowHiddenRow`
+            // already accounts for the empty-archive case (false there
+            // regardless of the setting), so the `else if !beenTrips
+            // .isEmpty` below stays the exact pre-P6.5 expanded rendering.
+            if HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: showPastTrips, beenCount: beenTrips.count) {
+                hiddenPastTripsRow(count: beenTrips.count)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else if !beenTrips.isEmpty {
                 beenSectionHeader(count: beenTrips.count)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -808,6 +824,13 @@ struct HomeView: View {
             LinearGradient(colors: [Palette.paper, Palette.paper.opacity(0)], startPoint: .top, endPoint: .bottom)
                 .frame(height: 8)
         }
+    }
+
+    /// UX P6.5: the collapsed "been" register's own row — tapping "Show"
+    /// flips the setting back on (never a toggle here, always on: this row
+    /// only ever renders while it's off) rather than reopening Settings.
+    private func hiddenPastTripsRow(count: Int) -> some View {
+        HiddenPastTripsRow(count: count) { showPastTrips = true }
     }
 
     /// P5.4: a "been" trip's muted compact row. Tapping reuses `openTrip`

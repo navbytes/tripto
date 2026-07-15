@@ -584,4 +584,111 @@ final class HomeRegistersTests: XCTestCase {
         let expectedMonth = start.formatted(.dateTime.month(.abbreviated))
         XCTAssertEqual(text, "\(expectedMonth) \u{00B7} 1 day \u{00B7} 2 items")
     }
+
+    // MARK: - HomePastTripsVisibility (UX P6.5 "Show past trips" setting)
+
+    func testShouldShowHiddenRowWhenSettingIsOffAndTherePastTrips() {
+        XCTAssertTrue(HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: false, beenCount: 3))
+    }
+
+    func testShouldShowHiddenRowFalseWhenSettingIsOn() {
+        XCTAssertFalse(HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: true, beenCount: 3))
+    }
+
+    /// The brief's own callout: the hidden-count row must not appear when
+    /// there are zero past trips, regardless of the setting.
+    func testShouldShowHiddenRowFalseWhenThereAreZeroPastTripsEvenIfSettingIsOff() {
+        XCTAssertFalse(HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: false, beenCount: 0))
+    }
+
+    func testHiddenRowTextSingularizes() {
+        XCTAssertEqual(HomePastTripsVisibility.hiddenRowText(beenCount: 1), "1 past trip hidden")
+    }
+
+    func testHiddenRowTextPluralizes() {
+        XCTAssertEqual(HomePastTripsVisibility.hiddenRowText(beenCount: 2), "2 past trips hidden")
+    }
+
+    // MARK: - P6.5 harden: the reveal row's count must equal what the `been`
+    // register actually contains, even under the tz edge cases this file
+    // already exercises above -- reusing those exact fixtures, since the
+    // reveal row and `been` must never be able to disagree about whether a
+    // borderline-live trip counts as "past."
+
+    /// Reuses `testBucketDoesNotArchiveATripOnItsLastNightInAWesternZone`'s
+    /// own Honolulu-stay fixture: a device far east (Tokyo) has already
+    /// turned its own calendar page, but the trip's own (Honolulu) zone says
+    /// its last night is still current. Paired with one genuinely past trip
+    /// -- the hidden-row count must reflect ONLY the real past trip, never
+    /// the still-live one a naive device-zone bucket could misjudge as over.
+    func testHiddenRowCountMatchesBeenRegisterCountWhenATripsOwnZoneKeepsItLiveOnItsLastNight() {
+        let honolulu = "Pacific/Honolulu"
+        var tokyoCal = Calendar(identifier: .gregorian)
+        tokyoCal.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let honoluluTrip = trip(
+            start: DayDate(year: 2026, month: 7, day: 20).asDate(calendar: tokyoCal),
+            end: DayDate(year: 2026, month: 7, day: 25).asDate(calendar: tokyoCal)
+        )
+        let stay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Waikiki stay",
+            startsAt: instant(2026, 7, 20, 15, 0, tz: honolulu),
+            endsAt: instant(2026, 7, 25, 11, 0, tz: honolulu), tz: honolulu
+        )
+        let liveTimeZone = TripDateBucketing.liveTimeZone(items: [stay])
+        // 2026-07-25 20:00 Honolulu -- the trip's own last night, still
+        // current in its own zone even though Tokyo has already rolled over.
+        let now = instant(2026, 7, 25, 20, 0, tz: honolulu)
+        let genuinelyPast = trip(start: day(2026, 1, 1), end: day(2026, 1, 5))
+
+        let realBucket: (Trip) -> TripBucket = { candidate in
+            candidate.id == honoluluTrip.id
+                ? HomeTripDayLabels.bucket(trip: candidate, liveTimeZone: liveTimeZone, now: now, deviceCalendar: tokyoCal)
+                : TripDateBucketing.bucket(startDate: candidate.startDate, endDate: candidate.endDate, today: now, calendar: tokyoCal)
+        }
+
+        let been = HomeTripOrdering.been([honoluluTrip, genuinelyPast], bucket: realBucket)
+        XCTAssertEqual(been.map(\.id), [genuinelyPast.id], "the still-live Honolulu trip must never land in `been`")
+
+        XCTAssertTrue(HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: false, beenCount: been.count))
+        XCTAssertEqual(
+            HomePastTripsVisibility.hiddenRowText(beenCount: been.count), "1 past trip hidden",
+            "the reveal row's count must equal the actual `been` register count, not include the still-live trip"
+        )
+    }
+
+    /// Mirror case, reusing `testAheadKeepsATripEndingLateTonightInAZoneAheadOfTheDevice`'s
+    /// own Naha fixture: a trip still ahead in its own (JST) zone even though
+    /// a device further east (Auckland) has already turned its own calendar
+    /// page. With nothing else in the list, the hidden-row count must stay
+    /// at exactly zero -- and the row itself must not render at all.
+    func testHiddenRowStaysAtZeroWhenTheOnlyTripIsStillAheadInAZoneEastOfTheDevice() {
+        var jst = Calendar(identifier: .gregorian)
+        jst.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let nahaStay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Naha stay",
+            startsAt: instant(2026, 7, 20, 15, 0, tz: "Asia/Tokyo"),
+            endsAt: instant(2026, 7, 26, 23, 0, tz: "Asia/Tokyo"),
+            tz: "Asia/Tokyo"
+        )
+        let nahaTrip = trip(
+            start: DayDate(year: 2026, month: 7, day: 20).asDate(calendar: jst),
+            end: DayDate(year: 2026, month: 7, day: 26).asDate(calendar: jst)
+        )
+        // 2026-07-26 23:30 JST == 2026-07-27 02:30 in Auckland.
+        let now = instant(2026, 7, 26, 23, 30, tz: "Asia/Tokyo")
+        let realBucket: (Trip) -> TripBucket = { candidate in
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TripDateBucketing.liveTimeZone(
+                items: [nahaStay], deviceTimeZone: TimeZone(identifier: "Pacific/Auckland")!
+            )
+            return TripDateBucketing.bucket(startDate: candidate.startDate, endDate: candidate.endDate, today: now, calendar: calendar)
+        }
+
+        let been = HomeTripOrdering.been([nahaTrip], bucket: realBucket)
+        XCTAssertTrue(been.isEmpty, "a trip still ahead in its own zone must never land in `been`")
+        XCTAssertFalse(
+            HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: false, beenCount: been.count),
+            "zero past trips must never show the hidden-row reveal, even mid this tz edge case"
+        )
+    }
 }

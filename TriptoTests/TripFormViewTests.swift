@@ -263,4 +263,84 @@ final class TripFormViewTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - P6.5: canonicalGradientKey preserves a valid generated key
+    // (a genuine, distinct cover) instead of folding it into "dusk" the way
+    // an unknown/legacy key still does.
+
+    func testCanonicalGradientKeyPreservesAValidGeneratedKey() {
+        let key = "gen:v1:120,45"
+        XCTAssertEqual(TripFormView.canonicalGradientKey(key), key)
+    }
+
+    func testCanonicalGradientKeyFallsBackToDuskForAMalformedGeneratedKey() {
+        XCTAssertEqual(TripFormView.canonicalGradientKey("gen:v1:400,45"), "dusk")
+    }
+
+    func testIsCoverGradientChangedTrueForTwoDifferentGeneratedKeys() {
+        XCTAssertTrue(TripFormView.isCoverGradientChanged(current: "gen:v1:10,20", initial: "gen:v1:30,40"))
+    }
+
+    func testIsCoverGradientChangedFalseForTheSameGeneratedKeyTwice() {
+        XCTAssertFalse(TripFormView.isCoverGradientChanged(current: "gen:v1:10,20", initial: "gen:v1:10,20"))
+    }
+
+    // MARK: - P6.5: nextShuffledGradientKey — Shuffle's actual behavior,
+    // mixing fresh `CoverGradientGenerator` rolls with the three curated
+    // classics (`shuffledGradientKey`, unchanged, still covered above).
+
+    func testNextShuffledGradientKeyGeneratesWhenSeedIsNotAMultipleOfFour() {
+        let key = TripFormView.nextShuffledGradientKey(current: "dusk", seed: 1)
+        XCTAssertTrue(key.hasPrefix("gen:v1:"))
+    }
+
+    func testNextShuffledGradientKeyStepsToTheNextCuratedClassicEveryFourthSeed() {
+        XCTAssertEqual(
+            TripFormView.nextShuffledGradientKey(current: "dusk", seed: 4),
+            TripFormView.shuffledGradientKey(current: "dusk")
+        )
+        XCTAssertEqual(TripFormView.nextShuffledGradientKey(current: "dusk", seed: 4), "plum")
+    }
+
+    func testNextShuffledGradientKeyIsDeterministicForTheSameSeed() {
+        XCTAssertEqual(
+            TripFormView.nextShuffledGradientKey(current: "moss", seed: 99),
+            TripFormView.nextShuffledGradientKey(current: "moss", seed: 99)
+        )
+    }
+
+    // MARK: - P6.5 harden: does Shuffle ever repeat the same key twice in a
+    // row? The two branches have DIFFERENT guarantees -- pinning both rather
+    // than assuming one blanket "never repeats" contract for the whole
+    // function.
+
+    /// The "1-in-4 classic" branch (`seed.isMultiple(of: 4)`) always steps to
+    /// `shuffledGradientKey`, which cycles `(currentIndex + 1) %
+    /// gradientOptions.count` -- with 3 options, `nextIndex` can never equal
+    /// `currentIndex`, so this branch alone provably never repeats the
+    /// current curated key.
+    func testNextShuffledGradientKeyOnTheClassicBranchNeverRepeatsTheCurrentCuratedKey() {
+        for key in ["dusk", "plum", "moss"] {
+            let next = TripFormView.nextShuffledGradientKey(current: key, seed: 4) // 4.isMultiple(of: 4) -> classic branch
+            XCTAssertNotEqual(next, key, "current \(key)")
+        }
+    }
+
+    /// The other 3-in-4 branch is a PURE function of `seed` alone --
+    /// `CoverGradientGenerator.generate(seed:)` never reads `current`, so
+    /// nothing excludes it from reproducing `current` verbatim. This is not
+    /// a defect: real entropy (`UInt64.random(in:)`) makes the same `UInt64`
+    /// recurring back to back astronomically unlikely, and the docs on
+    /// `nextShuffledGradientKey` never actually promise otherwise. Pinned
+    /// here as the function's real (weaker) contract, since the brief calls
+    /// out checking rather than assuming this.
+    func testNextShuffledGradientKeyOnTheRandomBranchCanReproduceTheCurrentKeyIfTheSameSeedRecurs() {
+        let seed: UInt64 = 5 // not a multiple of 4 -> the fresh-random-roll branch
+        let generated = TripFormView.nextShuffledGradientKey(current: "dusk", seed: seed)
+        XCTAssertTrue(generated.hasPrefix("gen:v1:"), "sanity: seed 5 must take the generate branch")
+        XCTAssertEqual(
+            TripFormView.nextShuffledGradientKey(current: generated, seed: seed), generated,
+            "the random branch has no guard against reproducing `current` when the same seed recurs"
+        )
+    }
 }

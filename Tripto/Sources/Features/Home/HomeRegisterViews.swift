@@ -354,3 +354,46 @@ struct BeenRow: View {
         .accessibilityLabel("\(trip.title), \(HomeBeenSummary.subtitleText(trip: trip, itemCount: itemCount))")
     }
 }
+
+/// UX P6.5: the collapsed "been" register when `SettingsView`'s "Show past
+/// trips" toggle is off — replaces the whole sticky-year-headers archive
+/// with one quiet row, so hiding past trips never reads as data loss (the
+/// count is always right there, one tap un-hides them). `HomeView` only
+/// ever shows this when there's at least one past trip to hide
+/// (`HomePastTripsVisibility.shouldShowHiddenRow`) — an empty archive has
+/// nothing to collapse, same as the expanded case's own empty-`beenTrips`
+/// gate.
+struct HiddenPastTripsRow: View {
+    let count: Int
+    let onShow: () -> Void
+
+    var body: some View {
+        Button(action: onShow) {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                    .accessibilityHidden(true)
+                Text(HomePastTripsVisibility.hiddenRowText(beenCount: count))
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                Spacer(minLength: Spacing.sm)
+                // `Palette.amberInk` — this app's existing "inline (non-
+                // capsule) amber text action" token (`PaletteExtras.swift`'s
+                // own doc comment), reused rather than a new color.
+                Text("Show")
+                    .font(Typo.body(Typo.Size.caption, weight: .bold))
+                    .foregroundStyle(Palette.amberInk)
+            }
+            .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, Spacing.xl)
+        // One VoiceOver stop, count + action together (P6.5 brief) —
+        // same "combine into one spoken sentence" convention as `BeenRow`
+        // above.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(HomePastTripsVisibility.hiddenRowText(beenCount: count)), Show")
+    }
+}
