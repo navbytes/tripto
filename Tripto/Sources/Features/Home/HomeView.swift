@@ -619,6 +619,11 @@ struct HomeView: View {
         // day-to-day). Computed once here, same "once per render pass"
         // convention as every other lookup above.
         let duplicateSurvivorByShellId = TripMergeDetection.survivorByShellId(in: aheadTrips)
+        // UX P6.6: hoisted so `planNewTripRow`'s own trailing-margin check
+        // (now sitting directly above the "been" content, see that row's own
+        // comment below) and the `if` below it agree on the exact same
+        // value, rather than calling this twice.
+        let showHiddenRow = HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: showPastTrips, beenCount: beenTrips.count)
 
         return List {
             ForEach(aheadTrips) { trip in
@@ -699,12 +704,28 @@ struct HomeView: View {
                 }
             }
 
+            // UX P6.6 (create-action reachability — ux-expert P5 fix-round
+            // finding + client direction): moved here, directly above the
+            // "been" content, from the true list end (P5.5's original spot)
+            // — a growing archive used to bury this affordance at the
+            // bottom of an ever-longer scroll. VoiceOver reads it in this
+            // same order: the create action before the archive header.
+            // `showHiddenRow || !beenTrips.isEmpty` mirrors the `if`/`else
+            // if` immediately below — zero past trips means NEITHER branch
+            // renders, so this stays the exact last row with no added
+            // trailing margin, same as before this move.
+            planNewTripRow
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .padding(.bottom, showHiddenRow || !beenTrips.isEmpty ? Spacing.lg : 0)
+
             // UX P6.5: "Show past trips" off collapses the whole archive
             // into one quiet reveal row instead — `shouldShowHiddenRow`
             // already accounts for the empty-archive case (false there
             // regardless of the setting), so the `else if !beenTrips
             // .isEmpty` below stays the exact pre-P6.5 expanded rendering.
-            if HomePastTripsVisibility.shouldShowHiddenRow(showPastTrips: showPastTrips, beenCount: beenTrips.count) {
+            if showHiddenRow {
                 hiddenPastTripsRow(count: beenTrips.count)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -725,11 +746,6 @@ struct HomeView: View {
                     }
                 }
             }
-
-            planNewTripRow
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)

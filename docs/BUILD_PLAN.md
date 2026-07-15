@@ -260,7 +260,10 @@ Each screen below maps to the mockups. Behavior stated here wins over the mockup
     gradient card unchanged: cover, city, country · start date · duration,
     a countdown pill, an avatar stack. Whole card/row is the tap target.
 - Empty state: not a blank screen — a single "Plan a new trip" invitation with one line on what the app does. (See §6 copy guidance.)
-- "Plan a new trip" affordance always present at the list foot.
+- "Plan a new trip" affordance always present — directly above the "Been
+  there" section once the archive holds any trips (create reachability
+  shouldn't degrade as it grows); with no past trips it's simply the list's
+  last row.
 
 ### 4.2 Trip → Itinerary timeline  (`TripApp.jsx` → Itinerary)
 - **This is the core screen. Most polish budget goes here.**
