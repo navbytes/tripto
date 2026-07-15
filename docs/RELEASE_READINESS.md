@@ -115,6 +115,12 @@ Full detail in [`PRIVACY_DISCLOSURE.md`](PRIVACY_DISCLOSURE.md). Summary:
   to an LLM provider (currently OpenAI) via Cloudflare AI Gateway to extract
   bookings. Import feature only; app functionality; not tracking. The app shows
   an explicit consent prompt before any text is sent (Apple Guideline 5.1.2(i)).
+- [ ] **(owner, at the next submission that ships P8 images)** Add
+  **"Photos or Videos"** under User Content in the App Privacy form — the P8
+  avatar/cover feature uploads user-selected photos to Supabase Storage
+  (client-approved 2026-07-16; plan:
+  `.claude/company/ux-redesign/handoffs/P8-images-plan.md`). Update
+  [`PRIVACY_DISCLOSURE.md`](PRIVACY_DISCLOSURE.md) in the same pass.
 
 ## 6. App Store Connect metadata (paste-ready)
 
