@@ -27,6 +27,8 @@ struct ShareTripView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
+    /// P7 award-audit: backs `inviteButtonsLayout`'s AX-size restack below.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var toast: String?
     @State private var shareSheetItems: [Any]?
@@ -600,7 +602,15 @@ struct ShareTripView: View {
                 .textCase(.uppercase)
 
             if isOrganizer {
-                HStack(spacing: Spacing.md) {
+                // P7 award-audit (persona dry-run, AX3): "Companion link"
+                // mid-word-wrapped ("Compani"/"on link") — splitting the row
+                // 50/50 left less width than that one word needs. Same
+                // defect class + fix `SegmentedControl`'s own doc comment
+                // already names ("equal-width segments mid-word-wrap... at
+                // accessibility sizes" -> stack vertically there instead),
+                // applied to both tiles uniformly rather than singling out
+                // the one that happened to break first.
+                inviteButtonsLayout {
                     inviteButton(role: .companion, title: "Companion link", icon: "pencil", color: CategoryColor.activity.fg)
                     inviteButton(role: .viewer, title: "Viewer link", icon: "eye.fill", color: CategoryColor.flight.fg)
                 }
@@ -626,6 +636,16 @@ struct ShareTripView: View {
                     .foregroundStyle(Palette.slate)
             }
         }
+    }
+
+    /// P7 award-audit: the two invite tiles split one row 50/50 at default
+    /// sizes; stacked (full row width each) at AX sizes, same `AnyLayout`
+    /// swap `SegmentedControl`'s Upcoming/Past pills already use for the
+    /// identical "equal-width split has no room for a whole word" squeeze.
+    private var inviteButtonsLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: Spacing.md))
+            : AnyLayout(HStackLayout(spacing: Spacing.md))
     }
 
     /// The one active invite of `role`, if any — invites are role-scoped
@@ -750,9 +770,11 @@ struct ShareTripView: View {
                         .foregroundStyle(Palette.amberInk)
                         .padding(.top, 1)
                         .accessibilityHidden(true)
+                    // P7 award-audit (CUT): headline used to repeat
+                    // "Review" — the button right below already says it.
                     Text(count == 1
-                        ? "1 name looks like the same person \u{2014} Review"
-                        : "\(count) names look like the same person \u{2014} Review")
+                        ? "1 name looks like the same person"
+                        : "\(count) names look like the same person")
                         .font(Typo.body(weight: .bold))
                         .foregroundStyle(Palette.ink)
                 }
@@ -781,6 +803,18 @@ struct ShareTripView: View {
     /// Same RLS-mirroring gate as adding an itinerary/packing item
     /// (`trip_profiles_insert`: organizer or companion) — reused rather
     /// than reinvented, per `ItemPermissions`'s own doc comment.
+    ///
+    /// P7 award-audit (BLOCKER): fg+fill were both `Palette.indigo`, a
+    /// generated token that's the *same* fixed dark hex in both themes
+    /// (Tokens.swift — deliberately fixed: it's the opaque fill this app's
+    /// toasts/filled toggles/cover-gradient stops rely on, see those call
+    /// sites). Reused as inline ink here it measured ~10.6:1 in light mode
+    /// but ~1.4:1 in dark (dark-on-near-black), same defect class
+    /// `BookingDetailView`'s own "D2 defect 7" doc comment already
+    /// diagnosed and fixed for its confirmation-code copy button — same
+    /// fix: `.ink`, this app's adaptive primary-text token, recomputed here
+    /// (fg vs. the fill immediately below, both themes): light ~13.9:1,
+    /// dark ~13.2:1 — both comfortably clear WCAG AA (and AAA).
     @ViewBuilder
     private var addProfileButton: some View {
         if ItemPermissions.canAdd(role: myRole) {
@@ -791,10 +825,10 @@ struct ShareTripView: View {
                     Image(systemName: "person.badge.plus")
                     Text("Add someone without the app").font(Typo.body(weight: .semibold))
                 }
-                .foregroundStyle(Palette.indigo)
+                .foregroundStyle(Palette.ink)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.md)
-                .background(Palette.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+                .background(Palette.ink.opacity(0.08), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
             }
             .buttonStyle(.plain)
             .padding(.top, Spacing.sm)
@@ -1441,9 +1475,15 @@ private struct ProfileDedupeReviewSheet: View {
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
                     .foregroundStyle(Palette.slate)
                     .frame(minHeight: 44)
-                Button("Merge") { pairPendingConfirm = pair }
+                // P7 award-audit: was plain `.ink` — this row's own tap
+                // leads straight to the confirm dialog's `role: .destructive`
+                // "Merge" above (deleting a `trip_profiles` row), so the
+                // entry point should read as destructive too, not a neutral
+                // action. Same automatic role-tint every other destructive
+                // row-button in this file already relies on (e.g. `inviteRow`'s
+                // "Revoke") — no explicit color needed once the role is set.
+                Button("Merge", role: .destructive) { pairPendingConfirm = pair }
                     .font(Typo.body(Typo.Size.caption, weight: .bold))
-                    .foregroundStyle(Palette.ink)
                     .frame(minHeight: 44)
             }
         }
