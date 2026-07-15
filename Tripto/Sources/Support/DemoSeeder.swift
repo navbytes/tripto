@@ -65,6 +65,21 @@ enum DemoSeeder {
         let member = TripMember(
             id: UUID(), tripId: tripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now
         )
+        // UX P4 Share screenshot (docs/UX_REDESIGN_ROADMAP.md P4.1's inline
+        // role-chip `Menu`): a second, local-only membership so that Menu
+        // has a non-self row to render/demo against at all — until a real
+        // companion actually joins, the trigger-created membership table
+        // only ever has the signed-in organizer locally (see `member`'s own
+        // doc comment), so there was nothing else to show the feature on.
+        // Same "local-only, never enqueued" shape as `member`: this
+        // `userId` isn't a real account, so pushing it would 23503 on
+        // `trip_members`' FK to `profiles`. `createdAt` is `now` + 1s
+        // (strictly after the organizer's) so `tripCreatorId`/`sortedMembers`
+        // resolve unambiguously.
+        let companionMember = TripMember(
+            id: UUID(), tripId: tripId, userId: UUID(), roleRaw: TripRole.companion.rawValue,
+            createdAt: now.addingTimeInterval(1)
+        )
         // M4 family layer: two non-app profiles (BUILD_PLAN.md §3.3/§5.3) —
         // the kids/grandparents the "Just mine" filter and packing list are
         // built for, seeded the same way a real organizer would add them
@@ -159,6 +174,7 @@ enum DemoSeeder {
 
         modelContext.insert(trip)
         modelContext.insert(member) // local-only; never enqueued (see note above)
+        modelContext.insert(companionMember) // local-only; never enqueued (see note above)
         modelContext.insert(meeraProfile)
         modelContext.insert(grandmaProfile)
         try? modelContext.save()
