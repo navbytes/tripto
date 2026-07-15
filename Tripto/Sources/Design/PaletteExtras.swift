@@ -65,6 +65,24 @@ public extension Palette {
     /// change between light and dark, same rationale as `onAmber` above.
     static let coverPillFill = Color.black.opacity(0.38)
 
+    /// Amber-soft tint for the "First up"/"Today" eyebrow labels
+    /// (`FirstUpStrip`/`TodayPanelView`) — the mockup's `.lbl` sets
+    /// `color: var(--amber-soft)`, not plain white (P5 fix-round item 9).
+    /// Reuses `amberSoft`'s own light-mode hex rather than inventing a new
+    /// number, but as a fixed (not theme-adaptive) constant: `amberSoft`
+    /// itself turns into a 22%-alpha wash in dark mode, which would render
+    /// this text near-invisible, and the wrong surface anyway — like
+    /// `coverPillFill` above, the cover gradient behind it doesn't change
+    /// with the system appearance. Computed against the same worst case as
+    /// that token's own audit (dusk's lightest stop composited under
+    /// `coverPillFill`), this measures ~4.74:1 (moss ~5.77:1, plum
+    /// ~7.61:1) — all clear AA's 4.5:1 bar. The mockup's own literal
+    /// `--amber-soft` (#F6C48A, more saturated) only reaches ~3.49:1 on
+    /// dusk, so it was rejected. Used at full opacity, not stacked under an
+    /// extra `.opacity(0.85)` the way the white eyebrow text previously
+    /// was — that dimming would drop dusk to ~3.93:1, under the bar.
+    static let coverPillAmberText = Color(hex: "#FBEADB")
+
     /// Elevation/depth tint for `.shadow(color:...)` call sites (UX audit
     /// finding 5) — deliberately distinct from `ink`, which is
     /// text-semantic and flips to near-white in dark mode; using it as a

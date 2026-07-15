@@ -9,16 +9,26 @@ import SwiftUI
 /// pill bullet. `fraction` is pre-clamped by the caller (`TripCard`).
 /// Decorative — the pill's own "in N days" text already carries the
 /// meaning, so this stays out of VoiceOver.
+///
+/// Reviewer finding: the original 2.4pt stroke on a 13pt circle (a ~0.18
+/// diameter ratio) was too thin to read at a glance against the pill's own
+/// busy gradient backdrop — confirmed by cropping/zooming a captured
+/// screenshot, where the amber arc was technically present but easy to miss
+/// entirely. The mockup's own `.ring` is a thicker donut (13px circle, 3px
+/// inset — a ~0.27 ratio); `lineWidth` now matches that proportion, and the
+/// track's own opacity is bumped so the UNFILLED portion also reads clearly
+/// rather than blending into `coverPillFill`.
 struct CountdownRing: View {
     let fraction: Double
-    @ScaledMetric(relativeTo: .caption) private var diameter: CGFloat = 13
+    @ScaledMetric(relativeTo: .caption) private var diameter: CGFloat = 14
+    private var lineWidth: CGFloat { diameter * 0.27 }
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.white.opacity(0.28), lineWidth: 2.4)
+            Circle().stroke(Color.white.opacity(0.4), lineWidth: lineWidth)
             Circle()
                 .trim(from: 0, to: fraction)
-                .stroke(Palette.amber, style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+                .stroke(Palette.amber, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 // Starts at 12 o'clock, draws clockwise — the familiar
                 // activity-ring reading direction.
                 .rotationEffect(.degrees(-90))
@@ -79,7 +89,7 @@ struct FirstUpStrip: View {
                     .font(Typo.body(9.5, weight: .bold))
                     .tracking(1.1)
                     .textCase(.uppercase)
-                    .opacity(0.85)
+                    .foregroundStyle(Palette.coverPillAmberText)
                 Text(model.text)
                     .font(Typo.body(13, weight: .semibold))
                     .lineLimit(1)
@@ -110,9 +120,18 @@ struct DayProgressBar: View {
     let dayNumber: Int
     let totalDays: Int
 
+    /// Reviewer nit: capped at the same ceiling `ItineraryDayBucketing
+    /// .maxGapFillDays` already uses for its own "don't walk a corrupt/
+    /// absurd date range's full length" guard — an un-capped `totalDays`
+    /// (a manual edit or a bad import) would otherwise draw one segment per
+    /// day with no upper bound.
+    private var segmentCount: Int {
+        min(max(totalDays, 1), ItineraryDayBucketing.maxGapFillDays)
+    }
+
     var body: some View {
         HStack(spacing: Spacing.xxs) {
-            ForEach(1...max(totalDays, 1), id: \.self) { day in
+            ForEach(1...segmentCount, id: \.self) { day in
                 Capsule()
                     .fill(segmentColor(for: day))
                     .frame(height: 3)
@@ -143,7 +162,7 @@ struct TodayPanelView: View {
                 .font(Typo.body(9.5, weight: .bold))
                 .tracking(1.1)
                 .textCase(.uppercase)
-                .opacity(0.85)
+                .foregroundStyle(Palette.coverPillAmberText)
                 .padding(.top, Spacing.xxs)
 
             ForEach(Array(panel.rows.enumerated()), id: \.offset) { _, row in

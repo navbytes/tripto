@@ -41,21 +41,38 @@ final class HomeRegistersTests: XCTestCase {
         XCTAssertEqual(ahead.map(\.id), [near.id, far.id])
     }
 
-    /// Swift's `sorted(by:)` is a *stable* sort (guaranteed since Swift 5) —
-    /// pinned here directly against `ahead`'s own real comparator (not just
-    /// assumed from the stdlib docs) so a future refactor to an unstable
-    /// sort can't silently scramble same-day trips' order.
-    func testAheadWithEqualStartDatesPreservesInputOrderStably() {
+    /// Same-`startDate` trips break ties by `id`, ascending (reviewer
+    /// finding) — NOT by preserving whatever order the caller happened to
+    /// hand them in. `sorted(by:)`'s own stability alone isn't enough:
+    /// SwiftData `@Query`'s row order for ties isn't guaranteed stable
+    /// across app launches, so two DIFFERENT input orderings of the exact
+    /// same same-day trips must still land on the exact same (id-sorted)
+    /// output — proving the tie-break is a real deterministic key, not an
+    /// accident of whatever order was handed in.
+    func testAheadWithEqualStartDatesBreaksTiesByIdAscending() {
         let same = day(2026, 7, 20)
         let first = trip(id: UUID(), start: same, end: day(2026, 7, 22))
         let second = trip(id: UUID(), start: same, end: day(2026, 7, 23))
         let third = trip(id: UUID(), start: same, end: day(2026, 7, 24))
+        let expectedIds = [first, second, third].sorted { $0.id.uuidString < $1.id.uuidString }.map(\.id)
+
         let forward = HomeTripOrdering.ahead([first, second, third]) { _ in .upcoming }
-        XCTAssertEqual(forward.map(\.id), [first.id, second.id, third.id])
-        // Same three trips, opposite input order — a stable sort mirrors it
-        // exactly, not some incidental identity/hash-based order.
+        XCTAssertEqual(forward.map(\.id), expectedIds)
         let reversed = HomeTripOrdering.ahead([third, second, first]) { _ in .upcoming }
-        XCTAssertEqual(reversed.map(\.id), [third.id, second.id, first.id])
+        XCTAssertEqual(reversed.map(\.id), expectedIds, "a different input order must still land on the same id-sorted output")
+    }
+
+    /// Same tie-break, `been` side (same reviewer finding, same reasoning).
+    func testBeenWithEqualEndDatesBreaksTiesByIdAscending() {
+        let same = day(2026, 3, 10)
+        let first = trip(id: UUID(), start: day(2026, 3, 1), end: same)
+        let second = trip(id: UUID(), start: day(2026, 3, 2), end: same)
+        let expectedIds = [first, second].sorted { $0.id.uuidString < $1.id.uuidString }.map(\.id)
+
+        let forward = HomeTripOrdering.been([first, second]) { _ in .past }
+        XCTAssertEqual(forward.map(\.id), expectedIds)
+        let reversed = HomeTripOrdering.been([second, first]) { _ in .past }
+        XCTAssertEqual(reversed.map(\.id), expectedIds)
     }
 
     /// Repeated calls against the identical (already-shuffled) input must
@@ -152,6 +169,74 @@ final class HomeRegistersTests: XCTestCase {
             .past,
             "sanity: judged against the device's own zone this same trip/instant would already read as past"
         )
+    }
+
+    // MARK: - HomeTripDayLabels.bucket (reviewer HIGH: tz-west bucketing)
+
+    /// The exact regression the reviewer named: device in Tokyo (east),
+    /// trip's own items all in Honolulu (west) — `calendar.startOfDay(for:)`
+    /// reinterpreting the trip's already-device-anchored `startDate`/
+    /// `endDate` through the LIVE (Honolulu) zone would shift both a full
+    /// day earlier, wrongly archiving a trip that's still live. Composed
+    /// with the real `TripDateBucketing.liveTimeZone` (not a stub), mirroring
+    /// exactly how `HomeView`'s `tripList` derives it.
+    func testBucketKeepsATripLiveWhenDeviceIsEastOfTheTripsOwnZone() {
+        let honolulu = "Pacific/Honolulu"
+        var honoluluCal = Calendar(identifier: .gregorian)
+        honoluluCal.timeZone = TimeZone(identifier: honolulu)!
+        // A 5-night Honolulu stay — device-anchored start/end dates built
+        // the same way `TripFormView.save()` builds them: whatever calendar
+        // day the CREATING device's `Calendar.current` said, here simulated
+        // as Tokyo (a device far east of Honolulu).
+        var tokyoCal = Calendar(identifier: .gregorian)
+        tokyoCal.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let honoluluTrip = trip(
+            start: DayDate(year: 2026, month: 7, day: 20).asDate(calendar: tokyoCal),
+            end: DayDate(year: 2026, month: 7, day: 25).asDate(calendar: tokyoCal)
+        )
+        let stay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Waikiki stay",
+            startsAt: instant(2026, 7, 20, 15, 0, tz: honolulu),
+            endsAt: instant(2026, 7, 25, 11, 0, tz: honolulu),
+            tz: honolulu
+        )
+        let liveTimeZone = TripDateBucketing.liveTimeZone(items: [stay])
+        XCTAssertEqual(liveTimeZone.identifier, honolulu, "sanity: the trip's own effective zone is Honolulu")
+
+        // "Now" is 2026-07-22 09:00 in Tokyo — squarely inside the trip's
+        // 5 nights, no matter which zone judges it.
+        let now = instant(2026, 7, 22, 9, 0, tz: "Asia/Tokyo")
+        let bucket = HomeTripDayLabels.bucket(trip: honoluluTrip, liveTimeZone: liveTimeZone, now: now, deviceCalendar: tokyoCal)
+        XCTAssertEqual(bucket, .inProgress, "a trip mid-stay in a zone WEST of the device must still read as live")
+    }
+
+    /// The boundary case: the trip's LAST night, still live in its own
+    /// (western) zone even though the device's own (eastern) zone would
+    /// already call it over — the mirror of `DateBucketingTests`' own Naha
+    /// case, but for the ahead/been split specifically.
+    func testBucketDoesNotArchiveATripOnItsLastNightInAWesternZone() {
+        let honolulu = "Pacific/Honolulu"
+        var tokyoCal = Calendar(identifier: .gregorian)
+        tokyoCal.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let honoluluTrip = trip(
+            start: DayDate(year: 2026, month: 7, day: 20).asDate(calendar: tokyoCal),
+            end: DayDate(year: 2026, month: 7, day: 25).asDate(calendar: tokyoCal)
+        )
+        let stay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Waikiki stay",
+            startsAt: instant(2026, 7, 20, 15, 0, tz: honolulu),
+            endsAt: instant(2026, 7, 25, 11, 0, tz: honolulu),
+            tz: honolulu
+        )
+        let liveTimeZone = TripDateBucketing.liveTimeZone(items: [stay])
+
+        // 2026-07-25 20:00 Honolulu == 2026-07-26 15:00 Tokyo — the trip's
+        // own last calendar day (the 25th, Honolulu) is still current, but a
+        // device reading its OWN (Tokyo) calendar has already turned to the
+        // 26th, past the trip's device-anchored `endDate` (the 25th).
+        let now = instant(2026, 7, 25, 20, 0, tz: honolulu)
+        let bucket = HomeTripDayLabels.bucket(trip: honoluluTrip, liveTimeZone: liveTimeZone, now: now, deviceCalendar: tokyoCal)
+        XCTAssertEqual(bucket, .inProgress, "the trip's own last night in Honolulu must not be archived a day early")
     }
 
     func testOrderedIsAheadThenBeen() {
@@ -283,6 +368,7 @@ final class HomeRegistersTests: XCTestCase {
     func testItemsFiltersToTodayInLiveTimeZone() {
         let tz = TimeZone(identifier: "Asia/Tokyo")!
         let now = instant(2026, 7, 24, 8, 0, tz: "Asia/Tokyo")
+        let tripStart = DayDate(year: 2026, month: 7, day: 22)
         let today1 = TestFixtures.makeItineraryItem(
             title: "Breakfast", startsAt: instant(2026, 7, 24, 9, 0, tz: "Asia/Tokyo"), tz: "Asia/Tokyo"
         )
@@ -295,21 +381,44 @@ final class HomeRegistersTests: XCTestCase {
         let yesterday = TestFixtures.makeItineraryItem(
             title: "Arrival", startsAt: instant(2026, 7, 23, 20, 0, tz: "Asia/Tokyo"), tz: "Asia/Tokyo"
         )
-        let result = HomeTodayPlan.items(in: [tomorrow, today2, yesterday, today1], liveTimeZone: tz, now: now)
-        XCTAssertEqual(result.map(\.id), [today1.id, today2.id])
+        let result = HomeTodayPlan.items(in: [tomorrow, today2, yesterday, today1], tripStart: tripStart, liveTimeZone: tz, now: now)
+        XCTAssertEqual(result.map { $0.item.id }, [today1.id, today2.id])
     }
 
     func testItemsExcludesSuggestedItems() {
         let tz = TimeZone(identifier: "UTC")!
         let now = instant(2026, 7, 24, 8, 0, tz: "UTC")
+        let tripStart = DayDate(year: 2026, month: 7, day: 22)
         let confirmed = TestFixtures.makeItineraryItem(
             title: "Real plan", startsAt: instant(2026, 7, 24, 9, 0, tz: "UTC"), status: .confirmed
         )
         let suggested = TestFixtures.makeItineraryItem(
             title: "Unreviewed", startsAt: instant(2026, 7, 24, 10, 0, tz: "UTC"), status: .suggested
         )
-        let result = HomeTodayPlan.items(in: [confirmed, suggested], liveTimeZone: tz, now: now)
-        XCTAssertEqual(result.map(\.id), [confirmed.id])
+        let result = HomeTodayPlan.items(in: [confirmed, suggested], tripStart: tripStart, liveTimeZone: tz, now: now)
+        XCTAssertEqual(result.map { $0.item.id }, [confirmed.id])
+    }
+
+    /// Reviewer MED finding: an ONGOING multi-night stay (check-in
+    /// yesterday, check-out in 2 more nights) never itself `startsAt`
+    /// today, but the itinerary tab's own `ItineraryDayBucketing.sections`
+    /// still carries a `.staying` row for it on every night in between —
+    /// `HomeTodayPlan.items` must count that row too, or Home's "+K more
+    /// today" would under-count relative to what the itinerary shows.
+    func testItemsIncludesAnOngoingStayThatCheckedInEarlier() {
+        let tz = TimeZone(identifier: "UTC")!
+        let now = instant(2026, 7, 24, 8, 0, tz: "UTC")
+        let tripStart = DayDate(year: 2026, month: 7, day: 20)
+        let stay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Beach Hotel",
+            startsAt: instant(2026, 7, 22, 15, 0, tz: "UTC"), endsAt: instant(2026, 7, 26, 11, 0, tz: "UTC"), tz: "UTC"
+        )
+        let result = HomeTodayPlan.items(in: [stay], tripStart: tripStart, liveTimeZone: tz, now: now)
+        XCTAssertEqual(result.count, 1)
+        guard case .staying(let item, _, _) = result.first else {
+            return XCTFail("expected a `.staying` row for an ongoing stay, got \(String(describing: result.first))")
+        }
+        XCTAssertEqual(item.id, stay.id)
     }
 
     /// The "+K more today" count: 4 items today, only the first 2 render as
@@ -323,8 +432,8 @@ final class HomeRegistersTests: XCTestCase {
                 title: "Plan \(offset)", startsAt: instant(2026, 7, 24, 9 + offset, 0, tz: "Asia/Tokyo"), tz: "Asia/Tokyo"
             )
         }
-        let todayItems = HomeTodayPlan.items(in: items, liveTimeZone: tz, now: now)
-        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayItems: todayItems, now: now, liveTimeZone: tz, deviceCalendar: utc)
+        let todayRows = HomeTodayPlan.items(in: items, tripStart: DayDate(year: 2026, month: 7, day: 22), liveTimeZone: tz, now: now)
+        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayRows: todayRows, now: now, liveTimeZone: tz, deviceCalendar: utc)
         XCTAssertEqual(panel.rows.count, 2)
         XCTAssertEqual(panel.rows.map(\.title), ["Plan 0", "Plan 1"])
         XCTAssertEqual(panel.moreCount, 2)
@@ -345,10 +454,27 @@ final class HomeRegistersTests: XCTestCase {
                 title: "Plan \(offset)", startsAt: instant(2026, 7, 24, 9 + offset, 0, tz: "Asia/Tokyo"), tz: "Asia/Tokyo"
             )
         }
-        let todayItems = HomeTodayPlan.items(in: items, liveTimeZone: tz, now: now)
-        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayItems: todayItems, now: now, liveTimeZone: tz, deviceCalendar: utc)
+        let todayRows = HomeTodayPlan.items(in: items, tripStart: DayDate(year: 2026, month: 7, day: 22), liveTimeZone: tz, now: now)
+        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayRows: todayRows, now: now, liveTimeZone: tz, deviceCalendar: utc)
         XCTAssertEqual(panel.rows.count, 2, "both of today's items must render as rows")
         XCTAssertEqual(panel.moreCount, 0)
+    }
+
+    /// A staying row's own display text: no single clock time (the whole
+    /// point of an all-day backdrop row), title carries the "Staying" cue.
+    func testTodayPanelDisplaysAStayingRowWithNoTimeAndAStayingLabel() {
+        let tz = TimeZone(identifier: "UTC")!
+        let now = instant(2026, 7, 24, 8, 0, tz: "UTC")
+        let fiveDayTrip = trip(start: day(2026, 7, 22), end: day(2026, 7, 26))
+        let stay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Beach Hotel",
+            startsAt: instant(2026, 7, 22, 15, 0, tz: "UTC"), endsAt: instant(2026, 7, 26, 11, 0, tz: "UTC"), tz: "UTC"
+        )
+        let todayRows = HomeTodayPlan.items(in: [stay], tripStart: DayDate(year: 2026, month: 7, day: 22), liveTimeZone: tz, now: now)
+        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayRows: todayRows, now: now, liveTimeZone: tz, deviceCalendar: utc)
+        XCTAssertEqual(panel.rows.count, 1)
+        XCTAssertEqual(panel.rows.first?.time, "")
+        XCTAssertEqual(panel.rows.first?.title, "Staying \u{00B7} Beach Hotel")
     }
 
     /// "Day N of M" — day 1 is the trip's own start date; day 3 is two full
@@ -357,7 +483,7 @@ final class HomeRegistersTests: XCTestCase {
         let tz = TimeZone(identifier: "UTC")!
         let now = instant(2026, 7, 24, 9, 0, tz: "UTC")
         let fiveDayTrip = trip(start: day(2026, 7, 22), end: day(2026, 7, 26))
-        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayItems: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
+        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayRows: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
         XCTAssertEqual(panel.dayNumber, 3)
         XCTAssertEqual(panel.totalDays, 5)
     }
@@ -372,7 +498,7 @@ final class HomeRegistersTests: XCTestCase {
         // way (`HomeTodayPanel.make`'s own doc comment).
         let now = instant(2026, 7, 30, 9, 0, tz: "UTC")
         let fiveDayTrip = trip(start: day(2026, 7, 22), end: day(2026, 7, 26))
-        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayItems: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
+        let panel = HomeTodayPanel.make(trip: fiveDayTrip, todayRows: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
         XCTAssertEqual(panel.dayNumber, 5)
     }
 
@@ -390,7 +516,7 @@ final class HomeRegistersTests: XCTestCase {
         let tz = TimeZone(identifier: "UTC")!
         let now = instant(2026, 7, 24, 9, 0, tz: "UTC")
         let reversedTrip = trip(start: day(2026, 7, 26), end: day(2026, 7, 22))
-        let panel = HomeTodayPanel.make(trip: reversedTrip, todayItems: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
+        let panel = HomeTodayPanel.make(trip: reversedTrip, todayRows: [], now: now, liveTimeZone: tz, deviceCalendar: utc)
         XCTAssertEqual(panel.totalDays, 1, "a reversed date range must clamp to at least 1 day, never negative/zero")
         XCTAssertTrue(
             (1...panel.totalDays).contains(panel.dayNumber),
@@ -421,5 +547,15 @@ final class HomeRegistersTests: XCTestCase {
         let text = HomeBeenSummary.subtitleText(trip: oneDayTrip, itemCount: 1, calendar: utc)
         let expectedMonth = start.formatted(.dateTime.month(.abbreviated))
         XCTAssertEqual(text, "\(expectedMonth) \u{00B7} 1 day \u{00B7} 1 item")
+    }
+
+    /// Reviewer nit: a corrupted/reversed date range (`endDate < startDate`)
+    /// must clamp to "1 day," never print a negative count.
+    func testSubtitleTextClampsToOneDayForReversedDates() {
+        let start = day(2026, 2, 10)
+        let reversedTrip = trip(start: start, end: day(2026, 2, 5))
+        let text = HomeBeenSummary.subtitleText(trip: reversedTrip, itemCount: 2, calendar: utc)
+        let expectedMonth = start.formatted(.dateTime.month(.abbreviated))
+        XCTAssertEqual(text, "\(expectedMonth) \u{00B7} 1 day \u{00B7} 2 items")
     }
 }

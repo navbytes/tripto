@@ -11,9 +11,10 @@ struct HomeView: View {
     @Query private var tripMembers: [TripMember]
     @Query private var tripProfiles: [TripProfile]
     /// docs/UX_REDESIGN_ROADMAP.md Phase 5: backs every trip's own liveness
-    /// (`bucket(for:)`, via `TripDateBucketing.liveTimeZone`) and the
-    /// "next"/"now" registers' FIRST-UP/today's-plan content, plus "been"
-    /// row item counts. Filtered to `.confirmed` in `itemsByTripId` below,
+    /// (`HomeTripDayLabels.bucket`, via `TripDateBucketing.liveTimeZone`,
+    /// computed once per render in `tripList`) and the "next"/"now"
+    /// registers' FIRST-UP/today's-plan content, plus "been" row item
+    /// counts. Filtered to `.confirmed` in `itemsByTripId` below,
     /// not here — an unreviewed email-import suggestion must never surface
     /// on Home (same EI-2 rule `TripView`'s own `@Query` already enforces)
     /// — but a plain in-Swift filter matches this file's existing
@@ -221,8 +222,13 @@ struct HomeView: View {
             // than inventing a second one.
             .sheet(item: $tripToDuplicate) { sourceTrip in
                 TripFormView(mode: .create, prefill: TripDuplication.prefill(for: sourceTrip)) { newTrip, _ in
-                    duplicateContent(from: sourceTrip, into: newTrip)
-                    toast = "Trip duplicated"
+                    // P5 fix-round: don't say "duplicated" if the clone
+                    // save actually failed — the trip itself still exists
+                    // (created via the sheet's own hardened save above),
+                    // just without its copied plans.
+                    toast = duplicateContent(from: sourceTrip, into: newTrip)
+                        ? "Trip duplicated"
+                        : "Trip created, but copying its plans didn\u{2019}t finish \u{2014} pull to refresh and try again."
                 }
             }
             .confirmationDialog(
@@ -397,7 +403,7 @@ struct HomeView: View {
 
     private var greetingBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if myDisplayName == nil {
+            if isProfileStillLoading {
                 // Finding 4: no profile has hydrated yet — a redacted
                 // placeholder keeps the layout height stable without
                 // asserting a fake "Traveler" identity that reads as
@@ -407,6 +413,12 @@ struct HomeView: View {
                     .foregroundStyle(Palette.slate)
                     .redacted(reason: .placeholder)
             } else {
+                // P5 fix-round (ux-expert fix-now): `greeting` already
+                // degrades to plain "Good evening" (no trailing name/comma)
+                // once `myDisplayName` is nil — this branch is what makes
+                // that render as a genuinely SETTLED state, not a
+                // still-loading one (see `isProfileStillLoading`'s doc
+                // comment).
                 Text(greeting)
                     .font(Typo.body(weight: .medium))
                     .foregroundStyle(Palette.slate)
@@ -470,6 +482,21 @@ struct HomeView: View {
         myProfile?.displayName
     }
 
+    /// P5 fix-round (ux-expert fix-now): finding 4's own `myDisplayName ==
+    /// nil` check conflated "still loading" with "settled, and there's
+    /// genuinely no profile for me" — a SIGNED-OUT session (`myProfile`'s
+    /// own doc comment: no `userId` at all to look one up by) or a
+    /// signed-in session whose first pull already completed with no
+    /// matching row are both SETTLED facts, not "still loading," yet the
+    /// old check showed the redacted skeleton FOREVER for either — reading
+    /// as permanently broken. Reuses `SyncStatus.hasCompletedInitialHomePull`,
+    /// the exact same loading/settled signal `HomeEmptyPlaceholder.resolve`
+    /// already uses for the trips list itself, so the two can't disagree
+    /// about whether this session has "settled" yet.
+    private var isProfileStillLoading: Bool {
+        myDisplayName == nil && authManager.userId != nil && !syncStatus.hasCompletedInitialHomePull
+    }
+
     // MARK: - List
 
     /// Card tap -> trip screen (PLAN-signature-layer.md §D1). Flies the
@@ -479,8 +506,12 @@ struct HomeView: View {
     /// (`appRouter.tripToOpen`'s `.onChange`, `applyUITestAutopilotIfNeeded`)
     /// call `path.append` directly and never go through here, so they stay
     /// plain pushes unconditionally -- they don't originate from a visible
-    /// card to fly from.
-    private func openTrip(_ trip: Trip) {
+    /// card to fly from. `register` defaults to `.plain` — "been" rows (the
+    /// only other caller) never fly anyway (no `.cardFrameTracking`, so
+    /// `hasSourceFrame` is always false there), so the value is inert for
+    /// them; ahead rows pass the SAME register value their own `TripCard`
+    /// renders (P5 fix-round item 12), so the flight clone matches it.
+    private func openTrip(_ trip: Trip, register: HomeCardRegister = .plain) {
         // Ignore taps while a flight is already in flight.
         guard heroFlight.state == .idle else { return }
         let sourceFrame = cardFrameIndex.frames[trip.id]
@@ -494,7 +525,7 @@ struct HomeView: View {
         heroFlight.destFrame = nil
         heroFlight.state = .flying(
             trip: trip, people: people(for: trip),
-            isPending: syncStatus.pendingRowIds.contains(trip.id), sourceFrame: sourceFrame
+            isPending: syncStatus.pendingRowIds.contains(trip.id), register: register, sourceFrame: sourceFrame
         )
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -515,17 +546,42 @@ struct HomeView: View {
     /// regression against the "registers are one list to a screen reader"
     /// contract. Flagged for review in the handoff, since the roadmap's own
     /// phrasing points at `LazyVStack`.
+    ///
+    /// Reviewer perf finding: `itemsByTripId`/the per-trip bucket/`ahead`/
+    /// `been` used to be computed FRESH on every access — `registerKind(for:)`
+    /// alone re-ran `aheadTrips` (itself a full trips × items pass) once per
+    /// ROW. All four are now computed exactly once per render pass here and
+    /// threaded through as locals/params — same "compute once at the top of
+    /// body, thread as locals" recipe `ItineraryTabView.body` already uses
+    /// for its own `models`/`hintDayId`/`todayTargetId`.
     private var tripList: some View {
-        List {
+        let itemsByTripId = itemsByTripId
+        let bucketsByTripId = Dictionary(uniqueKeysWithValues: trips.map { trip in
+            (trip.id, HomeTripDayLabels.bucket(trip: trip, liveTimeZone: TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])))
+        })
+        let bucketLookup: (Trip) -> TripBucket = { bucketsByTripId[$0.id] ?? .upcoming }
+        let aheadTrips = HomeTripOrdering.ahead(trips, bucket: bucketLookup)
+        let beenTrips = HomeTripOrdering.been(trips, bucket: bucketLookup)
+        let aheadFirstId = aheadTrips.first?.id
+        let beenYears = beenYears(in: beenTrips)
+
+        return List {
             ForEach(aheadTrips) { trip in
+                // Computed once per row and handed to BOTH `TripCard` and
+                // `openTrip` (P5 fix-round item 12) — the flight clone
+                // renders the exact same register the tapped card did.
+                let register = cardRegister(
+                    for: trip, aheadFirstId: aheadFirstId, bucket: bucketsByTripId[trip.id] ?? .upcoming,
+                    itemsByTripId: itemsByTripId
+                )
                 Button {
-                    openTrip(trip)
+                    openTrip(trip, register: register)
                 } label: {
                     TripCard(
                         trip: trip,
                         people: people(for: trip),
                         isPending: syncStatus.pendingRowIds.contains(trip.id),
-                        register: cardRegister(for: trip)
+                        register: register
                     )
                     .padding(.horizontal, Spacing.xl)
                     // PLAN-signature-layer.md §D1: measures this exact
@@ -554,15 +610,15 @@ struct HomeView: View {
             }
 
             if !beenTrips.isEmpty {
-                beenSectionHeader
+                beenSectionHeader(count: beenTrips.count)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
                 ForEach(beenYears, id: \.self) { year in
                     Section {
-                        ForEach(beenTrips(inYear: year)) { trip in
-                            beenRow(trip)
+                        ForEach(beenTrips.filter { Calendar.current.component(.year, from: $0.endDate) == year }) { trip in
+                            beenRow(trip, itemCount: itemsByTripId[trip.id]?.count ?? 0)
                         }
                     } header: {
                         yearHeader(year)
@@ -589,15 +645,22 @@ struct HomeView: View {
 
     /// P5.2/P5.3: resolves the "next"/"now" registers' extra content once
     /// per card — `.plain` (unchanged rendering) for every other ahead trip.
-    private func cardRegister(for trip: Trip) -> HomeCardRegister {
-        switch registerKind(for: trip) {
+    /// Takes the already-computed `aheadFirstId`/`bucket`/`itemsByTripId`
+    /// (see `tripList`'s own doc comment) rather than re-deriving any of
+    /// them itself.
+    private func cardRegister(
+        for trip: Trip, aheadFirstId: UUID?, bucket: TripBucket, itemsByTripId: [UUID: [ItineraryItem]]
+    ) -> HomeCardRegister {
+        switch HomeRegister.kind(for: trip, aheadFirstId: aheadFirstId, bucket: bucket) {
         case .next:
             let firstUp = HomeFirstUp.pick(from: itemsByTripId[trip.id] ?? [])
             return .next(firstUp: firstUp.map(HomeFirstUp.init))
         case .now:
-            let tz = liveTimeZone(for: trip)
-            let todayItems = HomeTodayPlan.items(in: itemsByTripId[trip.id] ?? [], liveTimeZone: tz)
-            let panel = HomeTodayPanel.make(trip: trip, todayItems: todayItems, liveTimeZone: tz)
+            let tz = TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])
+            let todayRows = HomeTodayPlan.items(
+                in: itemsByTripId[trip.id] ?? [], tripStart: HomeTripDayLabels.tripStart(trip), liveTimeZone: tz
+            )
+            let panel = HomeTodayPanel.make(trip: trip, todayRows: todayRows, liveTimeZone: tz)
             return .now(panel: panel)
         case .plain, .been:
             return .plain
@@ -608,13 +671,20 @@ struct HomeView: View {
     /// archive once, above the first sticky year header. Matches the
     /// mockup's `.arch` (title + hairline rule + trip-count eyebrow); no
     /// search entry (not in this phase's scope).
-    private var beenSectionHeader: some View {
+    ///
+    /// Reviewer nit: the title was sized/weighted to the mockup's own CSS
+    /// numbers (19px/600) but still read as competing with `header`'s "Your
+    /// trips" H1 in context — quieted a step further (17pt, `Spacing.xl`
+    /// top padding instead of `.xxl`) toward the mockup's own hairline-rule
+    /// register, and gains `.isHeader` (it names a real navigational
+    /// division of the list, same as the year headers below it do).
+    private func beenSectionHeader(count: Int) -> some View {
         HStack(spacing: Spacing.md) {
             Text("Been there")
-                .font(Typo.display(19))
+                .font(Typo.display(17))
                 .foregroundStyle(Palette.ink)
             Rectangle().fill(Palette.mist).frame(height: 1)
-            Text("\(beenTrips.count) trip\(beenTrips.count == 1 ? "" : "s")")
+            Text("\(count) trip\(count == 1 ? "" : "s")")
                 .font(Typo.body(10.5, weight: .bold))
                 .tracking(0.8)
                 .textCase(.uppercase)
@@ -622,9 +692,10 @@ struct HomeView: View {
                 .fixedSize()
         }
         .padding(.horizontal, Spacing.xl)
-        .padding(.top, Spacing.xxl)
+        .padding(.top, Spacing.xl)
         .padding(.bottom, Spacing.xxs)
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 
     /// Sticky year header (P5.4) — same `Palette.paper`-fade recipe as
@@ -660,25 +731,27 @@ struct HomeView: View {
     /// (it isn't `TripCard`-shaped), so `HeroFlightGate` sees no source
     /// frame for it and `openTrip` already falls back to a plain push, with
     /// no separate "been rows never fly" branch needed.
-    private func beenRow(_ trip: Trip) -> some View {
+    private func beenRow(_ trip: Trip, itemCount: Int) -> some View {
         Button {
             openTrip(trip)
         } label: {
-            BeenRow(trip: trip, itemCount: itemsByTripId[trip.id]?.count ?? 0)
+            BeenRow(trip: trip, itemCount: itemCount)
         }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .listRowSeparatorTint(Palette.mist)
-        // "Swipe leading/trailing" (P5.4): both edges reach the same single
-        // action, same two-edge convention `PackingListView`'s rows already
-        // use (there for two different actions; here the same one, reachable
-        // from either direction). Both invoke the exact same
-        // `tripToDuplicate` sheet flow (`TripDuplication`/`duplicateContent`)
-        // every ahead card's context-menu "Duplicate Trip" already uses — no
-        // second implementation.
+        // P5.4: trailing only (matches the mockup's own reveal direction).
+        // Reviewer nit: this used to ALSO register on `.leading` — the same
+        // action on both edges meant VoiceOver's custom-actions rotor listed
+        // "Copy to a new trip" twice for one row, with no way to tell the
+        // two apart. `.swipeActions` buttons are auto-exposed to that rotor
+        // (the whole reason `List` stayed the container for "been" rows —
+        // see `tripList`'s own doc comment), so the fix is to stop
+        // registering the duplicate at the source rather than fight that
+        // auto-exposure. The context menu below still reaches the same
+        // action a second way, deliberately (kept per the brief).
         .swipeActions(edge: .trailing) { copyToNewTripSwipeAction(trip) }
-        .swipeActions(edge: .leading) { copyToNewTripSwipeAction(trip) }
         .contextMenu {
             Button {
                 tripToDuplicate = trip
@@ -1001,48 +1074,23 @@ struct HomeView: View {
 
     // MARK: - Derived data (docs/UX_REDESIGN_ROADMAP.md Phase 5)
 
-    /// This trip's own confirmed items — backs `bucket(for:)`'s
-    /// `liveTimeZone` derivation and the "next"/"now"/"been" registers'
-    /// content. Grouped once per render pass rather than filtered afresh at
-    /// every call site (a trip count × item count scan is trivial at this
-    /// app's scale, same "boring, not hot-looped" reasoning
-    /// `duplicateContent` below already accepts for its own one-off
-    /// per-trip item fetch).
+    /// This trip's own confirmed items — backs the per-trip live-timezone
+    /// bucket and the "next"/"now"/"been" registers' content. Read exactly
+    /// once per render pass, at the top of `tripList` (reviewer perf
+    /// finding — see that property's own doc comment); every other
+    /// `@Query`-derived collection here (`trips`, `tripProfiles`,
+    /// `tripMembers`) is small enough per access that only this one needed
+    /// hoisting.
     private var itemsByTripId: [UUID: [ItineraryItem]] {
         Dictionary(grouping: items.filter { $0.status == .confirmed }, by: \.tripId)
-    }
-
-    /// P2's note for this phase: judge each trip's liveness/past against
-    /// *that trip's own* `TripDateBucketing.liveTimeZone(items:)`, not the
-    /// device's zone — so a trip stays "ahead" at 23:00 in Naha even once
-    /// the device has already rolled over. `Trip.bucket(asOf:calendar:)`'s
-    /// own public API/default (device `Calendar.current`) is untouched;
-    /// this is the composition Home now does at its own call site.
-    private func bucket(for trip: Trip) -> TripBucket {
-        var calendar = Calendar.current
-        calendar.timeZone = liveTimeZone(for: trip)
-        return trip.bucket(asOf: .now, calendar: calendar)
-    }
-
-    private func liveTimeZone(for trip: Trip) -> TimeZone {
-        TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])
-    }
-
-    /// P5.1: "ahead" — the one-comparator ordering's own doc comment
-    /// (`HomeTripOrdering.ahead`) covers the rest.
-    private var aheadTrips: [Trip] {
-        HomeTripOrdering.ahead(trips) { bucket(for: $0) }
-    }
-
-    private var beenTrips: [Trip] {
-        HomeTripOrdering.been(trips) { bucket(for: $0) }
     }
 
     /// P5.4: distinct years among `beenTrips`, in the same most-recent-first
     /// order (grouped by `endDate`'s year — the same field `been`'s own
     /// sort already keys off, so a trip that crosses a year boundary can't
-    /// land in a section that disagrees with its own sort position).
-    private var beenYears: [Int] {
+    /// land in a section that disagrees with its own sort position). Takes
+    /// the already-ordered `beenTrips` rather than re-deriving it.
+    private func beenYears(in beenTrips: [Trip]) -> [Int] {
         var seen = Set<Int>()
         var years: [Int] = []
         for trip in beenTrips {
@@ -1050,15 +1098,6 @@ struct HomeView: View {
             if seen.insert(year).inserted { years.append(year) }
         }
         return years
-    }
-
-    private func beenTrips(inYear year: Int) -> [Trip] {
-        beenTrips.filter { Calendar.current.component(.year, from: $0.endDate) == year }
-    }
-
-    /// P5.2/P5.3: which register `trip`'s card/row renders as.
-    private func registerKind(for trip: Trip) -> HomeRegisterKind {
-        HomeRegister.kind(for: trip, aheadFirstId: aheadTrips.first?.id, bucket: bucket(for: trip))
     }
 
     private func people(for trip: Trip) -> [AvatarStack.Person] {
@@ -1131,8 +1170,25 @@ struct HomeView: View {
     /// ceiling this app already accepts for this shape of write. Move the
     /// insert loop to a background `ModelActor` (like `SyncStore`) if that
     /// ever proves real.
-    private func duplicateContent(from sourceTrip: Trip, into newTrip: Trip) {
-        guard let userId = authManager.userId else { return }
+    ///
+    /// P5 fix-round: the items/packing save used to be a silently-swallowed
+    /// `try?`, same shape as `TripFormView.save()`'s OWN save calls before
+    /// they were hardened to `do`/`catch` — a failure here would still show
+    /// the caller's unconditional "Trip duplicated" toast even though the
+    /// clone never actually landed. Investigated as the suspect for qa's D1
+    /// (FIRST UP intermittently missing after a swipe-copy): two separate
+    /// repro attempts (an isolated SwiftData round-trip across a simulated
+    /// relaunch, and a full UI-driven repro matching qa's exact steps on a
+    /// clean simulator) both came back green, so this fix is a defensive
+    /// hardening on its own merits (an app must never claim success on a
+    /// write that silently failed), not a confirmed root-cause fix — flagged
+    /// for the CTO/debugger below.
+    /// - Returns: `false` only if the items/packing save itself threw —
+    ///   `true` covers both "cloned successfully" and "nothing to clone"
+    ///   (the source trip was simply empty, not a failure).
+    @discardableResult
+    private func duplicateContent(from sourceTrip: Trip, into newTrip: Trip) -> Bool {
+        guard let userId = authManager.userId else { return false }
         let sourceTripId = sourceTrip.id
         let itemDescriptor = FetchDescriptor<ItineraryItem>(
             predicate: #Predicate<ItineraryItem> { $0.tripId == sourceTripId }
@@ -1142,7 +1198,7 @@ struct HomeView: View {
         )
         let sourceItems = (try? modelContext.fetch(itemDescriptor)) ?? []
         let sourcePacking = (try? modelContext.fetch(packingDescriptor)) ?? []
-        guard !sourceItems.isEmpty || !sourcePacking.isEmpty else { return }
+        guard !sourceItems.isEmpty || !sourcePacking.isEmpty else { return true }
 
         let now = Date()
         let dayDelta = TripDuplication.dayDelta(from: sourceTrip.startDate, to: newTrip.startDate)
@@ -1155,7 +1211,11 @@ struct HomeView: View {
 
         for item in clonedItems { modelContext.insert(item) }
         for packingItem in clonedPacking { modelContext.insert(packingItem) }
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            return false
+        }
 
         let newTripId = newTrip.id
         Task {
@@ -1166,6 +1226,7 @@ struct HomeView: View {
                 await syncEngine?.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: newTripId, payload: packingItem.toDTO())
             }
         }
+        return true
     }
 }
 

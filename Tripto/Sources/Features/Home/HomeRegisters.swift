@@ -14,16 +14,25 @@ enum HomeTripOrdering {
     /// ahead/been *split* does (`bucket`, supplied by the caller — see
     /// `ordered(_:bucket:)`'s doc comment). A live trip's `startDate` is
     /// always `<= today`, so it sorts to position 0 for free — no special
-    /// case, matching the roadmap's own "Sort rule."
+    /// case, matching the roadmap's own "Sort rule." Ties break on `id`
+    /// (reviewer finding): `sorted(by:)` is stable, but the INPUT order
+    /// (`@Query`) isn't guaranteed stable across app launches, so two
+    /// same-day trips could silently swap places from one launch to the
+    /// next without an explicit, deterministic tie-break.
     static func ahead(_ trips: [Trip], bucket: (Trip) -> TripBucket) -> [Trip] {
-        trips.filter { !bucket($0).isPastTab }.sorted { $0.startDate < $1.startDate }
+        trips.filter { !bucket($0).isPastTab }.sorted {
+            $0.startDate == $1.startDate ? $0.id.uuidString < $1.id.uuidString : $0.startDate < $1.startDate
+        }
     }
 
     /// "Been" — already ended — most-recent-first, by `endDate` (not
     /// `startDate`: a trip that started later can still have ended first,
     /// e.g. a quick weekend booked after a longer trip already in progress).
+    /// Same `id` tie-break as `ahead`, same reason.
     static func been(_ trips: [Trip], bucket: (Trip) -> TripBucket) -> [Trip] {
-        trips.filter { bucket($0).isPastTab }.sorted { $0.endDate > $1.endDate }
+        trips.filter { bucket($0).isPastTab }.sorted {
+            $0.endDate == $1.endDate ? $0.id.uuidString < $1.id.uuidString : $0.endDate > $1.endDate
+        }
     }
 
     /// The one list Home renders: `ahead` then `been`. `bucket` is supplied
@@ -35,6 +44,50 @@ enum HomeTripOrdering {
     /// device has already rolled over.
     static func ordered(_ trips: [Trip], bucket: (Trip) -> TripBucket) -> [Trip] {
         ahead(trips, bucket: bucket) + been(trips, bucket: bucket)
+    }
+}
+
+/// The recipe `ItineraryTabView` already proved (P2.4): a trip's own start/
+/// end are `DayDate` labels in the DEVICE calendar (the storage anchor —
+/// `Trip.startDate`/`endDate` carry no time zone of their own), while
+/// "today" is a `DayDate` label in the trip's LIVE zone
+/// (`TripDateBucketing.liveTimeZone`). Comparing `DayDate`s (plain Y/M/D,
+/// no residual tz) rather than feeding a raw `Date` through a *swapped*
+/// `Calendar` is what matters: `TripDateBucketing.bucket(...,calendar:)`
+/// reads ALL THREE of its inputs (start/end/today) through the ONE calendar
+/// it's given, so passing it a live-zone calendar together with the trip's
+/// own device-anchored `startDate`/`endDate` silently REINTERPRETS those
+/// already-anchored instants — wrongly archiving a live trip whenever the
+/// live zone sits west of the device (device in Tokyo, trip's own items all
+/// in Honolulu, say). This is the one shared helper `HomeView.bucket(for:)`
+/// and `HomeTodayPanel.make` both route through, so the two can't drift
+/// apart on how "today" is derived.
+enum HomeTripDayLabels {
+    static func tripStart(_ trip: Trip, deviceCalendar: Calendar = .current) -> DayDate {
+        DayDate.from(trip.startDate, calendar: deviceCalendar)
+    }
+
+    static func tripEnd(_ trip: Trip, deviceCalendar: Calendar = .current) -> DayDate {
+        DayDate.from(trip.endDate, calendar: deviceCalendar)
+    }
+
+    /// "Today," as a `DayDate` label in `liveTimeZone`.
+    static func todayLabel(liveTimeZone: TimeZone, now: Date = .now, deviceCalendar: Calendar = .current) -> DayDate {
+        var liveCalendar = deviceCalendar
+        liveCalendar.timeZone = liveTimeZone
+        return DayDate.from(now, calendar: liveCalendar)
+    }
+
+    /// Same three-way branch as `TripDateBucketing.bucket`, operating on
+    /// already-resolved `DayDate` labels instead of raw `Date`s sharing one
+    /// `Calendar` — see this enum's own doc comment for why that matters.
+    static func bucket(trip: Trip, liveTimeZone: TimeZone, now: Date = .now, deviceCalendar: Calendar = .current) -> TripBucket {
+        let start = tripStart(trip, deviceCalendar: deviceCalendar)
+        let end = tripEnd(trip, deviceCalendar: deviceCalendar)
+        let today = todayLabel(liveTimeZone: liveTimeZone, now: now, deviceCalendar: deviceCalendar)
+        if end < today { return .past }
+        if start <= today { return .inProgress }
+        return .upcoming
     }
 }
 
@@ -125,18 +178,24 @@ struct HomeFirstUp: Equatable {
 // MARK: - Register "now" — today's plan + day progress
 
 enum HomeTodayPlan {
-    /// Today's confirmed items, earliest first — the "now" register's
-    /// inline mini-list. "Today" is judged in `liveTimeZone`
-    /// (`TripDateBucketing.liveTimeZone` — the trip's own effective zone,
-    /// P2.4); each item still buckets into *its own* local day via
-    /// `startLocalDay` (its own primary tz), exactly like
-    /// `ItineraryDayBucketing` already does for the itinerary tab — this
-    /// only narrows that same rule to today.
-    static func items(in items: [ItineraryItem], liveTimeZone: TimeZone, now: Date = .now) -> [ItineraryItem] {
-        let today = ItineraryTimeZone.localDay(of: now, in: liveTimeZone)
-        return items
-            .filter { $0.status == .confirmed && $0.startLocalDay == today }
-            .sorted { $0.startsAt < $1.startsAt }
+    /// Today's plan rows, sourced from the SAME day-bucketing the itinerary
+    /// tab renders from (`ItineraryDayBucketing.sections`) — not a
+    /// standalone `startLocalDay == today` filter (reviewer MED finding):
+    /// that missed an ONGOING multi-night stay whose check-in was an
+    /// earlier day, since its own `startsAt` never falls on today even
+    /// though the itinerary's today section carries a `.staying` row for
+    /// it. Sourcing from the same function means Home's "+K more today"
+    /// can never disagree with what tapping into the itinerary and looking
+    /// at today's section actually shows. `tripStart` is the trip's own
+    /// start `DayDate` (`HomeTripDayLabels.tripStart`) — `sections` numbers/
+    /// expands multi-day stays relative to it. Confirmed-only:
+    /// `sections` itself already drops `status == .suggested` (EI-2).
+    static func items(
+        in items: [ItineraryItem], tripStart: DayDate, liveTimeZone: TimeZone, now: Date = .now
+    ) -> [ItineraryDayBucketing.Row] {
+        let today = HomeTripDayLabels.todayLabel(liveTimeZone: liveTimeZone, now: now)
+        let sections = ItineraryDayBucketing.sections(items: items, tripStart: tripStart)
+        return sections.first(where: { $0.day == today })?.rows ?? []
     }
 }
 
@@ -154,26 +213,27 @@ struct HomeTodayPanel: Equatable {
     let totalDays: Int
     /// "Wed 24 Jul", in the trip's live zone.
     let dateText: String
-    /// First two of today's items.
+    /// First two of today's rows.
     let rows: [Row]
-    /// How many more of today's items aren't in `rows`.
+    /// How many more of today's rows aren't in `rows`.
     let moreCount: Int
 
-    /// `todayItems` is already resolved (`HomeTodayPlan.items(...)`, sorted,
-    /// today-only) — this only formats it plus the day-progress numbers.
-    /// `dayNumber` reuses `ItineraryDayBucketing.dayNumber` (the itinerary
-    /// tab's own "Day N" math, BUILD_PLAN.md §4.2) rather than re-deriving
-    /// day-count math a second way, clamped into `1...totalDays` so a
-    /// same-day edit or a trip judged live right at a boundary can't report
-    /// Day 0 or an out-of-range N.
+    /// `todayRows` is already resolved (`HomeTodayPlan.items(...)`, today's
+    /// section only, itinerary-order) — this only formats it plus the
+    /// day-progress numbers. `dayNumber` reuses `ItineraryDayBucketing
+    /// .dayNumber` (the itinerary tab's own "Day N" math, BUILD_PLAN.md
+    /// §4.2) rather than re-deriving day-count math a second way, clamped
+    /// into `1...totalDays` so a same-day edit or a trip judged live right
+    /// at a boundary can't report Day 0 or an out-of-range N. `today`/
+    /// `tripStart` both route through `HomeTripDayLabels` — the one shared
+    /// helper `HomeView.bucket(for:)` also uses, so the two can't drift
+    /// apart on how "today" is derived (reviewer finding).
     static func make(
-        trip: Trip, todayItems: [ItineraryItem], now: Date = .now, liveTimeZone: TimeZone,
+        trip: Trip, todayRows: [ItineraryDayBucketing.Row], now: Date = .now, liveTimeZone: TimeZone,
         deviceCalendar: Calendar = .current
     ) -> HomeTodayPanel {
-        var tripTzCalendar = deviceCalendar
-        tripTzCalendar.timeZone = liveTimeZone
-        let today = DayDate.from(now, calendar: tripTzCalendar)
-        let tripStart = DayDate.from(trip.startDate, calendar: deviceCalendar)
+        let today = HomeTripDayLabels.todayLabel(liveTimeZone: liveTimeZone, now: now, deviceCalendar: deviceCalendar)
+        let tripStart = HomeTripDayLabels.tripStart(trip, deviceCalendar: deviceCalendar)
         let totalDays = max(trip.durationInDays(calendar: deviceCalendar), 1)
         let rawDayNumber = ItineraryDayBucketing.dayNumber(
             for: today, tripStart: tripStart, calendar: Calendar(identifier: .gregorian)
@@ -185,23 +245,44 @@ struct HomeTodayPanel: Equatable {
         dateFormatter.timeZone = liveTimeZone
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
 
-        let rows = todayItems.prefix(2).map {
-            Row(time: ItineraryTimeZone.timeString($0.startsAt, in: $0.primaryTz), title: $0.title)
-        }
+        let rows = todayRows.prefix(2).map(displayRow)
         return HomeTodayPanel(
             dayNumber: dayNumber, totalDays: totalDays, dateText: dateFormatter.string(from: now),
-            rows: Array(rows), moreCount: max(0, todayItems.count - rows.count)
+            rows: Array(rows), moreCount: max(0, todayRows.count - rows.count)
         )
+    }
+
+    /// A bucketed row's own (time, title) for the mini-list — `.item` shows
+    /// its start time same as before; `.staying`/`.checkOut` have no single
+    /// clock time of their own (an all-day backdrop / the checkout instant
+    /// respectively aren't "when this row starts" the way a plain item's
+    /// `startsAt` is), so those get a wording cue instead, same "Staying"/
+    /// "Check out" vocabulary `StayingStripRow`/`CheckOutRow`
+    /// (`TimelineRowViews.swift`) already use on the itinerary tab.
+    private static func displayRow(_ row: ItineraryDayBucketing.Row) -> Row {
+        switch row {
+        case .item(let item):
+            return Row(time: ItineraryTimeZone.timeString(item.startsAt, in: item.primaryTz), title: item.title)
+        case .staying(let item, _, _):
+            return Row(time: "", title: "Staying \u{00B7} \(item.title)")
+        case .checkOut(let item):
+            let time = item.endsAt.map { ItineraryTimeZone.timeString($0, in: item.effectiveTz) } ?? ""
+            return Row(time: time, title: "Check out \u{00B7} \(item.title)")
+        }
     }
 }
 
 // MARK: - Register "been" — compact row subtitle
 
 enum HomeBeenSummary {
-    /// "Feb · 4 days · 6 items."
+    /// "Feb · 4 days · 6 items." Reviewer nit: `days` clamped to at least 1
+    /// — same defensive floor `HomeTodayPanel.make`'s own `totalDays`
+    /// already applies, for the same reason (nothing stops a corrupted
+    /// import/edit from producing `startDate > endDate`, which would
+    /// otherwise print a nonsensical "−3 days").
     static func subtitleText(trip: Trip, itemCount: Int, calendar: Calendar = .current) -> String {
         let month = trip.startDate.formatted(.dateTime.month(.abbreviated))
-        let days = trip.durationInDays(calendar: calendar)
+        let days = max(trip.durationInDays(calendar: calendar), 1)
         return "\(month) \u{00B7} \(days) day\(days == 1 ? "" : "s") \u{00B7} \(itemCount) item\(itemCount == 1 ? "" : "s")"
     }
 }
