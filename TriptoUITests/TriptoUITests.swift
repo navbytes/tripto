@@ -629,13 +629,36 @@ final class TriptoUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.5)
         attachScreenshot(named: "home", of: app)
 
+        // P7 refresh (P6.6): `planNewTripRow` now renders directly above the
+        // "been" content (previously the true list foot, below every
+        // archive row) — its own dedicated capture, stopping the scroll the
+        // moment IT'S hittable, is what actually frames the new order (confirmed
+        // empirically: at AX3's much taller rows, this waypoint is too shallow
+        // to also carry a real "been" ROW into frame — only the archive
+        // header's top edge — so it stays a separate shot rather than
+        // replacing `home-been` below, whose own AX3 contract is specifically
+        // "been rows in frame," unchanged since before P6.6).
+        let planNewTripButton = app.buttons["Plan a new trip"]
+        for _ in 0..<15 where !planNewTripButton.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            planNewTripButton.isHittable,
+            "'Plan a new trip' row (P6.6: now directly above the been archive) never scrolled into view"
+        )
         let beenHeader = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Been there")).firstMatch
+        XCTAssertTrue(beenHeader.exists, "'Been there' header should already be reachable once 'Plan a new trip' is on screen — it's the very next row (P6.6)")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "home-plan-new-trip-been", of: app)
+
+        // Pre-P6.6 waypoint, unchanged: one page further than "Been there"
+        // first appearing, so a sticky year header reads as mid-stick rather
+        // than just-arrived — also this scene's own AX3 contract (been ROWS,
+        // not just the header, in frame).
         for _ in 0..<15 where !beenHeader.exists {
             app.swipeUp()
         }
         XCTAssertTrue(beenHeader.waitForExistence(timeout: 10), "'Been there' section never scrolled into view")
-        // One more page down so a year header sits pinned mid-scroll rather
-        // than just-arrived at the very top of frame.
         app.swipeUp()
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "home-been", of: app)
@@ -854,6 +877,36 @@ final class TriptoUITests: XCTestCase {
         attachScreenshot(named: "home-next-register", of: app)
     }
 
+    /// P6.5's "Show past trips" off (`SettingsView`'s toggle): the whole
+    /// "been" archive collapses into one quiet reveal row ("N past trips
+    /// hidden — Show", `HiddenPastTripsRow`) instead of the expanded year-
+    /// sectioned list — no prior capture test has ever run with the setting
+    /// off. `-showPastTrips NO` needs no app-code hook: it's Foundation's
+    /// own `NSUserDefaults` argument-domain convention (a `-key value` pair
+    /// in `launchArguments` seeds `UserDefaults` — and so `@AppStorage`
+    /// (`HomePastTripsVisibility.appStorageKey`) — before the app ever
+    /// runs, the same mechanism `-AppleLanguages` etc. already use
+    /// system-wide), reachable on a fresh install with zero production
+    /// changes.
+    func testCaptureHomePastTripsHiddenRow() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedRegisterShowcase",
+            "-showPastTrips", "NO"
+        ]
+        app.launch()
+        let liveCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tokyo Sprint")).firstMatch
+        XCTAssertTrue(liveCard.waitForExistence(timeout: 30), "live register showcase trip (Tokyo Sprint) never appeared")
+
+        let hiddenRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "past trip")).firstMatch
+        for _ in 0..<15 where !hiddenRow.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(hiddenRow.isHittable, "'N past trips hidden \u{2014} Show' row never scrolled into view")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "home-past-trips-hidden", of: app)
+    }
+
     /// Day 1, unscrolled: the conflict banner, both flagged hotel cards
     /// (`hotel1`/`hotel1Duplicate`, the same seeded conflict
     /// `testCaptureItineraryScreen` above already renders), AND the
@@ -995,5 +1048,41 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Booking details"].waitForExistence(timeout: 30), "Booking detail never appeared")
         Thread.sleep(forTimeInterval: 0.5)
         attachScreenshot(named: "booking-detail-original-pass", of: app)
+    }
+
+    // MARK: - P7 refresh: New-trip generated gradient cover (P6.5)
+
+    /// P6.5's generated gradient covers (`CoverGradientGenerator`, mixed in
+    /// with the three curated classics by the Shuffle button —
+    /// `TripFormView.nextShuffledGradientKey`'s own doc comment: a tap's
+    /// `seed` generates a fresh one unless `seed.isMultiple(of: 4)`, i.e.
+    /// ~75% of taps generate, the other ~25% cycle to the next curated
+    /// classic) — no prior capture test has ever landed on one. The button
+    /// fires real entropy per tap (`.random(in: .min...max)` at the call
+    /// site, not driveable to a guaranteed outcome from a test), so this
+    /// taps Shuffle 8 times, attaching a screenshot after every single tap:
+    /// the odds every one of 8 independent taps happens to cycle to a
+    /// classic instead is 0.25^8 (\u{2248} 1 in 65,000) — see the Tester
+    /// report for which numbered attempt was kept as the final PNG and how
+    /// it was confirmed to actually be a generated (non-classic) gradient.
+    func testCaptureNewTripGeneratedCoverShuffle() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 30), "Home never showed the seeded trip")
+        app.buttons["Plan a new trip"].tap()
+        let titleField = app.textFields["Lisbon"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 10), "New-trip sheet never appeared")
+        if app.keyboards.buttons["Done"].waitForExistence(timeout: 2) {
+            app.keyboards.buttons["Done"].tap()
+        }
+        app.swipeUp()
+        let shuffleButton = app.buttons["Shuffle cover"]
+        XCTAssertTrue(shuffleButton.waitForExistence(timeout: 5), "Shuffle cover button never appeared")
+        for attempt in 0..<8 {
+            shuffleButton.tap()
+            Thread.sleep(forTimeInterval: 0.2)
+            attachScreenshot(named: "newtrip-cover-shuffle-\(attempt)", of: app)
+        }
     }
 }
