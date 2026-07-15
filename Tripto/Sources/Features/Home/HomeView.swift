@@ -225,10 +225,15 @@ struct HomeView: View {
                     // P5 fix-round: don't say "duplicated" if the clone
                     // save actually failed — the trip itself still exists
                     // (created via the sheet's own hardened save above),
-                    // just without its copied plans.
-                    toast = duplicateContent(from: sourceTrip, into: newTrip)
-                        ? "Trip duplicated"
-                        : "Trip created, but copying its plans didn\u{2019}t finish \u{2014} pull to refresh and try again."
+                    // just without its copied plans. D1: `duplicateContent`
+                    // is now async (it pulls the source trip's items first —
+                    // see `HomeDuplication`), so it runs in a `Task`; the
+                    // sheet has already dismissed, the toast lands on Home.
+                    Task {
+                        toast = await duplicateContent(from: sourceTrip, into: newTrip)
+                            ? "Trip duplicated"
+                            : "Trip created, but copying its plans didn\u{2019}t finish \u{2014} pull to refresh and try again."
+                    }
                 }
             }
             .confirmationDialog(
@@ -1154,70 +1159,56 @@ struct HomeView: View {
 
     /// E2 (docs/BACKLOG.md §E2): runs right after `tripToDuplicate`'s create
     /// sheet saves the new trip row — clones `sourceTrip`'s confirmed items
-    /// and packing list into it. Fetched directly (not via a Home-wide
-    /// `@Query`, which would load every trip's items/packing rows just for
-    /// this rare action) — the same one-off `FetchDescriptor` idiom this
-    /// file already uses in the `appRouter.tripToOpen` handler above.
+    /// and packing list into it. The gather-and-clone lives in the testable
+    /// `HomeDuplication.cloneContent`; this method only supplies the context/
+    /// user, the source-pull closure, and the outbox enqueue.
     ///
-    /// Insert-then-save mirrors `DemoSeeder.seed`'s bulk pattern (the
-    /// closest existing "insert many rows into a new trip" precedent): one
-    /// batched `modelContext.save()`, not one per row. The outbox enqueue
-    /// loop is async and awaited sequentially inside one `Task` — off the
-    /// synchronous main-thread path, and ordered the same FIFO way the
+    /// The outbox enqueue loop is async and awaited sequentially inside one
+    /// `Task` — off the toast/return path, and ordered the same FIFO way the
     /// outbox's own push already expects.
     /// ponytail: a genuinely enormous trip could still make the synchronous
-    /// insert loop hitch; `DemoSeeder`'s ~70-item fixture is the existing
-    /// ceiling this app already accepts for this shape of write. Move the
-    /// insert loop to a background `ModelActor` (like `SyncStore`) if that
-    /// ever proves real.
+    /// insert loop (inside `cloneContent`) hitch; `DemoSeeder`'s ~70-item
+    /// fixture is the existing ceiling this app already accepts for this shape
+    /// of write. Move that loop to a background `ModelActor` (like `SyncStore`)
+    /// if it ever proves real.
     ///
-    /// P5 fix-round: the items/packing save used to be a silently-swallowed
-    /// `try?`, same shape as `TripFormView.save()`'s OWN save calls before
-    /// they were hardened to `do`/`catch` — a failure here would still show
-    /// the caller's unconditional "Trip duplicated" toast even though the
-    /// clone never actually landed. Investigated as the suspect for qa's D1
-    /// (FIRST UP intermittently missing after a swipe-copy): two separate
-    /// repro attempts (an isolated SwiftData round-trip across a simulated
-    /// relaunch, and a full UI-driven repro matching qa's exact steps on a
-    /// clean simulator) both came back green, so this fix is a defensive
-    /// hardening on its own merits (an app must never claim success on a
-    /// write that silently failed), not a confirmed root-cause fix — flagged
-    /// for the CTO/debugger below.
+    /// D1 (qa): FIRST UP was intermittently missing after a swipe-copy because
+    /// `pullHome` never loads itinerary items/packing (only `pullTrip`, on
+    /// trip-open, does — `SyncEngine+Pull`) — so duplicating a past trip never
+    /// opened this session read an EMPTY local set and the empty-source guard
+    /// reported success, producing an itemless copy that survived a cold
+    /// relaunch. Root-caused and covered by `HomeDuplicationTests`; the fix is
+    /// the `pullTrip` in `ensureSourceLoaded` below (earlier repro attempts
+    /// came back green only because they used trips whose items were already
+    /// in the mirror). Offline duplication of a still-unopened trip stays a
+    /// known gap: `pullTrip` no-ops offline, so there's nothing local to clone
+    /// — see docs/BACKLOG.md.
     /// - Returns: `false` only if the items/packing save itself threw —
     ///   `true` covers both "cloned successfully" and "nothing to clone"
     ///   (the source trip was simply empty, not a failure).
     @discardableResult
-    private func duplicateContent(from sourceTrip: Trip, into newTrip: Trip) -> Bool {
+    private func duplicateContent(from sourceTrip: Trip, into newTrip: Trip) async -> Bool {
         guard let userId = authManager.userId else { return false }
         let sourceTripId = sourceTrip.id
-        let itemDescriptor = FetchDescriptor<ItineraryItem>(
-            predicate: #Predicate<ItineraryItem> { $0.tripId == sourceTripId }
-        )
-        let packingDescriptor = FetchDescriptor<PackingItem>(
-            predicate: #Predicate<PackingItem> { $0.tripId == sourceTripId }
-        )
-        let sourceItems = (try? modelContext.fetch(itemDescriptor)) ?? []
-        let sourcePacking = (try? modelContext.fetch(packingDescriptor)) ?? []
-        guard !sourceItems.isEmpty || !sourcePacking.isEmpty else { return true }
+        // Capture value copies before the `await` below so no `@Model` is held
+        // across the suspension (`pullTrip` hops to the `SyncEngine` actor).
+        let sourceStart = sourceTrip.startDate
+        let newTripId = newTrip.id
+        let newStart = newTrip.startDate
 
-        let now = Date()
-        let dayDelta = TripDuplication.dayDelta(from: sourceTrip.startDate, to: newTrip.startDate)
-        let clonedItems = TripDuplication.clonedItems(
-            from: sourceItems, newTripId: newTrip.id, dayDelta: dayDelta, createdBy: userId, now: now
-        )
-        let clonedPacking = TripDuplication.clonedPackingItems(
-            from: sourcePacking, newTripId: newTrip.id, createdBy: userId, now: now
-        )
-
-        for item in clonedItems { modelContext.insert(item) }
-        for packingItem in clonedPacking { modelContext.insert(packingItem) }
-        do {
-            try modelContext.save()
-        } catch {
+        guard let cloned = await HomeDuplication.cloneContent(
+            sourceTripId: sourceTripId, sourceStart: sourceStart,
+            newTripId: newTripId, newStart: newStart, createdBy: userId, modelContext: modelContext,
+            // D1 (qa): items/packing enter the mirror only via `pullTrip`, so
+            // pull the source's rows before cloning — otherwise a trip never
+            // opened this session clones an empty set (see `HomeDuplication`).
+            ensureSourceLoaded: { await syncEngine?.pullTrip(sourceTripId) }
+        ) else {
             return false
         }
 
-        let newTripId = newTrip.id
+        let clonedItems = cloned.items
+        let clonedPacking = cloned.packing
         Task {
             for item in clonedItems {
                 await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: newTripId, payload: item.toDTO())
