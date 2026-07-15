@@ -908,7 +908,11 @@ final class TripArchiveTests: XCTestCase {
         XCTAssertEqual(prepared.count, 1)
         XCTAssertEqual(prepared.first?.title, "First")
         XCTAssertEqual(report.tripsImported, 1)
+        // P6.1: a same-archive repeat matches neither idempotence rule, so
+        // `existingLocalTripId` stays nil — there's genuinely nothing local
+        // to open yet (default value, matches production for this branch).
         XCTAssertEqual(report.tripSkips, [.init(tripId: "dup", title: "Second", reason: .alreadyImported)])
+        XCTAssertNil(report.tripSkips.first?.existingLocalTripId)
     }
 
     /// D2/reviewer L6: a duplicate id's FIRST occurrence being skipped for
@@ -1008,7 +1012,12 @@ final class TripArchiveTests: XCTestCase {
         let (prepared, report) = TripArchiveMapper.map(document: document, existingTripIds: [existingId])
 
         XCTAssertTrue(prepared.isEmpty)
-        XCTAssertEqual(report.tripSkips, [.init(tripId: "dup-trip", title: "Test trip", reason: .alreadyImported)])
+        // P6.1: rule (a) (derived UUIDv5 match) — `existingLocalTripId` is
+        // the matched local trip, backing the result sheet's "Open trip".
+        XCTAssertEqual(
+            report.tripSkips,
+            [.init(tripId: "dup-trip", title: "Test trip", reason: .alreadyImported, existingLocalTripId: existingId)]
+        )
         XCTAssertEqual(report.tripsImported, 0)
     }
 
@@ -1026,9 +1035,13 @@ final class TripArchiveTests: XCTestCase {
         let (prepared, report) = TripArchiveMapper.map(document: document, existingTripIds: [existingLocalTripId])
 
         XCTAssertTrue(prepared.isEmpty)
+        // P6.1: rule (b) (raw-id match) also backs "Open trip".
         XCTAssertEqual(
             report.tripSkips,
-            [.init(tripId: existingLocalTripId.uuidString, title: "My Own Export", reason: .alreadyImported)]
+            [.init(
+                tripId: existingLocalTripId.uuidString, title: "My Own Export", reason: .alreadyImported,
+                existingLocalTripId: existingLocalTripId
+            )]
         )
     }
 
@@ -1065,6 +1078,9 @@ final class TripArchiveTests: XCTestCase {
 
         XCTAssertTrue(prepared.isEmpty)
         XCTAssertEqual(report.tripSkips.first?.reason, .alreadyImported)
+        // P6.1: the match still resolves to the correctly-cased local id,
+        // not the lowercased archive string reused verbatim.
+        XCTAssertEqual(report.tripSkips.first?.existingLocalTripId, existingLocalTripId)
     }
 
     func testReimportingTheSameArchiveTwiceCreatesZeroNewRowsTheSecondTime() {

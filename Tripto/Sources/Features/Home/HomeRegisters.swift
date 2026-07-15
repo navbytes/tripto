@@ -14,14 +14,28 @@ enum HomeTripOrdering {
     /// ahead/been *split* does (`bucket`, supplied by the caller — see
     /// `ordered(_:bucket:)`'s doc comment). A live trip's `startDate` is
     /// always `<= today`, so it sorts to position 0 for free — no special
-    /// case, matching the roadmap's own "Sort rule." Ties break on `id`
+    /// case, matching the roadmap's own "Sort rule." Sort key is
+    /// `(startDate, endDate, id)`, all three ascending — `endDate` sits
+    /// between `startDate` and the `id` tie-break (P6.2 reviewer finding):
+    /// `startDate` alone isn't enough to guarantee adjacency for
+    /// `TripMergeDetection.survivorByShellId`'s "identical dates means the
+    /// pair is always adjacent" assumption — a third trip sharing only the
+    /// SAME start date (a different, unrelated trip) could otherwise sort
+    /// BETWEEN two trips that share both start AND end (a true duplicate
+    /// pair), landing between them purely by `id` string luck. Two trips
+    /// tied on `(startDate, endDate)` are always contiguous in the result
+    /// (a property of sorting by a compound key), so a real duplicate pair
+    /// can never be split apart by an unrelated same-start trip once
+    /// `endDate` also participates. `id` remains the final tie-break
     /// (reviewer finding): `sorted(by:)` is stable, but the INPUT order
     /// (`@Query`) isn't guaranteed stable across app launches, so two
-    /// same-day trips could silently swap places from one launch to the
-    /// next without an explicit, deterministic tie-break.
+    /// identical-range trips could silently swap places from one launch to
+    /// the next without an explicit, deterministic tie-break.
     static func ahead(_ trips: [Trip], bucket: (Trip) -> TripBucket) -> [Trip] {
-        trips.filter { !bucket($0).isPastTab }.sorted {
-            $0.startDate == $1.startDate ? $0.id.uuidString < $1.id.uuidString : $0.startDate < $1.startDate
+        trips.filter { !bucket($0).isPastTab }.sorted { lhs, rhs in
+            if lhs.startDate != rhs.startDate { return lhs.startDate < rhs.startDate }
+            if lhs.endDate != rhs.endDate { return lhs.endDate < rhs.endDate }
+            return lhs.id.uuidString < rhs.id.uuidString
         }
     }
 

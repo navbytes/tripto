@@ -239,7 +239,83 @@ enum DemoSeeder {
         if ProcessInfo.processInfo.arguments.contains("-uitestSeedRegisterShowcase") {
             await seedRegisterShowcaseTrips(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
         }
+        // UX P6 trust suite (docs/UX_REDESIGN_ROADMAP.md Phase 6): own flag,
+        // same "DemoSeeder reads ProcessInfo directly, additive" recipe as
+        // `-uitestSeedRegisterShowcase` above — see `seedP6TrustShowcase`'s
+        // own doc comment for what it adds and why it's gated separately.
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedP6TrustShowcase") {
+            await seedP6TrustShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
+        }
         return tripId
+    }
+
+    // MARK: - UX P6 trust-suite showcase (import-result / merge / dedupe)
+
+    /// Two same-dates/same-destination "ahead" trips so `TripMergeDetection
+    /// .survivorByShellId` finds a real adjacent pair to fuse a
+    /// `DuplicateTripStrip` under on Home (P6.2's merge strip + 6s countdown
+    /// screenshots), plus two similarly-named `TripProfile` rows on one of
+    /// them so `ProfileDedupe.duplicatePairs` has something for
+    /// `ShareTripView`'s dedupe banner + review sheet to surface (P6.3).
+    /// Dated relative to `Date()`, not fixed like the flights/hotels above —
+    /// same reasoning as `seedRegisterShowcaseTrips`'s own doc comment: this
+    /// must stay a genuine "ahead" (never "been") pair no matter when the
+    /// seed actually runs. Both trips get a LOCAL-only organizer
+    /// `TripMember` for `userId` (same "never enqueued" shape as `member`
+    /// above) — `HomeView.canMergeTrips`/`ShareTripView`'s dedupe banner are
+    /// both organizer-gated, and this is the signed-in user on every launch
+    /// `-uitestAutoSignIn` drives.
+    ///
+    /// Own flag rather than folding into `seedRegisterShowcaseTrips`: same
+    /// "`-uitestOpenFirstTrip` targets `trips.first?.id`" landmine that
+    /// function's own doc comment already flags — an uninvolved test opting
+    /// into the register showcase alone must not also gain a duplicate-trip
+    /// pair (or vice versa) it never asked for.
+    private static func seedP6TrustShowcase(modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date) async {
+        var deviceCalendar = Calendar(identifier: .gregorian)
+        deviceCalendar.timeZone = .current
+        let today = deviceCalendar.startOfDay(for: now)
+        let start = deviceCalendar.date(byAdding: .day, value: 20, to: today) ?? today
+        let end = deviceCalendar.date(byAdding: .day, value: 25, to: today) ?? today
+
+        let firstId = UUID()
+        let first = Trip(
+            id: firstId, title: "Bali Family Trip", destination: "Bali, Indonesia", countryCode: "ID",
+            startDate: start, endDate: end, coverGradient: "moss", tripTypeRaw: TripType.family.rawValue,
+            createdBy: userId, createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        let firstMember = TripMember(id: UUID(), tripId: firstId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        // P6.3: two profiles on the SAME trip sharing a normalized display
+        // name (trim + lowercase — `ProfileDedupe.normalizedKey`) — reads as
+        // a realistic "typed the same family member in twice" duplicate
+        // (trailing space, invisible in the UI) rather than an obvious typo.
+        let priya = TripProfile(id: UUID(), tripId: firstId, displayName: "Priya", avatarColor: "plum", linkedUserId: nil, createdAt: now)
+        let priyaAgain = TripProfile(
+            id: UUID(), tripId: firstId, displayName: "Priya ", avatarColor: "sky", linkedUserId: nil,
+            createdAt: now.addingTimeInterval(1)
+        )
+
+        let secondId = UUID()
+        let second = Trip(
+            id: secondId, title: "Bali Getaway", destination: "Bali, Indonesia", countryCode: "ID",
+            startDate: start, endDate: end, coverGradient: "dusk", tripTypeRaw: TripType.family.rawValue,
+            createdBy: userId, createdAt: now.addingTimeInterval(1), updatedAt: now, updatedBy: nil
+        )
+        let secondMember = TripMember(id: UUID(), tripId: secondId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+
+        modelContext.insert(first)
+        modelContext.insert(firstMember) // local-only; never enqueued (see note above)
+        modelContext.insert(priya)
+        modelContext.insert(priyaAgain)
+        modelContext.insert(second)
+        modelContext.insert(secondMember) // local-only; never enqueued
+        try? modelContext.save()
+
+        await syncEngine.enqueueUpsert(table: .trips, rowId: firstId, tripId: firstId, payload: first.toDTO())
+        await syncEngine.enqueueUpsert(table: .trips, rowId: secondId, tripId: secondId, payload: second.toDTO())
+        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: priya.id, tripId: firstId, payload: priya.toDTO())
+        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: priyaAgain.id, tripId: firstId, payload: priyaAgain.toDTO())
+        await syncEngine.flushPush()
     }
 
     // MARK: - UX P5 register showcase (Home one-list, three registers)

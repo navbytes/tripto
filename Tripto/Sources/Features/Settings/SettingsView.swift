@@ -12,6 +12,12 @@ struct SettingsView: View {
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
     @Environment(SyncStatus.self) private var syncStatus
+    /// P6.1: "Open trip" on an already-imported skip row routes through the
+    /// same app-wide "go to this trip from wherever you are" mechanism a
+    /// widget/Spotlight/Siri tap already uses (`AppRouter.openTrip(id:)`) —
+    /// `HomeView`'s own `.onChange(of: appRouter.tripToOpen)` does the
+    /// actual pull+push, unchanged.
+    @Environment(AppRouter.self) private var appRouter
     @Environment(\.dismiss) private var dismiss
 
     @State private var displayName = ""
@@ -39,9 +45,10 @@ struct SettingsView: View {
 
     /// Tripto Archive v1 (docs/IMPORT_FORMAT.md) — "Import trips"/"Export
     /// trips" (roadmap 2.2/2.3). `archiveImportError` drives the
-    /// atomic-failure alert; `archiveImportReport` drives either a plain
-    /// success alert or the skip-detail sheet, split on the report's own
-    /// `isFullSuccess`.
+    /// atomic-failure alert (nothing was imported at all — no report to
+    /// show); `archiveImportReport` drives `ImportResultSheet` (P6.1,
+    /// docs/UX_REDESIGN_ROADMAP.md) — one branded sheet for every
+    /// successful import, whether or not it had skips.
     @State private var isPresentingArchiveImporter = false
     @State private var isImportingArchive = false
     @State private var isExportingArchive = false
@@ -272,6 +279,18 @@ struct SettingsView: View {
             }
         }
         .toastOverlay($toast)
+        // N2 (P6 fix round): opens `ImportResultSheet` directly with a
+        // representative report — same shape as `HomeView`'s own
+        // `-uitestOpenSettings`/`-uitestOpenShare` hooks, letting a
+        // screenshot pass reach this sheet without a real archive-file
+        // import flow.
+        .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-uitestOpenImportResult") {
+                archiveImportReport = Self.uitestSampleImportReport
+            }
+            #endif
+        }
         .onAppear {
             if displayName.isEmpty {
                 displayName = myProfile?.displayName ?? ""
@@ -361,14 +380,17 @@ struct SettingsView: View {
         } message: {
             Text(archiveImportError?.message ?? "")
         }
-        .alert("Import complete", isPresented: isPresentingArchiveImportSuccessAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(archiveImportReport.map(Self.importSummary) ?? "")
-        }
         .sheet(isPresented: isPresentingArchiveImportReportSheet) {
             if let archiveImportReport {
-                ArchiveImportReportSheet(report: archiveImportReport)
+                ImportResultSheet(
+                    report: archiveImportReport,
+                    onOpenTrip: { tripId in appRouter.openTrip(id: tripId) },
+                    // Pops SettingsView itself back to Home — the sheet's
+                    // own `\.dismiss` only ever closes the sheet, so this
+                    // screen has to supply its own dismissal for "go see
+                    // your trips" to actually leave Settings.
+                    onSeeTrips: { dismiss() }
+                )
             }
         }
     }
@@ -384,16 +406,13 @@ struct SettingsView: View {
         )
     }
 
-    private var isPresentingArchiveImportSuccessAlert: Binding<Bool> {
-        Binding(
-            get: { archiveImportReport?.isFullSuccess == true },
-            set: { isPresented in if !isPresented { archiveImportReport = nil } }
-        )
-    }
-
+    /// P6.1: always shows once there's a report — the old alert-vs-sheet
+    /// split on `isFullSuccess` is gone; `ImportResultSheet` itself degrades
+    /// to the small/clean-import case rather than needing a second, simpler
+    /// presentation to fall back to.
     private var isPresentingArchiveImportReportSheet: Binding<Bool> {
         Binding(
-            get: { archiveImportReport != nil && archiveImportReport?.isFullSuccess == false },
+            get: { archiveImportReport != nil },
             set: { isPresented in if !isPresented { archiveImportReport = nil } }
         )
     }
@@ -669,127 +688,35 @@ struct SettingsView: View {
     My data: \u{2026}
     """
 
-    private static func importSummary(_ report: TripArchiveImportReport) -> String {
-        let tripWord = report.tripsImported == 1 ? "trip" : "trips"
-        let itemWord = report.itemsImported == 1 ? "item" : "items"
-        return "\(report.tripsImported) \(tripWord), \(report.itemsImported) \(itemWord) imported."
-    }
-
     /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): the Export row's "N trips · M
-    /// items" subtitle. Not `private` (unlike `importSummary` above) so
-    /// `SettingsExportCountsTests` can pin the pluralization directly.
+    /// items" subtitle. Not `private` so `SettingsExportCountsTests` can
+    /// pin the pluralization directly (same reasoning as `ImportResultSheet
+    /// .subtitleText`/`primaryActionText`'s own non-private statics).
     static func exportCountsText(tripCount: Int, itemCount: Int) -> String {
         let tripWord = tripCount == 1 ? "trip" : "trips"
         let itemWord = itemCount == 1 ? "item" : "items"
         return "\(tripCount) \(tripWord) \u{00B7} \(itemCount) \(itemWord)"
     }
-}
 
-/// Settings' "Import trips" result when the archive had any skips or flags
-/// — a clean import gets the simpler `.alert` instead (`SettingsView.body`'s
-/// split on `TripArchiveImportReport.isFullSuccess`).
-private struct ArchiveImportReportSheet: View {
-    let report: TripArchiveImportReport
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    LabeledContent("Trips imported", value: "\(report.tripsImported)")
-                    LabeledContent("Items imported", value: "\(report.itemsImported)")
-                    if report.profilesImported > 0 {
-                        LabeledContent("Travellers added", value: "\(report.profilesImported)")
-                    }
-                }
-
-                if report.zoneAssumedCount > 0 {
-                    Section {
-                        Text(zoneAssumedText)
-                    }
-                }
-
-                if !report.tripSkips.isEmpty {
-                    Section("Trips skipped") {
-                        ForEach(Array(report.tripSkips.enumerated()), id: \.offset) { _, skip in
-                            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                                Text(skip.title.isEmpty ? "Untitled trip" : skip.title)
-                                    .font(Typo.body(weight: .semibold))
-                                Text(Self.sentenceCased(skip.reason.reportText))
-                                    .font(Typo.body(Typo.Size.caption))
-                                    .foregroundStyle(Palette.slate)
-                            }
-                            // UX#7: read as one VoiceOver element (name +
-                            // reason together), not two separate stops.
-                            .accessibilityElement(children: .combine)
-                        }
-                    }
-                }
-
-                if !report.itemSkips.isEmpty {
-                    Section("Items skipped") {
-                        ForEach(Array(report.itemSkips.enumerated()), id: \.offset) { _, skip in
-                            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                                // UX#3: the item's own title/category, not
-                                // the raw archive item id (often empty).
-                                Text(skip.itemLabel)
-                                    .font(Typo.body(weight: .semibold))
-                                Text("\(Self.sentenceCased(skip.reason.reportText)) \u{2014} "
-                                    + (skip.tripTitle.isEmpty ? "Untitled trip" : skip.tripTitle))
-                                    .font(Typo.body(Typo.Size.caption))
-                                    .foregroundStyle(Palette.slate)
-                            }
-                            .accessibilityElement(children: .combine)
-                        }
-                    }
-                }
-
-                if report.droppedNotesCount > 0 {
-                    Section {
-                        Text(droppedNotesText)
-                    }
-                }
-            }
-            .navigationTitle("Import results")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            // UX#7: this sheet's own content is the only signal a VoiceOver
-            // user gets that the import finished — announce the headline
-            // counts the moment it presents, same as any other result toast.
-            .onAppear {
-                AccessibilityNotification.Announcement(summaryAnnouncement).post()
-            }
-        }
-    }
-
-    private var summaryAnnouncement: String {
-        let tripWord = report.tripsImported == 1 ? "trip" : "trips"
-        let itemWord = report.itemsImported == 1 ? "item" : "items"
-        let skipCount = report.tripSkips.count + report.itemSkips.count
-        let skipWord = skipCount == 1 ? "item" : "items"
-        return "\(report.tripsImported) \(tripWord), \(report.itemsImported) \(itemWord) imported. "
-            + "\(skipCount) \(skipWord) skipped."
-    }
-
-    private var zoneAssumedText: String {
-        let word = report.zoneAssumedCount == 1 ? "item" : "items"
-        return "\(report.zoneAssumedCount) \(word) assumed your device time zone \u{2014} check times."
-    }
-
-    private var droppedNotesText: String {
-        let word = report.droppedNotesCount == 1 ? "trip\u{2019}s notes weren\u{2019}t" : "trips\u{2019} notes weren\u{2019}t"
-        return "\(report.droppedNotesCount) \(word) imported \u{2014} Tripto doesn\u{2019}t store trip-level notes yet."
-    }
-
-    /// UX#6: BUILD_PLAN §6.2 sentence case — `reportText` values are
-    /// already lowercase; only the first letter needs raising (`.capitalized`
-    /// title-cased every word, e.g. "Missing Id").
-    private static func sentenceCased(_ text: String) -> String {
-        guard let first = text.first else { return text }
-        return first.uppercased() + text.dropFirst()
-    }
+    #if DEBUG
+    /// N2 (P6 fix round): `-uitestOpenImportResult`'s fixture — a
+    /// feature-complete report (stat tiles incl. travellers, a recoverable
+    /// skip, a non-recoverable one, the zone-assumed note) so the capture
+    /// UI test shows the sheet at its most representative, not the
+    /// degraded/empty case (`ImportResultSheetTests` already covers that
+    /// case's own text mapping directly).
+    private static let uitestSampleImportReport = TripArchiveImportReport(
+        tripsImported: 20, itemsImported: 67, profilesImported: 12,
+        tripSkips: [
+            .init(tripId: "1", title: "Parents\u{2019} visit to Hong Kong", reason: .cancelled),
+            .init(tripId: "2", title: "Bangkok", reason: .alreadyImported, existingLocalTripId: UUID()),
+            .init(tripId: "3", title: "", reason: .noStartDate)
+        ],
+        itemSkips: [
+            .init(tripId: "1", tripTitle: "IndiGo booking", itemId: "i1", itemLabel: "Flight 6E204", reason: .noStartTime)
+        ],
+        zoneAssumedCount: 3,
+        droppedNotesCount: 20
+    )
+    #endif
 }
