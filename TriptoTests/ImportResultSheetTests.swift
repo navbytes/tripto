@@ -50,4 +50,30 @@ final class ImportResultSheetTests: XCTestCase {
     func testSentenceCasedOnEmptyStringIsANoOp() {
         XCTAssertEqual(ImportResultSheet.sentenceCased(""), "")
     }
+
+    // MARK: - All-skipped import (a real `TripArchiveImportReport`, not bare ints)
+
+    /// The brief's "all-skipped import": every trip in the archive was
+    /// itself skipped (cancelled/already-imported/no-start-date/etc.), so
+    /// `tripsImported == 0` but there are real skip rows to show — distinct
+    /// from a report that's simply empty. Exercises the mapping off an
+    /// actual report value (as `SettingsView` builds it), not isolated ints.
+    func testAllSkippedImportReportMapsToAnHonestSubtitleAndADoneButton() {
+        let report = TripArchiveImportReport(
+            tripsImported: 0, itemsImported: 0, profilesImported: 0,
+            tripSkips: [
+                .init(tripId: "1", title: "Bangkok", reason: .alreadyImported, existingLocalTripId: UUID()),
+                .init(tripId: "2", title: "Parents\u{2019} visit to Hong Kong", reason: .cancelled),
+                .init(tripId: "3", title: "", reason: .noStartDate)
+            ],
+            itemSkips: [
+                .init(tripId: "1", tripTitle: "Bangkok", itemId: "i1", itemLabel: "Flight 6E204", reason: .noStartTime)
+            ]
+        )
+
+        XCTAssertTrue(ImportResultSheet.subtitleText(tripsImported: report.tripsImported).localizedCaseInsensitiveContains("nothing"))
+        XCTAssertEqual(ImportResultSheet.primaryActionText(tripsImported: report.tripsImported), "Done")
+        XCTAssertFalse(report.isFullSuccess, "an all-skipped import is never a full success — the skip section must render")
+        XCTAssertEqual(report.tripSkips.count + report.itemSkips.count, 4, "every skip row must be counted, trip and item alike")
+    }
 }

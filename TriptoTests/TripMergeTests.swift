@@ -96,4 +96,81 @@ final class TripMergeTests: XCTestCase {
         XCTAssertEqual(moved?.packing.count, 0)
         XCTAssertEqual(moved?.profiles.count, 0)
     }
+
+    /// Collision handling: `execute` never compares the shell's rows against
+    /// the survivor's own — it only moves rows whose `tripId` matches the
+    /// shell. Two items independently sitting at the exact same instant (one
+    /// per trip) are both KEPT after the merge, not deduplicated — pins the
+    /// actual (simple, by-design) behavior so a future change couldn't add
+    /// silent content-based deduping (or accidentally drop one) unnoticed.
+    @MainActor
+    func testMergeKeepsBothItemsWhenShellAndSurvivorHaveItemsAtTheIdenticalInstant() async throws {
+        let context = ModelContext(AppSchema.makeContainer(inMemory: true))
+        let shellId = UUID()
+        let survivorId = UUID()
+        let sharedInstant = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let shellItem = TestFixtures.makeItineraryItem(tripId: shellId, title: "Shell's own item", startsAt: sharedInstant)
+        let survivorItem = TestFixtures.makeItineraryItem(tripId: survivorId, title: "Survivor's own item", startsAt: sharedInstant)
+        context.insert(shellItem)
+        context.insert(survivorItem)
+        try context.save()
+
+        let moved = await TripMerge.execute(
+            shellTripId: shellId, survivorTripId: survivorId, modelContext: context, ensureBothLoaded: {}
+        )
+        XCTAssertEqual(moved?.items.map(\.id), [shellItem.id], "only the shell's own row is reported as moved")
+
+        let onSurvivor = try context.fetch(FetchDescriptor<ItineraryItem>(
+            predicate: #Predicate<ItineraryItem> { $0.tripId == survivorId }
+        ))
+        XCTAssertEqual(
+            Set(onSurvivor.map(\.id)), Set([shellItem.id, survivorItem.id]),
+            "an identical-time collision is kept, not merged/deduplicated — both rows survive independently"
+        )
+    }
+
+    /// "App killed mid-countdown" (`HomeView.startMerge`'s own doc comment:
+    /// nothing touches the model or the network until the 6s countdown
+    /// elapses uncancelled) — from the model's point of view this is
+    /// indistinguishable from "the user never tapped Merge at all", since
+    /// `TripMerge.execute` is simply never invoked during the countdown.
+    /// Confirms both halves of that claim against real persistence rather
+    /// than just reasoning about the code: the shell/survivor rows are
+    /// completely untouched, and a brand new `ModelContext` against the same
+    /// store (standing in for "next launch's fresh `@Query`") re-detects the
+    /// identical duplicate pair — the strip reappears with nothing to
+    /// reconcile, no partial merge left behind.
+    @MainActor
+    func testKillingTheAppMidCountdownLeavesBothTripsIntactAndTheStripReappearsOnRelaunch() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let end = start.addingTimeInterval(4 * 86_400)
+        let shell = TestFixtures.makeTrip(destination: "Okinawa, Japan", startDate: start, endDate: end)
+        let survivor = TestFixtures.makeTrip(destination: "Okinawa, Japan", startDate: start, endDate: end)
+        let shellId = shell.id
+        let shellItem = TestFixtures.makeItineraryItem(tripId: shellId, startsAt: start)
+        context.insert(shell)
+        context.insert(survivor)
+        context.insert(shellItem)
+        try context.save()
+
+        // The 6s countdown elapsing uncancelled is the ONLY path to
+        // `TripMerge.execute` — deliberately never called here, simulating
+        // the app dying at any point during the window.
+
+        // "Next launch": a fresh context against the same store, exactly
+        // what a relaunch's own `@Query` would read back.
+        let relaunchContext = ModelContext(container)
+        let trips = try relaunchContext.fetch(FetchDescriptor<Trip>(sortBy: [SortDescriptor(\.startDate)]))
+        XCTAssertEqual(trips.count, 2, "no trip was deleted — the merge never actually ran")
+        let itemsStillOnShell = try relaunchContext.fetch(FetchDescriptor<ItineraryItem>(
+            predicate: #Predicate<ItineraryItem> { $0.tripId == shellId }
+        ))
+        XCTAssertEqual(itemsStillOnShell.count, 1, "the shell's item was never moved")
+
+        let pair = TripMergeDetection.survivorByShellId(in: trips)
+        XCTAssertFalse(pair.isEmpty, "detection is re-derived fresh from persisted trips, not cached state — the strip must reappear")
+    }
 }

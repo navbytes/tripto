@@ -61,6 +61,71 @@ final class ProfileDedupeTests: XCTestCase {
         XCTAssertTrue(ProfileDedupe.duplicatePairs(in: [profile(tripId: UUID(), name: "Sam")]).isEmpty)
     }
 
+    /// `normalizedKey`'s own doc comment is explicit: "trimmed + lowercased"
+    /// — no diacritic folding. Pins that actual, as-documented behavior
+    /// rather than assuming Unicode-savvy matching: "José" and "Jose" are
+    /// two different normalized keys today, so they are NOT offered as a
+    /// dedupe pair. Flagging in the handoff as a product question (the
+    /// roadmap only says "normalized name", which doesn't settle this) —
+    /// not a code defect, since the implementation matches its own doc
+    /// comment exactly.
+    func testDiacriticVariantsAreNotConsideredDuplicatesByTheCurrentNormalization() {
+        let tripId = UUID()
+        let withAccent = profile(tripId: tripId, name: "José")
+        let withoutAccent = profile(tripId: tripId, name: "Jose")
+        XCTAssertTrue(
+            ProfileDedupe.duplicatePairs(in: [withAccent, withoutAccent]).isEmpty,
+            "current normalization is trim+lowercase only — accented and unaccented spellings are distinct keys"
+        )
+    }
+
+    /// Emoji are significant to the match, same as any other character —
+    /// `normalizedKey` only trims/lowercases, it never strips symbols.
+    /// Identical emoji still pair like any other identical (case-insensitive)
+    /// name; adding/removing an emoji changes the string and must not pair.
+    func testEmojiIsSignificantToNormalizedMatching() {
+        let tripId = UUID()
+        let a = profile(tripId: tripId, name: "Mom \u{1F475}")
+        let b = profile(tripId: tripId, name: "MOM \u{1F475}")
+        XCTAssertEqual(ProfileDedupe.duplicatePairs(in: [a, b]).count, 1, "identical emoji + case-only difference still pairs")
+
+        let plain = profile(tripId: tripId, name: "Mom")
+        let withEmoji = profile(tripId: tripId, name: "Mom \u{1F475}")
+        XCTAssertTrue(
+            ProfileDedupe.duplicatePairs(in: [plain, withEmoji]).isEmpty,
+            "an emoji suffix makes the two names genuinely different strings"
+        )
+    }
+
+    /// KNOWN GAP (flagged in the handoff, not fixed here — this file is
+    /// test-only): `duplicatePairs` chooses the survivor by `createdAt`
+    /// alone, with no regard for `TripProfile.linkedUserId`. A profile
+    /// linked to a real signed-in account member can therefore be chosen as
+    /// the DUPLICATE — and deleted by `merge` — if it happens to have been
+    /// created after its unlinked namesake. That's a real account
+    /// disconnect, not just a display nit: `ShareTripView.duplicateProfilePairs`
+    /// passes ALL profiles through unfiltered, so nothing upstream guards
+    /// against it either. `XCTExpectFailure` documents the desired contract
+    /// and keeps CI green until this is fixed; delete the wrapper (leaving
+    /// the assertion) the day survivor selection prefers `linkedUserId != nil`.
+    func testLinkedProfileShouldSurviveOverAnUnlinkedNewerNamesake() {
+        let tripId = UUID()
+        let unlinkedOlder = profile(tripId: tripId, name: "Mom", createdAt: Date(timeIntervalSince1970: 0))
+        let linkedNewer = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Mom", avatarColor: "amber",
+            linkedUserId: UUID(), createdAt: Date(timeIntervalSince1970: 100)
+        )
+
+        XCTExpectFailure("""
+        KNOWN BUG: survivor is chosen by createdAt only (ProfileDedupe.swift's own `duplicatePairs`), \
+        so an account-linked profile can lose a merge to an older unlinked one. File a card; delete this \
+        expectation once linkedUserId is preferred.
+        """) {
+            let pairs = ProfileDedupe.duplicatePairs(in: [unlinkedOlder, linkedNewer])
+            XCTAssertEqual(pairs.first?.survivor.id, linkedNewer.id, "the account-linked profile must survive a merge")
+        }
+    }
+
     // MARK: - merge
 
     @MainActor

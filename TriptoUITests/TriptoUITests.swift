@@ -669,4 +669,75 @@ final class TriptoUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    // MARK: - P6 milestone screenshots (docs/UX_REDESIGN_ROADMAP.md Phase 6:
+    // import-result sheet, duplicate-trip merge, traveller dedupe) — same
+    // "config-agnostic test, appearance/Dynamic Type flipped from OUTSIDE
+    // between separate invocations" recipe as `testCaptureItineraryScreen`
+    // above (see the Tester report for the exact `xcrun simctl ui`
+    // commands). `-uitestSeedP6TrustShowcase` (`DemoSeeder`'s additive flag)
+    // seeds two same-dates/same-destination "ahead" trips ("Bali Family
+    // Trip"/"Bali Getaway") so Home's `DuplicateTripStrip` has a real
+    // adjacent pair to fuse under, plus two similarly-named profiles on
+    // "Bali Family Trip" so `ShareTripView`'s dedupe banner/review sheet
+    // have something to surface. No `-uitestOpenFirstTrip`/`-uitestOpenShare`
+    // involved — both target `trips.first?.id`, which on a fresh store is
+    // always "Lisbon" (`DemoSeeder.seed`'s own hardcoded return value), not
+    // this showcase's trips.
+
+    /// Home's merge strip, then the 6s countdown toast right after tapping
+    /// "Merge into…". The countdown is a genuine multi-second STATE (unlike
+    /// `testCaptureHomeBeenRowSwipeReveal`'s momentary swipe reveal), so no
+    /// held gesture is needed — a screenshot taken right after the tap is
+    /// well inside the 6s window. Matches on "Merge into" generically (not
+    /// a fixed survivor title): the two seeded trips share an identical
+    /// `startDate`, so `HomeTripOrdering.ahead`'s own tie-break
+    /// (`id.uuidString`, effectively random per run) decides which one ends
+    /// up the strip's survivor.
+    func testCaptureHomeMergeStripAndCountdown() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedP6TrustShowcase"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Bali Family Trip"].waitForExistence(timeout: 30), "P6 trust showcase trip never appeared")
+        XCTAssertTrue(app.staticTexts["Bali Getaway"].waitForExistence(timeout: 10), "the second duplicate trip never appeared")
+        let mergeButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Merge into")).firstMatch
+        XCTAssertTrue(mergeButton.waitForExistence(timeout: 10), "DuplicateTripStrip's Merge button never appeared")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "home-merge-strip", of: app)
+
+        mergeButton.tap()
+        let undoButton = app.buttons["Undo"]
+        XCTAssertTrue(undoButton.waitForExistence(timeout: 5), "merge countdown toast never appeared")
+        attachScreenshot(named: "merge-countdown-toast", of: app)
+    }
+
+    /// `ShareTripView`'s dedupe banner, then its "Review" destination
+    /// (`ProfileDedupeReviewSheet`). Reached by opening "Bali Family Trip"
+    /// directly and tapping the hero's own "Share trip" entry point
+    /// (`HeroCollapse.swift`), not `-uitestOpenShare` — see this section's
+    /// own doc comment for why that hook targets the wrong trip here.
+    func testCaptureShareDedupeBannerAndReviewSheet() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedP6TrustShowcase"]
+        app.launch()
+        let tripCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Bali Family Trip")).firstMatch
+        XCTAssertTrue(tripCard.waitForExistence(timeout: 30), "P6 trust showcase trip never appeared on Home")
+        tripCard.tap()
+        XCTAssertTrue(app.staticTexts["Bali Family Trip"].waitForExistence(timeout: 15), "trip screen never opened")
+
+        let shareButton = app.buttons["Share trip"]
+        XCTAssertTrue(shareButton.waitForExistence(timeout: 10), "hero's Share entry point never appeared")
+        shareButton.tap()
+        XCTAssertTrue(app.navigationBars["Share this trip"].waitForExistence(timeout: 10), "Share screen never appeared")
+
+        let reviewButton = app.buttons["Review"]
+        XCTAssertTrue(reviewButton.waitForExistence(timeout: 10), "dedupe banner's Review button never appeared")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "share-dedupe-banner", of: app)
+
+        reviewButton.tap()
+        XCTAssertTrue(app.navigationBars["Possible duplicates"].waitForExistence(timeout: 5), "dedupe review sheet never presented")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "dedupe-review-sheet", of: app)
+    }
 }
