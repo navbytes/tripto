@@ -1,5 +1,16 @@
 import SwiftUI
 
+/// docs/UX_REDESIGN_ROADMAP.md Phase 5: register-specific augmentation for
+/// the nearest-upcoming ("next") or live ("now") trip — `HomeView` resolves
+/// which one applies (`HomeRegister.kind`, `HomeRegisters.swift`) and hands
+/// the already-built content down; `.plain` (every other card, the default)
+/// renders exactly as `TripCard` did before this phase.
+enum HomeCardRegister: Equatable {
+    case plain
+    case next(firstUp: HomeFirstUp?)
+    case now(panel: HomeTodayPanel)
+}
+
 /// Home's trip card (BUILD_PLAN.md §4.1, §6.3 "gradient trip covers with
 /// glassy overlay pills"). The whole card is the tap target — `HomeView`
 /// wraps this in the `NavigationLink`/button, not this view itself, so it
@@ -9,6 +20,7 @@ struct TripCard: View {
     let people: [AvatarStack.Person]
     let isPending: Bool
     var today: Date = .now
+    var register: HomeCardRegister = .plain
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .caption) private var smallGlyphSize: CGFloat = 10
@@ -51,7 +63,7 @@ struct TripCard: View {
                 topLayout {
                     statusPill
                     if isPending {
-                        glassPill(text: "Waiting to sync", icon: "clock")
+                        glassPill(text: "Waiting to sync", leading: .icon("clock"))
                     }
                     if !dynamicTypeSize.isAccessibilitySize {
                         Spacer(minLength: Spacing.sm)
@@ -79,6 +91,8 @@ struct TripCard: View {
                     .font(Typo.body(Typo.Size.caption))
                     .foregroundStyle(.white.opacity(0.92))
                 }
+
+                registerContent
             }
             .padding(Spacing.lg)
         }
@@ -96,18 +110,51 @@ struct TripCard: View {
     private var accessibilityLabel: String {
         var parts = [trip.title]
         if let locationText { parts.append(locationText) }
-        switch bucket {
-        case .inProgress: parts.append("in progress")
-        case .upcoming: parts.append("in \(daysUntilStartText)")
-        case .past: parts.append("completed")
-        }
+        parts.append(statusAccessibilityPhrase)
         parts.append("starts \(startDateText)")
         parts.append(durationText)
         if !people.isEmpty {
             parts.append("\(people.count) traveler\(people.count == 1 ? "" : "s")")
         }
         if isPending { parts.append("waiting to sync") }
+        // P5.2/P5.3: "sensible per-card sentences" for the registers'
+        // on-card extras (§ contract) — the ring/day-progress-bar/mini-list
+        // views themselves stay out of the accessibility tree (see
+        // `HomeRegisterViews.swift`), so this is the one place their
+        // content actually reaches VoiceOver.
+        if let registerAccessibilityPhrase { parts.append(registerAccessibilityPhrase) }
         return parts.joined(separator: ", ")
+    }
+
+    /// The bucket-status phrase — "Day N of M" for the live "now" register
+    /// (richer than the plain "in progress" every other in-progress card
+    /// still says), the existing phrasing otherwise.
+    private var statusAccessibilityPhrase: String {
+        if case .now(let panel) = register {
+            return "day \(panel.dayNumber) of \(panel.totalDays)"
+        }
+        switch bucket {
+        case .inProgress: return "in progress"
+        case .upcoming: return "in \(daysUntilStartText)"
+        case .past: return "completed"
+        }
+    }
+
+    private var registerAccessibilityPhrase: String? {
+        switch register {
+        case .plain:
+            return nil
+        case .next(let firstUp):
+            guard let firstUp else { return nil }
+            return "first up: \(firstUp.text), \(firstUp.weekday) \(firstUp.time)"
+        case .now(let panel):
+            guard !panel.rows.isEmpty else { return nil }
+            var todayParts = panel.rows.map { "\($0.time) \($0.title)" }
+            if panel.moreCount > 0 {
+                todayParts.append("\(panel.moreCount) more today")
+            }
+            return "today: " + todayParts.joined(separator: ", ")
+        }
     }
 
     /// Shared with `accessibilityLabel` so the spoken and on-screen pill
@@ -117,22 +164,58 @@ struct TripCard: View {
         return "\(days) day\(days == 1 ? "" : "s")"
     }
 
+    /// P5.2/P5.3: the "next"/"now" registers override the plain bucket pill
+    /// — "next" keeps the existing "in N days" text but adds the countdown
+    /// ring bullet, "now" swaps in "Day N of M" with the live dot. Every
+    /// other card (`.plain`, incl. every non-first "ahead" trip) is
+    /// unchanged from before this phase.
     @ViewBuilder
     private var statusPill: some View {
-        switch bucket {
-        case .inProgress:
-            glassPill(text: "In progress", icon: nil)
-        case .upcoming:
-            glassPill(text: "in \(daysUntilStartText)", icon: nil)
-        case .past:
-            glassPill(text: "Completed", icon: nil)
+        switch register {
+        case .now(let panel):
+            glassPill(text: "Day \(panel.dayNumber) of \(panel.totalDays)", leading: .liveDot)
+        case .next:
+            glassPill(text: "in \(daysUntilStartText)", leading: .ring(fraction: countdownRingFraction))
+        case .plain:
+            switch bucket {
+            case .inProgress:
+                glassPill(text: "In progress")
+            case .upcoming:
+                glassPill(text: "in \(daysUntilStartText)")
+            case .past:
+                glassPill(text: "Completed")
+            }
         }
     }
 
-    private func glassPill(text: String, icon: String?) -> some View {
+    /// P5.2: docs/UX_REDESIGN_ROADMAP.md's own review call — true
+    /// elapsed-since-creation progress read as over-engineered for a
+    /// glance-only decoration the mockup only ever shows as a simple partial
+    /// arc. ponytail: linear against a 60-day ceiling, clamped — a trip
+    /// further out than that just shows a full ring; there's no ambition
+    /// here beyond "closer trips read differently from farther ones."
+    private var countdownRingFraction: Double {
+        min(max(Double(trip.daysUntilStart(asOf: today)), 0), 60) / 60
+    }
+
+    private enum PillLeading {
+        case none
+        case icon(String)
+        case ring(fraction: Double)
+        case liveDot
+    }
+
+    private func glassPill(text: String, leading: PillLeading = .none) -> some View {
         HStack(spacing: Spacing.xxs) {
-            if let icon {
-                Image(systemName: icon).font(.system(size: smallGlyphSize, weight: .semibold))
+            switch leading {
+            case .none:
+                EmptyView()
+            case .icon(let name):
+                Image(systemName: name).font(.system(size: smallGlyphSize, weight: .semibold))
+            case .ring(let fraction):
+                CountdownRing(fraction: fraction)
+            case .liveDot:
+                LiveDot()
             }
             Text(text)
         }
@@ -141,6 +224,30 @@ struct TripCard: View {
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.xs)
         .background(Palette.coverPillFill, in: Capsule())
+    }
+
+    /// The register's own extra content, appended below the title/meta
+    /// block — `EmptyView` for `.plain`, matching every card before this
+    /// phase exactly.
+    @ViewBuilder
+    private var registerContent: some View {
+        switch register {
+        case .plain:
+            EmptyView()
+        case .next(let firstUp):
+            if let firstUp {
+                FirstUpStrip(model: firstUp)
+                    .padding(.top, Spacing.md)
+            }
+        case .now(let panel):
+            VStack(alignment: .leading, spacing: Spacing.sm + 4) {
+                DayProgressBar(dayNumber: panel.dayNumber, totalDays: panel.totalDays)
+                if !panel.rows.isEmpty {
+                    TodayPanelView(panel: panel)
+                }
+            }
+            .padding(.top, Spacing.md)
+        }
     }
 
     private func metaItem(icon: String, text: String) -> some View {

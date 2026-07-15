@@ -10,6 +10,17 @@ struct HomeView: View {
     @Query private var profiles: [Profile]
     @Query private var tripMembers: [TripMember]
     @Query private var tripProfiles: [TripProfile]
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 5: backs every trip's own liveness
+    /// (`bucket(for:)`, via `TripDateBucketing.liveTimeZone`) and the
+    /// "next"/"now" registers' FIRST-UP/today's-plan content, plus "been"
+    /// row item counts. Filtered to `.confirmed` in `itemsByTripId` below,
+    /// not here — an unreviewed email-import suggestion must never surface
+    /// on Home (same EI-2 rule `TripView`'s own `@Query` already enforces)
+    /// — but a plain in-Swift filter matches this file's existing
+    /// convention (`people(for:)`/`isOrganizer(of:)` below already filter
+    /// their own unfiltered queries in Swift) rather than adding a
+    /// `#Predicate` + custom `init` just for this one query.
+    @Query private var items: [ItineraryItem]
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
@@ -23,11 +34,6 @@ struct HomeView: View {
     /// plain push, same convention as everywhere else this app checks it).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var selectedTab = "Upcoming"
-    /// Guards `chooseInitialTabIfNeeded()` to a one-time redirect (finding
-    /// 1) — after this fires once, the user's own tab taps are never
-    /// overridden.
-    @State private var didChooseInitialTab = false
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
     @State private var tripPendingDeletion: Trip?
@@ -103,15 +109,6 @@ struct HomeView: View {
                         .padding(.top, Spacing.md)
                         .padding(.bottom, Spacing.sm)
 
-                    // Hidden while trips is empty (finding 9) — an inert
-                    // Upcoming/Past toggle over a single empty/loading
-                    // message isn't a real choice yet.
-                    if !trips.isEmpty {
-                        SegmentedControl(options: ["Upcoming", "Past"], selection: $selectedTab)
-                            .padding(.horizontal, Spacing.xl)
-                            .padding(.bottom, Spacing.xs)
-                    }
-
                     if trips.isEmpty {
                         // First-pull loading vs. genuinely-empty vs.
                         // pull-failed account (findings 1/2): the resolver
@@ -132,9 +129,14 @@ struct HomeView: View {
                         case .empty:
                             emptyState
                         }
-                    } else if visibleTrips.isEmpty {
-                        emptyTabState
                     } else {
+                        // docs/UX_REDESIGN_ROADMAP.md Phase 5 (P5.1): one
+                        // list now covers every trip (`orderedTrips` is
+                        // `ahead + been`, exhaustive over `trips`), so the
+                        // old "selected tab is empty but the other tab has
+                        // content" branch this `else if` used to guard
+                        // (`emptyTabState`) can no longer happen — deleted,
+                        // not just unreached.
                         tripList
                     }
                 }
@@ -181,22 +183,19 @@ struct HomeView: View {
                 #endif
             }
             .sheet(isPresented: $isPresentingCreate) {
-                // Finding 2: switches to whichever tab the saved trip
-                // actually files under — `bucket().isPastTab`, not a
-                // hardcoded "Upcoming", so a backdated trip still lands
-                // somewhere visible.
-                TripFormView(mode: .create) { trip, _ in
+                // docs/UX_REDESIGN_ROADMAP.md Phase 5: one list now covers
+                // every trip, so a saved trip is always visible somewhere in
+                // it — finding 2's old tab-routing concern (`selectedTab =
+                // trip.bucket().isPastTab ? "Past" : "Upcoming"`) no longer
+                // has anything to route between.
+                TripFormView(mode: .create) { _, _ in
                     // Create-mode always reports `.saved` — it hard-stops on
                     // a nil `userId` before ever reaching a save.
-                    selectedTab = trip.bucket().isPastTab ? "Past" : "Upcoming"
                     toast = "Trip created"
                 }
             }
             .sheet(item: $editingTrip) { trip in
-                // Same fix, symmetric case: editing a trip's dates can move
-                // it to the other tab, where it'd otherwise vanish.
-                TripFormView(mode: .edit(trip)) { savedTrip, outcome in
-                    selectedTab = savedTrip.bucket().isPastTab ? "Past" : "Upcoming"
+                TripFormView(mode: .edit(trip)) { _, outcome in
                     switch outcome {
                     case .saved:
                         toast = "Changes saved"
@@ -223,7 +222,6 @@ struct HomeView: View {
             .sheet(item: $tripToDuplicate) { sourceTrip in
                 TripFormView(mode: .create, prefill: TripDuplication.prefill(for: sourceTrip)) { newTrip, _ in
                     duplicateContent(from: sourceTrip, into: newTrip)
-                    selectedTab = newTrip.bucket().isPastTab ? "Past" : "Upcoming"
                     toast = "Trip duplicated"
                 }
             }
@@ -255,14 +253,6 @@ struct HomeView: View {
                 // out, now that Home mounting proves a session exists.
                 await appRouter.claimPendingInviteIfNeeded()
                 await applyUITestAutopilotIfNeeded()
-            }
-            // Covers a warm SwiftData cache where `@Query` is already
-            // populated on first render (finding 1).
-            .onAppear { chooseInitialTabIfNeeded() }
-            // Covers async `@Query` hydration where `trips` populates after
-            // first render, so `.onAppear` alone would've seen `isEmpty`.
-            .onChange(of: trips.isEmpty) { _, isEmpty in
-                if !isEmpty { chooseInitialTabIfNeeded() }
             }
             .onChange(of: appRouter.tripToOpen) { _, tripId in
                 guard let tripId else { return }
@@ -353,7 +343,7 @@ struct HomeView: View {
         #endif
     }
 
-    /// Shared path for all six `.refreshable { }` closures on Home (finding
+    /// Shared path for all five `.refreshable { }` closures on Home (finding
     /// 1) — routes every pull-to-refresh gesture through the same gate so
     /// they can't diverge. `pullHome()` itself already drives `SyncStatus`;
     /// this only decides whether *this* gesture, specifically, should also
@@ -370,18 +360,6 @@ struct HomeView: View {
         ) {
             toast = "Couldn\u{2019}t refresh \u{2014} pull to try again"
         }
-    }
-
-    /// One-time initial-tab redirect (finding 1) — a user whose trips are
-    /// all in the past would otherwise land on the default "Upcoming" tab
-    /// and see an empty screen. `didChooseInitialTab` gates this to fire
-    /// once per session so it never overrides a manual tab switch
-    /// afterward. `HomeInitialTab.resolve` is the only place the decision
-    /// lives, so the regression tests on it are the safety net.
-    private func chooseInitialTabIfNeeded() {
-        guard !didChooseInitialTab && !trips.isEmpty else { return }
-        didChooseInitialTab = true
-        selectedTab = HomeInitialTab.resolve(hasUpcoming: !upcomingTrips.isEmpty, hasPast: !pastTrips.isEmpty)
     }
 
     // MARK: - Header
@@ -525,16 +503,29 @@ struct HomeView: View {
         }
     }
 
+    /// docs/UX_REDESIGN_ROADMAP.md Phase 5 (P5.1–P5.5): one list, three
+    /// registers. `List` (not the `ScrollView`+`LazyVStack(pinnedViews:)`
+    /// recipe `ItineraryTabView` uses for its own pinned day headers) stays
+    /// the container here — deliberately: `List`'s native `Section` headers
+    /// already pin on `.plain` style (the exact behavior "sticky year
+    /// headers" needs), and keeping `List` means the "been" rows inherit
+    /// `.swipeActions` for free, both its drag mechanics *and* VoiceOver's
+    /// automatic custom-actions rotor exposure — a hand-rolled swipe gesture
+    /// would need to reimplement that accessibility path by hand to avoid a
+    /// regression against the "registers are one list to a screen reader"
+    /// contract. Flagged for review in the handoff, since the roadmap's own
+    /// phrasing points at `LazyVStack`.
     private var tripList: some View {
         List {
-            ForEach(visibleTrips) { trip in
+            ForEach(aheadTrips) { trip in
                 Button {
                     openTrip(trip)
                 } label: {
                     TripCard(
                         trip: trip,
                         people: people(for: trip),
-                        isPending: syncStatus.pendingRowIds.contains(trip.id)
+                        isPending: syncStatus.pendingRowIds.contains(trip.id),
+                        register: cardRegister(for: trip)
                     )
                     .padding(.horizontal, Spacing.xl)
                     // PLAN-signature-layer.md §D1: measures this exact
@@ -562,6 +553,23 @@ struct HomeView: View {
                 ))
             }
 
+            if !beenTrips.isEmpty {
+                beenSectionHeader
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                ForEach(beenYears, id: \.self) { year in
+                    Section {
+                        ForEach(beenTrips(inYear: year)) { trip in
+                            beenRow(trip)
+                        }
+                    } header: {
+                        yearHeader(year)
+                    }
+                }
+            }
+
             planNewTripRow
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -571,8 +579,129 @@ struct HomeView: View {
         .scrollContentBackground(.hidden)
         // User-initiated escape hatch for a missed realtime event (finding
         // 10) — realtime/debounced pulls are the normal path, this is just
-        // the fallback.
+        // the fallback. P5.5: also the "launch always opens at top" check —
+        // `List` never restores/persists a scroll position across a fresh
+        // `HomeView` instantiation on its own, and nothing here adds any
+        // (no `@SceneStorage`/`ScrollViewReader` offset-restoring code),
+        // so a cold launch always starts at the top for free.
         .refreshable { await refreshFromPull() }
+    }
+
+    /// P5.2/P5.3: resolves the "next"/"now" registers' extra content once
+    /// per card — `.plain` (unchanged rendering) for every other ahead trip.
+    private func cardRegister(for trip: Trip) -> HomeCardRegister {
+        switch registerKind(for: trip) {
+        case .next:
+            let firstUp = HomeFirstUp.pick(from: itemsByTripId[trip.id] ?? [])
+            return .next(firstUp: firstUp.map(HomeFirstUp.init))
+        case .now:
+            let tz = liveTimeZone(for: trip)
+            let todayItems = HomeTodayPlan.items(in: itemsByTripId[trip.id] ?? [], liveTimeZone: tz)
+            let panel = HomeTodayPanel.make(trip: trip, todayItems: todayItems, liveTimeZone: tz)
+            return .now(panel: panel)
+        case .plain, .been:
+            return .plain
+        }
+    }
+
+    /// P5.4: "Been there" — a plain (non-sticky) row that introduces the
+    /// archive once, above the first sticky year header. Matches the
+    /// mockup's `.arch` (title + hairline rule + trip-count eyebrow); no
+    /// search entry (not in this phase's scope).
+    private var beenSectionHeader: some View {
+        HStack(spacing: Spacing.md) {
+            Text("Been there")
+                .font(Typo.display(19))
+                .foregroundStyle(Palette.ink)
+            Rectangle().fill(Palette.mist).frame(height: 1)
+            Text("\(beenTrips.count) trip\(beenTrips.count == 1 ? "" : "s")")
+                .font(Typo.body(10.5, weight: .bold))
+                .tracking(0.8)
+                .textCase(.uppercase)
+                .foregroundStyle(Palette.slate)
+                .fixedSize()
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.top, Spacing.xxl)
+        .padding(.bottom, Spacing.xxs)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Sticky year header (P5.4) — same `Palette.paper`-fade recipe as
+    /// `ItineraryTabView.dayHeaderBackground`, so content scrolling
+    /// underneath a pinned header fades rather than hard-clipping.
+    private func yearHeader(_ year: Int) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Text(String(year))
+                .font(Typo.body(11, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(Palette.slate)
+            Rectangle().fill(Palette.mist).frame(height: 1)
+        }
+        .padding(.horizontal, Spacing.xl)
+        .padding(.vertical, Spacing.sm)
+        .background(yearHeaderBackground)
+        .listRowInsets(EdgeInsets())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(year))
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var yearHeaderBackground: some View {
+        VStack(spacing: 0) {
+            Palette.paper
+            LinearGradient(colors: [Palette.paper, Palette.paper.opacity(0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 8)
+        }
+    }
+
+    /// P5.4: a "been" trip's muted compact row. Tapping reuses `openTrip`
+    /// unchanged — `cardFrameTracking` is never attached to a `BeenRow`
+    /// (it isn't `TripCard`-shaped), so `HeroFlightGate` sees no source
+    /// frame for it and `openTrip` already falls back to a plain push, with
+    /// no separate "been rows never fly" branch needed.
+    private func beenRow(_ trip: Trip) -> some View {
+        Button {
+            openTrip(trip)
+        } label: {
+            BeenRow(trip: trip, itemCount: itemsByTripId[trip.id]?.count ?? 0)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+        .listRowSeparatorTint(Palette.mist)
+        // "Swipe leading/trailing" (P5.4): both edges reach the same single
+        // action, same two-edge convention `PackingListView`'s rows already
+        // use (there for two different actions; here the same one, reachable
+        // from either direction). Both invoke the exact same
+        // `tripToDuplicate` sheet flow (`TripDuplication`/`duplicateContent`)
+        // every ahead card's context-menu "Duplicate Trip" already uses — no
+        // second implementation.
+        .swipeActions(edge: .trailing) { copyToNewTripSwipeAction(trip) }
+        .swipeActions(edge: .leading) { copyToNewTripSwipeAction(trip) }
+        .contextMenu {
+            Button {
+                tripToDuplicate = trip
+            } label: {
+                Label("Copy to a new trip", systemImage: "plus.square.on.square")
+            }
+        }
+    }
+
+    private func copyToNewTripSwipeAction(_ trip: Trip) -> some View {
+        Button {
+            tripToDuplicate = trip
+        } label: {
+            Label("Copy to a new trip", systemImage: "plus.square.on.square")
+        }
+        // Not `.tint(Palette.amber)`: a `.swipeActions` button's label is
+        // system-rendered in fixed white regardless of any `Label`/`Text`
+        // styling here, and white-on-amber measures ~2.4:1 (`PaletteExtras
+        // .swift`'s `onAmber` doc comment — fails AA outright). `.indigo` is
+        // `PackingListView`'s own precedent for exactly this shape (a
+        // non-destructive swipe action needing a tint) — white-on-indigo
+        // measures ~12.8:1.
+        .tint(Palette.indigo)
     }
 
     private var planNewTripRow: some View {
@@ -645,32 +774,6 @@ struct HomeView: View {
         }
         // One VoiceOver stop per bullet (icon + text), not two.
         .accessibilityElement(children: .combine)
-    }
-
-    /// Shown when the *selected tab* is empty but the other tab has trips —
-    /// avoids a near-blank screen with only a lone dashed button.
-    private var emptyTabState: some View {
-        ScrollView {
-            VStack(spacing: Spacing.md) {
-                Spacer()
-                Text(selectedTab == "Upcoming" ? "No upcoming trips" : "No past trips yet")
-                    .font(Typo.display(Typo.Size.title))
-                    .foregroundStyle(Palette.ink)
-                Text(selectedTab == "Upcoming"
-                     ? "Plan the next one \u{2014} everyone\u{2019}s bookings in one shared itinerary."
-                     : "Trips you\u{2019}ve wrapped up will show up here.")
-                    .font(Typo.body())
-                    .foregroundStyle(Palette.slate)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, Spacing.xl)
-                planNewTripCTA.padding(.top, Spacing.xs)
-                Spacer()
-                Spacer()
-            }
-            .padding(Spacing.xl)
-            .containerRelativeFrame(.vertical)
-        }
-        .refreshable { await refreshFromPull() }
     }
 
     /// First-pull loading placeholder (finding 2) — shown while a
@@ -896,25 +999,66 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Derived data
+    // MARK: - Derived data (docs/UX_REDESIGN_ROADMAP.md Phase 5)
 
-    private var upcomingTrips: [Trip] {
-        trips
-            .filter { !$0.bucket().isPastTab }
-            .sorted { lhs, rhs in
-                let lhsInProgress = lhs.bucket() == .inProgress
-                let rhsInProgress = rhs.bucket() == .inProgress
-                if lhsInProgress != rhsInProgress { return lhsInProgress }
-                return lhs.startDate < rhs.startDate
-            }
+    /// This trip's own confirmed items — backs `bucket(for:)`'s
+    /// `liveTimeZone` derivation and the "next"/"now"/"been" registers'
+    /// content. Grouped once per render pass rather than filtered afresh at
+    /// every call site (a trip count × item count scan is trivial at this
+    /// app's scale, same "boring, not hot-looped" reasoning
+    /// `duplicateContent` below already accepts for its own one-off
+    /// per-trip item fetch).
+    private var itemsByTripId: [UUID: [ItineraryItem]] {
+        Dictionary(grouping: items.filter { $0.status == .confirmed }, by: \.tripId)
     }
 
-    private var pastTrips: [Trip] {
-        trips.filter { $0.bucket().isPastTab }.sorted { $0.startDate > $1.startDate }
+    /// P2's note for this phase: judge each trip's liveness/past against
+    /// *that trip's own* `TripDateBucketing.liveTimeZone(items:)`, not the
+    /// device's zone — so a trip stays "ahead" at 23:00 in Naha even once
+    /// the device has already rolled over. `Trip.bucket(asOf:calendar:)`'s
+    /// own public API/default (device `Calendar.current`) is untouched;
+    /// this is the composition Home now does at its own call site.
+    private func bucket(for trip: Trip) -> TripBucket {
+        var calendar = Calendar.current
+        calendar.timeZone = liveTimeZone(for: trip)
+        return trip.bucket(asOf: .now, calendar: calendar)
     }
 
-    private var visibleTrips: [Trip] {
-        selectedTab == "Upcoming" ? upcomingTrips : pastTrips
+    private func liveTimeZone(for trip: Trip) -> TimeZone {
+        TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])
+    }
+
+    /// P5.1: "ahead" — the one-comparator ordering's own doc comment
+    /// (`HomeTripOrdering.ahead`) covers the rest.
+    private var aheadTrips: [Trip] {
+        HomeTripOrdering.ahead(trips) { bucket(for: $0) }
+    }
+
+    private var beenTrips: [Trip] {
+        HomeTripOrdering.been(trips) { bucket(for: $0) }
+    }
+
+    /// P5.4: distinct years among `beenTrips`, in the same most-recent-first
+    /// order (grouped by `endDate`'s year — the same field `been`'s own
+    /// sort already keys off, so a trip that crosses a year boundary can't
+    /// land in a section that disagrees with its own sort position).
+    private var beenYears: [Int] {
+        var seen = Set<Int>()
+        var years: [Int] = []
+        for trip in beenTrips {
+            let year = Calendar.current.component(.year, from: trip.endDate)
+            if seen.insert(year).inserted { years.append(year) }
+        }
+        return years
+    }
+
+    private func beenTrips(inYear year: Int) -> [Trip] {
+        beenTrips.filter { Calendar.current.component(.year, from: $0.endDate) == year }
+    }
+
+    /// P5.2/P5.3: which register `trip`'s card/row renders as.
+    private func registerKind(for trip: Trip) -> HomeRegisterKind {
+        HomeRegister.kind(for: trip, aheadFirstId: aheadTrips.first?.id, bucket: bucket(for: trip))
     }
 
     private func people(for trip: Trip) -> [AvatarStack.Person] {

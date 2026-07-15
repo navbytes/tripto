@@ -415,18 +415,17 @@ final class TriptoUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty"]
         app.launch()
-        // Not `app.staticTexts["Lisbon"]`: `HomeInitialTab.resolve` can open
-        // Home on either Upcoming or Past depending on what's already in the
-        // (cross-launch-persistent, `-simulateOffline`) local store — e.g. a
-        // previous run of this very test leaving an Upcoming trip behind —
-        // so the seeded (Past-dated) Lisbon trip isn't a reliable "Home has
-        // loaded" signal here. The Upcoming/Past `SegmentedControl` is fixed
-        // chrome above the trip `List` (unlike `planNewTripRow`, the list's
-        // own last row — pushed off-screen, and so not yet instantiated by
-        // SwiftUI's lazy `List`, once enough trips accumulate across
-        // repeated local runs of this same test), so it renders regardless
-        // of scroll position or which tab is showing.
-        XCTAssertTrue(app.buttons["Upcoming"].waitForExistence(timeout: 30), "Home never loaded")
+        // Not `app.staticTexts["Lisbon"]`: this repo's local store persists
+        // across launches (`-simulateOffline`), so a previous run of this
+        // very test can leave other trips behind, and the seeded (Past-dated)
+        // Lisbon trip isn't guaranteed to be the first row. "Your trips" is
+        // `header`'s fixed chrome above the one list (docs/UX_REDESIGN_ROADMAP.md
+        // Phase 5 retired the Upcoming/Past `SegmentedControl` this used to
+        // wait on) — unlike `planNewTripRow`, the list's own last row (pushed
+        // off-screen, and so not yet instantiated by SwiftUI's lazy `List`,
+        // once enough trips accumulate across repeated local runs), it
+        // renders regardless of scroll position or list contents.
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
 
         // `planNewTripRow` is the list's own last row — scroll to it rather
         // than assume it's already on-screen, same bounded-swipe technique
@@ -473,11 +472,9 @@ final class TriptoUITests: XCTestCase {
         // Same fixed-chrome reasoning as the first wait above (not
         // `Plan a new trip`/`Lisbon`) — a generous 60s timeout for the same
         // reason as the settle sleep above.
-        XCTAssertTrue(app.buttons["Upcoming"].waitForExistence(timeout: 60), "Home never reappeared after relaunch")
-        // Explicitly select Upcoming — where the newly created trip(s)
-        // actually live, being dated today — rather than depending on
-        // `HomeInitialTab.resolve` already having landed there.
-        app.buttons["Upcoming"].tap()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 60), "Home never reappeared after relaunch")
+        // docs/UX_REDESIGN_ROADMAP.md Phase 5: no tab to select any more —
+        // the newly created trip(s), dated today, are always in the one list.
 
         // `TripCard` is `.accessibilityElement(children: .ignore)` with one
         // combined label starting with the title (`HomeView.swift`'s

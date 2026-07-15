@@ -231,9 +231,34 @@ GET    /public/:slug                  PUBLIC read-only trip payload   [no auth]
 
 Each screen below maps to the mockups. Behavior stated here wins over the mockup where they differ (the mockup is a happy-path prototype).
 
-### 4.1 Home / trip list  (`TripApp.jsx` → Home)
-- Segmented control: **Upcoming | Past**, derived from `end_date` vs. now. "In-progress" (now between start/end) sorts to the top of Upcoming with a distinct status pill.
-- Trip card: gradient cover (from `cover_gradient` token), city (display serif), country · start date · duration, a countdown pill ("in 12 days") for upcoming, an avatar stack of members. Whole card is the tap target → opens the trip.
+### 4.1 Home / trip list  (`TripApp.jsx` → Home; **superseded** — see below)
+- **This subsection's original spec (a segmented Upcoming/Past control, one
+  card style) shipped in v1 and was replaced in the 1.1 UX-redesign track.**
+  Full rationale, mockup notes, and acceptance criteria:
+  [docs/UX_REDESIGN_ROADMAP.md](UX_REDESIGN_ROADMAP.md) Phase 5. What's
+  actually shipped, kept current here:
+- **One list, no tabs.** Two orderings concatenated: everything ending today
+  or later ("ahead"), soonest-start first, then everything already ended
+  ("been"), most recent first — one comparator, no special-casing; a live
+  trip's own start date already sorts it to position 0 for free. "Today"/
+  liveness is judged per-trip in *that trip's* own effective time zone
+  (`TripDateBucketing.liveTimeZone`, §7.4), not the device's.
+- **Three registers**, not one card style:
+  - **Next** — the nearest "ahead" trip, when it isn't live: the full
+    gradient card (as before) plus a countdown-ring "in N days" pill and a
+    "FIRST UP" strip naming the trip's next still-ahead itinerary item
+    (icon, title/route, weekday + time).
+  - **Now** — the nearest "ahead" trip, when it's live: a "Day N of M" pill
+    with a thin day-progress bar, and an inline mini-list of today's first
+    two plans plus a "+N more today" count; tapping the card opens the trip
+    already scrolled to today (§4.2).
+  - **Been** — every past trip: a muted compact row (no gradient cover,
+    avatars, or countdown), grouped under sticky year headers below a
+    "Been there · N trips" section header; swipe or long-press to copy a
+    past trip into a new one (reuses the existing duplicate-trip action).
+  - Every other "ahead" trip (i.e. not the nearest one) renders the plain
+    gradient card unchanged: cover, city, country · start date · duration,
+    a countdown pill, an avatar stack. Whole card/row is the tap target.
 - Empty state: not a blank screen — a single "Plan a new trip" invitation with one line on what the app does. (See §6 copy guidance.)
 - "Plan a new trip" affordance always present at the list foot.
 
