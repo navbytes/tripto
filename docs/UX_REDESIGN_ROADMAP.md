@@ -24,7 +24,7 @@ FAB→contextual dock, de-systemising Settings' Form.
 
 ---
 
-## Phase 1 — Itinerary rail: boarding-pass flights + timezone markers 🔄
+## Phase 1 — Itinerary rail: boarding-pass flights + timezone markers ✅ (PR #33)
 
 The mockup's signature. Flights render as a compact boarding pass **in the
 timeline row**; timezone changes become rail markers instead of floating
@@ -51,7 +51,7 @@ Data model untouched (`startsAt`/`endsAt`/zones already exist).
 Tests: duration/+1d math, landing-footer presence, marker emission order.
 Verify wave: tester, reviewer. Size: **M**.
 
-## Phase 2 — Conflicts + trip chrome ⏳
+## Phase 2 — Conflicts + trip chrome ✅ (PR #34)
 
 - **P2.1 Stay-overlap detection**: pure function over a trip's lodging
   items (date-range intersection on `startsAt`/`endsAt`). Amber-wash banner
@@ -73,7 +73,7 @@ Tests: overlap matrix (full/partial/none/adjacent), bucketing tz cases.
 Verify wave: tester, reviewer, ux-expert (timeline milestone: P1+P2
 screenshots). Size: **M**.
 
-## Phase 3 — Add-item sheet ⏳
+## Phase 3 — Add-item sheet ✅ (PR #35)
 
 Eleven stacked rows become one artifact; the form previews its own output.
 
@@ -96,7 +96,7 @@ Surfaces: `Features/Trip/AddItemSheet.swift`, `AddItemFormSections.swift`.
 Tests: return-leg construction, +1d detection, disclosure summary format.
 Verify wave: tester, reviewer. Size: **M**.
 
-## Phase 4 — Share, Settings, New-trip polish ⏳
+## Phase 4 — Share, Settings, New-trip polish ✅ (PR #36)
 
 - **P4.1 Share reorder** — people first, "Invite someone" primary; public
   link demoted to a switch-row with URL + copy + revoke (revoke exists);
@@ -121,7 +121,7 @@ small `AddItemSheet` touch (after Phase 3 lands — sequential, no conflict).
 Verify wave: tester, reviewer, **security-auditor** (roles/link surface).
 Size: **M**.
 
-## Phase 5 — Home: one list, three registers ⏳
+## Phase 5 — Home: one list, three registers ✅ (PR #37)
 
 The biggest IA change; amends BUILD_PLAN §4 in the same PR.
 
@@ -148,7 +148,7 @@ selection, first-item lookup.
 Verify wave: tester, reviewer, **qa-verifier** (acceptance on device flows),
 **ux-expert** (register hierarchy screenshots). Size: **L**.
 
-## Phase 6 — Post-import trust suite ⏳
+## Phase 6 — Post-import trust suite ✅ (PR #38; P6.5 covers+toggle #39, P6.6 row move #40)
 
 What the archive/email import produces, made trustworthy.
 
@@ -174,7 +174,7 @@ dedupe normalization.
 Verify wave: tester, reviewer, **security-auditor** (merge touches shared
 trip data + RLS assumptions), qa-verifier. Size: **L**.
 
-## Phase 7 — Award audit + fix cycle ⏳
+## Phase 7 — Award audit + fix cycle ✅ (fix PRs #41–#43, #45–#46; verdict: SHIP, 11/11 verified fixed, 0 regressions. Images program: P8-0 backend, P8a avatars #44; P8b/P8c queued)
 
 1. Build the app in the simulator; capture the full screen set (light +
    dark, default + AX type sizes) to `.claude/company/ux-redesign/handoffs/`.
