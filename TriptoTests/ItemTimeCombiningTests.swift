@@ -3,44 +3,20 @@ import XCTest
 
 /// The add-item form's date+time+zone math (this milestone's brief §4.3;
 /// `ItemTimeCombining`'s own doc comment): combining a date-only and
-/// time-only picker value into one instant in a specific IANA zone, and the
-/// flight form's "+1 day" auto-detect default.
+/// time-only picker value into one instant in a specific IANA zone.
+///
+/// P7c (award audit #4): the wall-clock-only `suggestedArrivalDayOffset`
+/// "+1 day" default this file used to also cover is gone — it was zone-blind
+/// (a late-enough departure paired with an unrelated arrival default could
+/// need +2 days to reach a valid arrival, which its 0/1 range couldn't
+/// express) and is superseded by an explicit arrival *date* picker
+/// (`AddItemSheet.flightInstants`/`FlightTimeValidationTests`), which makes
+/// any day gap directly representable instead of guessed.
 final class ItemTimeCombiningTests: XCTestCase {
-    private func timeOfDay(_ hour: Int, _ minute: Int) -> Date {
-        Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date())!
-    }
-
-    // MARK: - suggestedArrivalDayOffset (the "+1 day" chip's default)
-
-    /// This milestone's brief: "arrival wall < departure wall -> +1 day".
-    func testArrivalWallClockEarlierThanDepartureSuggestsNextDay() {
-        let offset = ItemTimeCombining.suggestedArrivalDayOffset(
-            departsTimeOfDay: timeOfDay(22, 0), arrivesTimeOfDay: timeOfDay(6, 30)
-        )
-        XCTAssertEqual(offset, 1)
-    }
-
-    func testArrivalWallClockLaterThanDepartureSuggestsSameDay() {
-        // ACCEPTANCE.md "(a)"'s own flight: 08:20 departure, 20:15 arrival.
-        let offset = ItemTimeCombining.suggestedArrivalDayOffset(
-            departsTimeOfDay: timeOfDay(8, 20), arrivesTimeOfDay: timeOfDay(20, 15)
-        )
-        XCTAssertEqual(offset, 0)
-    }
-
-    func testIdenticalWallClockTimesSuggestSameDay() {
-        let offset = ItemTimeCombining.suggestedArrivalDayOffset(
-            departsTimeOfDay: timeOfDay(10, 0), arrivesTimeOfDay: timeOfDay(10, 0)
-        )
-        XCTAssertEqual(offset, 0)
-    }
-
     // MARK: - combine (date + time-of-day -> instant in a target zone)
 
-    /// The suggestion above is only ever a *default* — `combine`'s
-    /// `dayOffset` is a fully independent, explicit parameter (the "+1 day"
-    /// chip's toggle), never re-derived from the wall clocks inside
-    /// `combine` itself.
+    /// `dayOffset` is a fully independent, explicit parameter — never
+    /// re-derived from the wall clocks inside `combine` itself.
     func testCombineAppliesAnExplicitDayOffsetRegardlessOfWallClockOrder() {
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(identifier: "UTC")!

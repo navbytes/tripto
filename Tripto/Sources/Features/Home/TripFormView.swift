@@ -514,13 +514,6 @@ struct TripFormView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             sectionHeading("Trip type")
             SegmentedControl(options: ["Family", "Friends", "Solo"], selection: tripTypeSelection)
-            // UX audit cycle 2 finding 3: no longer names "splitting costs"/
-            // "tracking them" — both are v2-scope features (BUILD_PLAN §5.5)
-            // that don't exist yet, and the old copy also didn't describe
-            // Solo. This wording is feature-agnostic and applies to all
-            // three options.
-            Text("A hint about who\u{2019}s traveling \u{2014} Tripto tailors its defaults as more features arrive.")
-                .helperTextStyle()
         }
     }
 
@@ -630,6 +623,18 @@ struct TripFormView: View {
     /// redirects `save()`'s usual immediate `dismiss()` into presenting
     /// `AddItemSheet` for the just-created trip instead (see
     /// `tripForBookingImport`'s doc comment).
+    ///
+    /// P7c (award audit #5): was a dashed `Palette.mist` outline with no
+    /// fill — the same "empty placeholder slot" recipe `ItineraryTabView
+    /// .daySkeleton`/`EmptyStateArt` use for a not-yet-filled spot, not an
+    /// always-real, always-tappable secondary action. Enabled, it barely
+    /// read as different from the primary "Create trip" CTA's own disabled
+    /// state right above it (both landed on a flat, low-contrast surface).
+    /// Now uses the same warm `Palette.amberSoft` secondary-CTA fill
+    /// `AddItemSheet`'s "Save & add the return leg" button already
+    /// establishes (foreground still dims to `Palette.slate` when
+    /// `!canSubmit`, unchanged) — a distinct, always-warm secondary tier,
+    /// never mistakable for the primary's own on/off states.
     @ViewBuilder
     private var bookingEmailSecondaryAction: some View {
         if !isEditing {
@@ -646,11 +651,8 @@ struct TripFormView: View {
                 .foregroundStyle(canSubmit ? Palette.ink : Palette.slate)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.md)
+                .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
                 .contentShape(RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
-                        .stroke(Palette.mist, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                }
             }
             .buttonStyle(.plain)
             .disabled(!canSubmit || isSaving)

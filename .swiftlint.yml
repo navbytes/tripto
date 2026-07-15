@@ -50,3 +50,10 @@ excluded:
   - scripts
   - .build
   - DerivedData
+  # Multi-agent "Company" worktrees (~/.claude/TEAM.md) — each is a full
+  # nested checkout with its own `scripts/`, so an unscoped `swiftlint`
+  # invocation (this project's own build phase "scans the whole repo") was
+  # picking up sibling lanes' own in-progress/isolated copies alongside this
+  # one, failing a build over code no lane here owns or can fix from its own
+  # worktree.
+  - .claude/worktrees
