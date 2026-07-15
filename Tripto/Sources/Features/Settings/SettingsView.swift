@@ -533,8 +533,8 @@ struct SettingsView: View {
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.xs)
                 .background(Palette.amber, in: Capsule())
-                .contentShape(Rectangle())
                 .frame(minHeight: 44)
+                .contentShape(Rectangle())
                 .disabled(isImportingArchive || isExportingArchive || isDeletingAccount)
             }
             Spacer(minLength: 0)

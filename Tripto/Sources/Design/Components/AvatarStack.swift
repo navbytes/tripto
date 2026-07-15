@@ -1,3 +1,4 @@
+import Nuke
 import NukeUI
 import SwiftUI
 
@@ -128,6 +129,14 @@ struct AvatarPhotoCircle: View {
                         // `.empty`/`.failure` intentionally render nothing —
                         // the initials underneath already show through.
                     }
+                    // Reviewer D3: without this, every distinct avatar in a
+                    // list/stack decodes the full ~512px stored JPEG into a
+                    // full-size bitmap just to draw an 18-26pt circle —
+                    // `.resize` downsamples at decode time (keyed to this
+                    // circle's own `diameter`), same "never decode bigger
+                    // than you'll render" reasoning as `ImageProcessing`'s
+                    // own upload-side downsample.
+                    .processors([ImageProcessors.Resize(size: CGSize(width: diameter, height: diameter), contentMode: .aspectFill, crop: true)])
                     .frame(width: diameter, height: diameter)
                     .clipShape(Circle())
                 }

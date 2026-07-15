@@ -430,7 +430,10 @@ struct HomeView: View {
         // passes `-simulateOffline`, so `resetLocalStore()`'s own re-pull
         // never fires (its early-return right after the wipe) — this stays
         // exactly as hermetic/no-network as the rest of the suite.
-        let showcaseFlags = ["-uitestSeedRegisterShowcase", "-uitestSeedNextRegisterShowcase", "-uitestSeedP6TrustShowcase"]
+        let showcaseFlags = [
+            "-uitestSeedRegisterShowcase", "-uitestSeedNextRegisterShowcase", "-uitestSeedP6TrustShowcase",
+            "-uitestSeedAvatarShowcase"
+        ]
         let needsShowcaseReset = !trips.isEmpty && showcaseFlags.contains { arguments.contains($0) }
         if arguments.contains("-uitestSeedIfEmpty") {
             if needsShowcaseReset {

@@ -51,17 +51,20 @@ struct AvatarPhotoPicker: View {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 // Same pill treatment + 44pt floor as `SettingsView
                 // .conversionPromptFeatureCard`'s "Copy the prompt" button —
-                // `.contentShape(Rectangle())` before `.frame(minHeight:)`
-                // is what makes the whole 44pt-tall frame tappable, not just
-                // the text's own tighter visual bounds.
+                // `.frame(minHeight:)` BEFORE `.contentShape(Rectangle())` is
+                // what makes the whole 44pt-tall frame tappable: contentShape
+                // fixes the hit-test rectangle to whatever size the view
+                // already is at that point in the chain, so applying it
+                // first (against the tighter text bounds) leaves the frame's
+                // own padding as a dead zone instead of expanding the hit area.
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Text(avatarPath == nil ? "Add photo" : "Change photo")
                         .font(Typo.body(Typo.Size.caption, weight: .bold))
                         .foregroundStyle(Palette.onAmber)
                         .padding(.horizontal, Spacing.md)
                         .background(Palette.amber, in: Capsule())
-                        .contentShape(Rectangle())
                         .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(isUploading)
 
@@ -72,8 +75,8 @@ struct AvatarPhotoPicker: View {
                         Text("Remove photo")
                             .font(Typo.body(Typo.Size.caption, weight: .semibold))
                             .foregroundStyle(Palette.rose)
-                            .contentShape(Rectangle())
                             .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .disabled(isUploading)
                 }

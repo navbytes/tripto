@@ -313,4 +313,73 @@ final class ImageProcessingTests: XCTestCase {
             // Also acceptable — a typed rejection, never a crash.
         }
     }
+
+    // MARK: - Security D5: GPS/Exif stripping is a load-bearing side effect
+    // of re-encoding through a decoded `CGImage` (`CGImageDestinationAddImage`)
+    // rather than copying source properties (`CGImageDestinationAddImageFromSource`
+    // / explicit `kCGImageDestinationMetadata`) — this pins it as a real
+    // regression test, not just an assumption, so a future refactor toward
+    // "preserve more of the original" can't silently reintroduce a location leak.
+
+    private func propertiesOf(_ data: Data) -> [CFString: Any]? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    }
+
+    private func makeJPEGDataWithGPSAndExif(width: Int, height: Int) -> Data {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 0.3, green: 0.3, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let cgImage = context.makeImage()!
+
+        let gps: [CFString: Any] = [
+            kCGImagePropertyGPSLatitude: 37.7749,
+            kCGImagePropertyGPSLatitudeRef: "N",
+            kCGImagePropertyGPSLongitude: 122.4194,
+            kCGImagePropertyGPSLongitudeRef: "W"
+        ]
+        let exif: [CFString: Any] = [kCGImagePropertyExifDateTimeOriginal: "2026:01:01 12:00:00"]
+        let properties: [CFString: Any] = [
+            kCGImagePropertyGPSDictionary: gps,
+            kCGImagePropertyExifDictionary: exif
+        ]
+
+        let encoded = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(encoded, UTType.jpeg.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        CGImageDestinationFinalize(destination)
+        return encoded as Data
+    }
+
+    /// Fixture sanity check + the actual regression: a JPEG carrying real
+    /// GPS/Exif metadata comes out the other side of `downsampledJPEG` with
+    /// no GPS dictionary and none of the original (personally-identifying)
+    /// Exif fields. Confirmed empirically (not assumed): the JPEG encoder
+    /// itself always writes a minimal, harmless Exif dictionary of its own
+    /// (`PixelXDimension`/`PixelYDimension`/`ColorSpace` — the image's own
+    /// technical properties, present on every JPEG regardless of input), so
+    /// asserting "no Exif dictionary at all" is the wrong, over-strict bar —
+    /// the leak this guards against is the *original* `DateTimeOriginal`
+    /// (stand-in for any personal/camera field) surviving, not that boilerplate.
+    func testDownsampledJPEGStripsGPSAndExifMetadata() async throws {
+        let input = makeJPEGDataWithGPSAndExif(width: 400, height: 300)
+        let inputProperties = try XCTUnwrap(propertiesOf(input), "fixture setup sanity check, not the pipeline itself")
+        XCTAssertNotNil(inputProperties[kCGImagePropertyGPSDictionary], "fixture must actually carry GPS metadata")
+        let inputExif = try XCTUnwrap(
+            inputProperties[kCGImagePropertyExifDictionary] as? [CFString: Any], "fixture must actually carry Exif metadata"
+        )
+        XCTAssertNotNil(inputExif[kCGImagePropertyExifDateTimeOriginal], "fixture sanity check")
+
+        let output = try await ImageProcessing.downsampledJPEG(input)
+        let outputProperties = try XCTUnwrap(propertiesOf(output))
+        XCTAssertNil(outputProperties[kCGImagePropertyGPSDictionary], "GPS metadata must never survive into the uploaded JPEG")
+        let outputExif = outputProperties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        XCTAssertNil(
+            outputExif?[kCGImagePropertyExifDateTimeOriginal], "the original Exif field must never survive into the uploaded JPEG"
+        )
+    }
 }
