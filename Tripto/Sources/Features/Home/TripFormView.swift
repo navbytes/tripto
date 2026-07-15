@@ -608,7 +608,7 @@ struct TripFormView: View {
                     // as "tappable" when the CTA actually is — a disabled
                     // button that still glows contradicts the adjacent "not
                     // yet" guidance above it.
-                    .shadow(color: canSubmit ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
+                    .shadow(color: canSubmit ? Palette.amberGlow.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
             .disabled(!canSubmit || isSaving)

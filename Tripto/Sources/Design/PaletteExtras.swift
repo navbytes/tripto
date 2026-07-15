@@ -109,9 +109,9 @@ public extension Palette {
     /// against `Palette.paper`'s light-mode cream, which is what the finding
     /// actually caught. Named here as the one vocabulary for that effect,
     /// `Color`-only like `shadow` (callers keep supplying their own
-    /// `.opacity(...)`/radius/y). Not yet adopted at those three call sites
-    /// — outside this pass's file scope (Home/PaletteExtras only); switch
-    /// them to this token instead of a fourth literal.
+    /// `.opacity(...)`/radius/y). Adopted at all three call sites (P7d
+    /// cleanup): `TripFormView`'s "Create trip", `AddItemSheet`'s "Add",
+    /// `Fab`'s add button.
     static let amberGlow = amber
 }
 

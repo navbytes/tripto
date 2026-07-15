@@ -702,9 +702,22 @@ final class TriptoUITests: XCTestCase {
         let liveCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tokyo Sprint")).firstMatch
         XCTAssertTrue(liveCard.waitForExistence(timeout: 30), "live register showcase trip never appeared")
 
-        for _ in 0..<15 { app.swipeUp() } // scroll deep toward "Plan a new trip"
-        let planRow = app.buttons["Plan a new trip"]
-        XCTAssertTrue(planRow.waitForExistence(timeout: 10), "'Plan a new trip' row never scrolled into view")
+        // P7d: this used to scroll toward "Plan a new trip" as the "deep
+        // enough" waypoint, but P6.6 moved that row to sit directly ABOVE
+        // the "been" archive (`HomeView.planNewTripRow`'s own doc comment) —
+        // it's no longer the list foot, so reaching it here no longer
+        // proves a genuinely deep scroll. "Dublin St. Patrick's" (Mar 2025)
+        // has the earliest `endDate` of every seeded past trip
+        // (`DemoSeeder.seedRegisterShowcaseTrips`), and `HomeTripOrdering
+        // .been`'s most-recent-first sort always renders it dead last — the
+        // true bottom of the one-list Home now.
+        // `.isHittable`, not `.exists` — SwiftUI's `List` already has every
+        // row's button in the accessibility tree pre-scroll (`.exists` would
+        // pass after one swipe regardless of position), so hittability is
+        // the only honest "actually scrolled into view" signal here.
+        let bottomRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Dublin St. Patrick")).firstMatch
+        for _ in 0..<50 where !bottomRow.isHittable { app.swipeUp() }
+        XCTAssertTrue(bottomRow.isHittable, "'Dublin St. Patrick's' (last been row) never scrolled into view")
 
         app.terminate()
         Thread.sleep(forTimeInterval: 1.0)

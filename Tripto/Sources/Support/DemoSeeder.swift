@@ -101,8 +101,16 @@ enum DemoSeeder {
         // the kids/grandparents the "Just mine" filter and packing list are
         // built for, seeded the same way a real organizer would add them
         // via `ShareTripView`'s "Add someone without the app".
+        // P7d award-audit: this used to seed "Meera (7)" — a bare, unlabeled
+        // "(7)" (BUILD_PLAN's own illustrative age flavor for the kid-profile
+        // example) that rendered raw wherever `displayName` shows
+        // (PackingListView's reassign picker, ShareTripView's people list) —
+        // indistinguishable from an item count or any other stray number.
+        // `TripProfile` has no `age` field (BUILD_PLAN §3.3) and no real UI
+        // surfaces one, so there was nothing to label; cut at the source
+        // instead of patching every render call site.
         let meeraProfile = TripProfile(
-            id: UUID(), tripId: tripId, displayName: "Meera (7)", avatarColor: "plum",
+            id: UUID(), tripId: tripId, displayName: "Meera", avatarColor: "plum",
             linkedUserId: nil, createdAt: now
         )
         let grandmaProfile = TripProfile(

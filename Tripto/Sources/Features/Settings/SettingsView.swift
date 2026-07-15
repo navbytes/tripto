@@ -178,7 +178,7 @@ struct SettingsView: View {
             Section {
                 Toggle("Show past trips", isOn: $showPastTrips)
             } footer: {
-                Text("Hide finished trips from the Home list.")
+                Text("Past trips stay on Home when this is on.")
                     .font(Typo.body(Typo.Size.caption))
             }
 
