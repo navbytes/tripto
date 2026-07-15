@@ -173,4 +173,25 @@ final class TripArchiveExporterTests: XCTestCase {
         XCTAssertEqual(decoded.trips.first?.items.count, 1)
         XCTAssertEqual(decoded.trips.first?.travellers, ["Grandma"])
     }
+
+    /// P8a (avatar photos): `travellers` stays a bare `[String]` of display
+    /// names (`docs/IMPORT_FORMAT.md` §2) — a traveller's `avatarPath` is a
+    /// storage path meaningless outside this project, so it must never leak
+    /// into the portable archive format.
+    func testTravellerAvatarPathNeverLeaksIntoTheExportedArchive() throws {
+        let tripId = UUID()
+        let trip = TestFixtures.makeTrip(id: tripId, startDate: .now, endDate: .now)
+        let grandma = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Grandma", avatarColor: "sky",
+            avatarPath: "\(UUID().uuidString)/photo.jpg", linkedUserId: nil, createdAt: .now
+        )
+
+        let document = TripArchiveExporter.composeDocument(trips: [trip], items: [], profiles: [grandma])
+        XCTAssertEqual(document.trips.first?.travellers, ["Grandma"])
+
+        let encoded = try TripArchiveExporter.encode(document)
+        let json = try XCTUnwrap(String(data: encoded, encoding: .utf8))
+        XCTAssertFalse(json.contains("photo.jpg"))
+        XCTAssertFalse(json.lowercased().contains("avatar_path"))
+    }
 }

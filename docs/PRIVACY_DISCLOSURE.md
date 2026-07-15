@@ -5,10 +5,13 @@ Reference for owner: what to enter in App Store Connect → "App Privacy" sectio
 
 ## Overview
 
-Tripto collects minimal data, shares it only with invited trip members and
-public-link viewers (sanitized), and uses no tracking, analytics, or ads SDKs.
-One feature — import (paste or email) — involves third-party processing for
-booking extraction.
+Tripto collects minimal data. Trip data (notes, confirmation codes, etc.) is
+visible only to invited trip members, and public-link viewers see a sanitized
+subset. Profile and trip-cover **photos** are the one exception: they live in
+a public-read storage bucket at an unguessable address, so anyone holding
+that exact URL could view the image even without being a trip member. Tripto
+uses no tracking, analytics, or ads SDKs. One feature — import (paste or
+email) — involves third-party processing for booking extraction.
 
 ---
 
@@ -31,11 +34,18 @@ form.)
 - **User Content:**
   - Trip data (itinerary, items: flights, stays, activities with locations,
     confirmation codes, notes, packing lists, trip-member profiles).
+  - **Photos:** profile avatar photos and trip-cover photos the user uploads
+    (downsampled on-device before upload).
   - **Purpose:** App functionality; stored in user's account and synced across
-    devices. Shared only with invited trip members (role-based access) and —
-    for public share links — a sanitized subset (dates, places, times only; no
-    codes, notes, emails, coordinates).
-  - **Tracking:** No. **Deletion:** Deleted when user deletes the account.
+    devices. Trip data (notes, codes, etc.) is shared only with invited trip
+    members (role-based access) and — for public share links — a sanitized
+    subset (dates, places, times only; no codes, notes, emails, coordinates).
+    **Photos are the exception:** they're stored in a public-read bucket at an
+    unguessable address, so anyone holding that exact URL can view the image
+    without being a trip member or signing in.
+  - **Tracking:** No. **Deletion:** Deleted when user deletes the account —
+    account deletion also purges the user's photo objects from storage, not
+    just the database rows referencing them.
 
 ### Does your app use third-party services or sub-processors for any of the data above?
 
@@ -111,7 +121,7 @@ When completing App Store Connect's form:
 - ✅ "App does NOT collect any user data"? **NO** (uncheck).
 - ✅ "User data is collected"? **YES** (check).
   - Data types: Email Address, Name, **Other User Content** (booking text &
-    trip details).
+    trip details), **Photos or Videos** (profile/trip-cover photos).
   - Purpose: App Functionality.
   - Linked to account: Yes.
   - Tracking: No.
@@ -157,4 +167,5 @@ extraction, and the API does not train on the data.
 
 - **Privacy Policy:** https://tripto.navbytes.io/privacy
 - **Support/Contact:** tripto@navbytes.io
-- **Data Deletion:** Settings → Delete Account (permanent, immediate).
+- **Data Deletion:** Settings → Delete Account (permanent, immediate; also
+  purges the user's avatar/cover photo storage folders, backend PR #14).

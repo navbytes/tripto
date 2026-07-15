@@ -331,4 +331,120 @@ final class DTORoundTripTests: XCTestCase {
         XCTAssertFalse(model.isFromUnverifiedSender)
         XCTAssertEqual(model.toDTO(), dto)
     }
+
+    // MARK: - P8a (avatar photos): `profiles.avatar_path`/`trip_profiles.avatar_path`
+
+    /// A server that hasn't shipped this column yet (or a row with no photo)
+    /// omits the key entirely — same additive/nullable contract as
+    /// `ItineraryItemDTO.senderVerified`'s own doc comment.
+    func testProfileDTODecodesAbsentAvatarPathAsNilAndRoundTrips() throws {
+        let id = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "display_name": "Priya",
+          "avatar_color": "amber",
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56+00:00"
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ProfileDTO.self, from: Data(json.utf8))
+        XCTAssertNil(dto.avatarPath)
+
+        let model = Profile(dto: dto)
+        XCTAssertNil(model.avatarPath)
+        XCTAssertEqual(model.toDTO(), dto)
+    }
+
+    /// A real uploaded path round-trips through DTO -> Model -> DTO, and
+    /// through `apply(_:)` (the pull-path mutation of an already-existing
+    /// local row), not just first insert via `init(dto:)`.
+    func testProfileDTORoundTripsAPresentAvatarPath() throws {
+        let id = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "display_name": "Priya",
+          "avatar_color": "amber",
+          "avatar_path": "\(id.uuidString)/photo.jpg",
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56+00:00"
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ProfileDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.avatarPath, "\(id.uuidString)/photo.jpg")
+
+        let model = Profile(dto: dto)
+        XCTAssertEqual(model.avatarPath, "\(id.uuidString)/photo.jpg")
+        XCTAssertEqual(model.toDTO(), dto)
+
+        let existing = Profile(
+            id: id, displayName: "Priya", avatarColor: "amber", avatarPath: nil,
+            createdAt: .now, updatedAt: .now
+        )
+        existing.apply(dto)
+        XCTAssertEqual(existing.avatarPath, "\(id.uuidString)/photo.jpg")
+
+        let reencoded = try JSONCoding.encoder.encode(dto)
+        let redecoded = try JSONCoding.decoder.decode(ProfileDTO.self, from: reencoded)
+        XCTAssertEqual(redecoded.avatarPath, dto.avatarPath)
+    }
+
+    /// Same absent-column contract as `Profile`'s own test above.
+    func testTripProfileDTODecodesAbsentAvatarPathAsNilAndRoundTrips() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "display_name": "Grandma",
+          "avatar_color": "sky",
+          "linked_user_id": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00"
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(TripProfileDTO.self, from: Data(json.utf8))
+        XCTAssertNil(dto.avatarPath)
+
+        let model = TripProfile(dto: dto)
+        XCTAssertNil(model.avatarPath)
+        XCTAssertEqual(model.toDTO(), dto)
+    }
+
+    /// Same present-value round-trip as `Profile`'s own test above, including
+    /// `apply(_:)` mutating an already-existing local row (the pull-path
+    /// `SyncStore.applyTripProfiles` actually exercises).
+    func testTripProfileDTORoundTripsAPresentAvatarPath() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "display_name": "Grandma",
+          "avatar_color": "sky",
+          "avatar_path": "\(tripId.uuidString)/grandma.jpg",
+          "linked_user_id": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00"
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(TripProfileDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.avatarPath, "\(tripId.uuidString)/grandma.jpg")
+
+        let model = TripProfile(dto: dto)
+        XCTAssertEqual(model.avatarPath, "\(tripId.uuidString)/grandma.jpg")
+        XCTAssertEqual(model.toDTO(), dto)
+
+        let existing = TripProfile(
+            id: id, tripId: tripId, displayName: "Grandma", avatarColor: "sky",
+            avatarPath: nil, linkedUserId: nil, createdAt: .now
+        )
+        existing.apply(dto)
+        XCTAssertEqual(existing.avatarPath, "\(tripId.uuidString)/grandma.jpg")
+    }
 }

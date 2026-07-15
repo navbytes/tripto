@@ -1,6 +1,9 @@
 #if DEBUG
+import CoreGraphics
 import Foundation
+import Nuke
 import SwiftData
+import UIKit
 
 /// Home's DEBUG "Seed demo trip" action — a 14-day, ~40-item trip used for
 /// perf and screenshot passes on the M2 timeline. Deliberately includes the
@@ -23,6 +26,20 @@ enum DemoSeeder {
     @MainActor
     static func seed(modelContext: ModelContext, syncEngine: SyncEngine?, authManager: AuthManager) async -> UUID? {
         guard let userId = authManager.userId else { return nil }
+        // P8a avatar-photos capture set: primes Nuke's in-memory image cache
+        // BEFORE the idempotence guard below can early-return — that guard
+        // (correctly) skips re-running every showcase further down on the
+        // SECOND+ launch against an already-seeded store, but each launch is
+        // its own fresh process with its own empty memory cache (Nuke's
+        // on-disk `DataCache` writes are staged and flushed asynchronously —
+        // confirmed via its own source — so a launch that both primes AND
+        // screenshots in one process works by accident, while a later,
+        // separate launch that only reads finds nothing there). Cheap and
+        // idempotent to redo every launch (an in-memory dictionary write),
+        // unlike the one-time row creation below.
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedAvatarShowcase") {
+            primeAvatarShowcaseImageCache(userId: userId)
+        }
         // Idempotence guard, checked against the STORE (not callers' @Query
         // state, which can be un-hydrated at launch — the W1-B evidence run
         // caught a double-seed race exactly that way: two "Lisbon" rows from
@@ -253,7 +270,142 @@ enum DemoSeeder {
         if ProcessInfo.processInfo.arguments.contains("-uitestSeedNextRegisterShowcase") {
             await seedNextRegisterShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
         }
+        // P8a avatar-photos capture set: own flag, same "own flag, additive"
+        // recipe as the three showcases above.
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedAvatarShowcase") {
+            await seedAvatarShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
+        }
         return tripId
+    }
+
+    // MARK: - P8a avatar-photos capture set (Settings profile photo, a
+    // people list/AvatarStack with a photo + an initials avatar side by
+    // side, TripProfileFormSheet with a photo)
+
+    /// Fixed, deterministic path strings (never a fresh random `UUID()`) —
+    /// the same two paths `primeAvatarShowcaseImageCache` (must run on
+    /// EVERY launch, before the outer idempotence guard) and
+    /// `seedAvatarShowcase` (row creation, once ever) both need to agree
+    /// on; a fresh random path from either side would leave the other's
+    /// cache entry/row pointing nowhere.
+    private static func avatarShowcaseOwnPhotoPath(userId: UUID) -> String { "\(userId.uuidString)/uitest-own-photo.jpg" }
+    private static let avatarShowcaseAshaPhotoPath = "uitest-fixed-asha/uitest-asha-photo.jpg"
+
+    /// `AvatarStorage.publicURL(for:)` always builds a real
+    /// `https://…supabase.co/…` URL (no test-only override hook — `Config
+    /// .SUPABASE_URL` is a fixed `static let`), so there's no path string
+    /// this seed could write that a live request would ever resolve, and
+    /// `TriptoUITests` must stay hermetic (CLAUDE.md). Instead of a network
+    /// fetch, this primes Nuke's own `ImagePipeline.shared` MEMORY cache
+    /// directly, in-process, for the exact URL each seeded `avatarPath`
+    /// derives to, with a synthetic in-memory image — `AvatarPhotoCircle`'s
+    /// `LazyImage(url:)` then finds a cache hit and renders it with zero
+    /// network involved. Deliberately the MEMORY cache, never the on-disk
+    /// `DataCache` `AvatarImagePipeline` also configures — `DataCache`'s
+    /// own writes are staged and flushed asynchronously (confirmed against
+    /// its own source, `Caching/DataCache.swift`), so priming it here has
+    /// no guarantee of finishing before this process ends; called fresh on
+    /// EVERY launch instead (see this function's call site, before `seed`'s
+    /// own idempotence guard) sidesteps that entirely — cheap, since it's
+    /// just an in-memory dictionary write. `AvatarImagePipeline.configured`
+    /// is force-referenced FIRST so the `DataCache`-backed pipeline swap
+    /// (which replaces `ImagePipeline.shared` wholesale) has already
+    /// happened before this primes it — priming the stock default pipeline
+    /// instead would be silently discarded the moment any
+    /// `AvatarPhotoCircle` first renders and triggers the swap.
+    private static func primeAvatarShowcaseImageCache(userId: UUID) {
+        _ = AvatarImagePipeline.configured
+        guard let photo = syntheticAvatarPhoto() else { return }
+        for path in [avatarShowcaseOwnPhotoPath(userId: userId), avatarShowcaseAshaPhotoPath] {
+            if let url = AvatarStorage.publicURL(for: path) {
+                ImagePipeline.shared.cache[url] = ImageContainer(image: photo)
+            }
+        }
+    }
+
+    /// A dedicated "Osaka Weekend" trip with exactly two travellers (one
+    /// photo, one initials-only) rather than reusing "Lisbon"'s own Meera/
+    /// Grandma pair — `ShareTripView`'s per-traveller role-chip `Menu`
+    /// shares one fixed "Role: Traveller" accessibility label with every
+    /// OTHER traveller row (never the person's name), and every other
+    /// showcase in this file already depends on Meera/Grandma's exact
+    /// existing shape; a THIRD occupant would only add more ambiguity there
+    /// for no capture this set needs. Row creation only, run once ever
+    /// (gated by the SAME outer idempotence guard every other showcase in
+    /// this file already relies on) — unlike this file's own cache-priming
+    /// above, a `TripProfile`/`Profile` row only needs to exist once:
+    /// SwiftData's `try? modelContext.save()` is synchronous, so (unlike
+    /// Nuke's `DataCache`) it reliably persists before this process ends.
+    private static func seedAvatarShowcase(modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date) async {
+        // Settings' own "Profile" section: `seed()` above deliberately never
+        // creates the organizer's own `Profile` row (its own doc comment —
+        // it's server-trigger-created, absent from this no-pull hermetic
+        // harness), so there'd otherwise be nothing for `SettingsView
+        // .myProfile` to seed the photo picker from. Local-only, same
+        // "never enqueued" convention as `member`/`companionMember` above —
+        // this row exists purely for local rendering, not a sync exercise.
+        let profile = Profile(
+            id: userId, displayName: "Naveen", avatarColor: "amber",
+            avatarPath: avatarShowcaseOwnPhotoPath(userId: userId), createdAt: now, updatedAt: now
+        )
+        modelContext.insert(profile)
+        try? modelContext.save()
+
+        let tripId = UUID()
+        let trip = Trip(
+            id: tripId, title: "Osaka Weekend", destination: "Osaka, Japan", countryCode: "JP",
+            startDate: now.addingTimeInterval(10 * 86_400), endDate: now.addingTimeInterval(13 * 86_400),
+            coverGradient: "moss", tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil
+        )
+        let member = TripMember(id: UUID(), tripId: tripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        let asha = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Asha", avatarColor: "plum",
+            avatarPath: avatarShowcaseAshaPhotoPath, linkedUserId: nil, createdAt: now
+        )
+        let kiran = TripProfile(
+            id: UUID(), tripId: tripId, displayName: "Kiran", avatarColor: "sky",
+            linkedUserId: nil, createdAt: now.addingTimeInterval(1)
+        )
+        let activity = makeItem(
+            tripId: tripId, category: .activity, title: "Osaka Castle",
+            startsAt: now.addingTimeInterval(10 * 86_400 + 10 * 3600), endsAt: nil, tz: TimeZone.current.identifier,
+            locationName: "Osaka Castle", confirmation: nil, details: .empty, userId: userId, now: now
+        )
+
+        modelContext.insert(trip)
+        modelContext.insert(member) // local-only; never enqueued (see `seed()`'s own `member` doc comment)
+        modelContext.insert(asha)
+        modelContext.insert(kiran)
+        modelContext.insert(activity)
+        try? modelContext.save()
+
+        await syncEngine.enqueueUpsert(table: .trips, rowId: tripId, tripId: tripId, payload: trip.toDTO())
+        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: asha.id, tripId: tripId, payload: asha.toDTO())
+        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: kiran.id, tripId: tripId, payload: kiran.toDTO())
+        await syncEngine.flushPush()
+        await syncEngine.enqueueUpsert(table: .itineraryItems, rowId: activity.id, tripId: tripId, payload: activity.toDTO())
+        await syncEngine.flushPush()
+    }
+
+    /// A soft gradient swatch — deliberately not a flat color (every
+    /// avatar's own initials fallback already is one), so a screenshot
+    /// reads unambiguously as "a photo," never mistaken for a second
+    /// initials circle.
+    private static func syntheticAvatarPhoto() -> UIImage? {
+        let size = 240
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        let colors = [
+            CGColor(red: 0.98, green: 0.62, blue: 0.25, alpha: 1), CGColor(red: 0.16, green: 0.35, blue: 0.75, alpha: 1)
+        ]
+        guard let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0, 1]) else { return nil }
+        context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: size, y: size), options: [])
+        guard let cgImage = context.makeImage() else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 
     // MARK: - UX P7 "next" register showcase (Home, countdown ring + FIRST UP)

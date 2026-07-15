@@ -12,6 +12,16 @@ final class Profile {
     @Attribute(.unique) var id: UUID
     var displayName: String
     var avatarColor: String
+    /// `profiles.avatar_path` (P8a, `.claude/company/ux-redesign/handoffs/
+    /// P8-images-plan.md` D3) — a storage path, not a URL: the app derives
+    /// the public URL from its own known project base (`AvatarStorage
+    /// .publicURL(for:)`), so this survives a domain/project move and can't
+    /// be poisoned with an arbitrary external host. Nullable/defaulted
+    /// (same lightweight-migration-safe convention as `ItineraryItem
+    /// .senderVerified`'s doc comment) — `nil` means no photo, the initials+
+    /// color fallback stays permanent, never a placeholder for "not loaded
+    /// yet."
+    var avatarPath: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -19,12 +29,14 @@ final class Profile {
         id: UUID,
         displayName: String,
         avatarColor: String,
+        avatarPath: String? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
         self.id = id
         self.displayName = displayName
         self.avatarColor = avatarColor
+        self.avatarPath = avatarPath
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -36,6 +48,14 @@ struct ProfileDTO: Codable, Sendable, Equatable {
     var id: UUID
     var displayName: String
     var avatarColor: String
+    /// See `Profile.avatarPath`'s doc comment. Defaulted so a DTO built via
+    /// the plain memberwise init (rather than decoded off the wire) keeps
+    /// compiling unchanged, and so a payload from a server that hasn't
+    /// shipped this column yet still decodes (`Optional`'s synthesized
+    /// `decodeIfPresent` handles a wholly absent key the same way it
+    /// handles an explicit `null`) — same convention as `ItineraryItemDTO
+    /// .senderVerified`'s doc comment.
+    var avatarPath: String?
     var createdAt: Date
     var updatedAt: Date
 }
@@ -46,6 +66,7 @@ extension Profile {
             id: dto.id,
             displayName: dto.displayName,
             avatarColor: dto.avatarColor,
+            avatarPath: dto.avatarPath,
             createdAt: dto.createdAt,
             updatedAt: dto.updatedAt
         )
@@ -56,6 +77,7 @@ extension Profile {
     func apply(_ dto: ProfileDTO) {
         displayName = dto.displayName
         avatarColor = dto.avatarColor
+        avatarPath = dto.avatarPath
         createdAt = dto.createdAt
         updatedAt = dto.updatedAt
     }
@@ -65,6 +87,7 @@ extension Profile {
             id: id,
             displayName: displayName,
             avatarColor: avatarColor,
+            avatarPath: avatarPath,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
