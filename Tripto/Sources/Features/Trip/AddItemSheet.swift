@@ -920,7 +920,7 @@ struct AddItemSheet: View {
                     .background(
                         isValid ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
                     )
-                    .shadow(color: isValid ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
+                    .shadow(color: isValid ? Palette.amberGlow.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
             .disabled(!isValid || isDismissingSuggestion || isSaving)

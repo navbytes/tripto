@@ -37,7 +37,7 @@ struct Fab: View {
                 .foregroundStyle(Palette.onAmber)
                 .frame(width: Self.diameter, height: Self.diameter)
                 .background(Palette.amber, in: Circle())
-                .shadow(color: Palette.amber.opacity(0.55), radius: 12, y: 7)
+                .shadow(color: Palette.amberGlow.opacity(0.55), radius: 12, y: 7)
         }
         .accessibilityLabel(accessibilityLabel)
     }
