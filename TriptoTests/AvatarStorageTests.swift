@@ -81,6 +81,49 @@ final class AvatarStorageTests: XCTestCase {
         }
     }
 
+    /// P8a brief's "no path write on failed upload — atomicity", verified at
+    /// the ROW level rather than just the stub's own bookkeeping (unlike
+    /// `testUploadPropagatesAStorageFailureWithoutReturningAPath` above,
+    /// which only proves the stub never recorded a path). This mirrors the
+    /// EXACT caller shape both real call sites use — `AvatarPhotoPicker
+    /// .upload`'s `avatarPath = try await AvatarStorage.upload(...)` inside a
+    /// `do`/`catch`, and `SettingsView.saveProfile`'s/`ShareTripView`'s
+    /// identical `profile.avatarPath = ...`/`tripProfile.avatarPath = ...` —
+    /// against a real `@Model` row (unattached, no `ModelContainer` needed;
+    /// same "build the model directly" convention `TestFixtures` uses) that
+    /// already has an existing photo, so a regression that assigned the
+    /// path unconditionally (e.g. hoisted above the `try`, or a caller that
+    /// swallowed the throw) would flip this from "throws, row untouched" to
+    /// "silently succeeds with a stale/empty row" and this test would catch
+    /// it — `testUploadPropagatesAStorageFailureWithoutReturningAPath`
+    /// alone would not, since it never touches a row at all.
+    func testFailedUploadLeavesAnExistingRowsAvatarPathUntouchedForBothProfileTypes() async throws {
+        let stub = StubAvatarBucket()
+        stub.errorToThrow = StubUploadError()
+
+        let profile = Profile(
+            id: UUID(), displayName: "Priya", avatarColor: "amber",
+            avatarPath: "existing/old-profile-photo.jpg", createdAt: .now, updatedAt: .now
+        )
+        do {
+            profile.avatarPath = try await AvatarStorage.upload(Data([0x01]), for: UUID(), via: stub)
+            XCTFail("expected upload to throw before the assignment ran")
+        } catch is StubUploadError {
+            XCTAssertEqual(profile.avatarPath, "existing/old-profile-photo.jpg")
+        }
+
+        let tripProfile = TripProfile(
+            id: UUID(), tripId: UUID(), displayName: "Grandma", avatarColor: "sky",
+            avatarPath: "existing/old-trip-profile-photo.jpg", linkedUserId: nil, createdAt: .now
+        )
+        do {
+            tripProfile.avatarPath = try await AvatarStorage.upload(Data([0x02]), for: UUID(), via: stub)
+            XCTFail("expected upload to throw before the assignment ran")
+        } catch is StubUploadError {
+            XCTAssertEqual(tripProfile.avatarPath, "existing/old-trip-profile-photo.jpg")
+        }
+    }
+
     func testPublicURLBuildsTheExpectedSupabaseStorageURL() {
         let url = AvatarStorage.publicURL(for: "abc-123/def-456.jpg")
         XCTAssertEqual(

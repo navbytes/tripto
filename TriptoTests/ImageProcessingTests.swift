@@ -109,4 +109,208 @@ final class ImageProcessingTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - P8a hardening: exotic source images (`CGBitmapContext` has no
+    // CMYK support, so `makeCMYKJPEGData` builds the `CGImage` directly off
+    // a raw 4-component buffer rather than drawing through a context; the
+    // rest reuse `makeTestImageData`'s "draw through a context" recipe).
+
+    private func makeCMYKJPEGData(width: Int, height: Int) -> Data {
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            pixels[i] = 200; pixels[i + 1] = 40; pixels[i + 2] = 10; pixels[i + 3] = 5
+        }
+        let colorSpace = CGColorSpaceCreateDeviceCMYK()
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        let cgImage = CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+            space: colorSpace, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        )!
+
+        let encoded = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(encoded, UTType.jpeg.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        CGImageDestinationFinalize(destination)
+        return encoded as Data
+    }
+
+    private func makeGrayscaleJPEGData(width: Int, height: Int) -> Data {
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.none.rawValue
+        )!
+        context.setFillColor(gray: 0.5, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let cgImage = context.makeImage()!
+
+        let encoded = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(encoded, UTType.jpeg.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        CGImageDestinationFinalize(destination)
+        return encoded as Data
+    }
+
+    /// `nil` if this ImageIO build has no HEIC encoder — confirmed present
+    /// on Apple silicon; the point of the test this backs is exercising the
+    /// pipeline's HEIC *decode* path, not asserting every possible build
+    /// machine can encode one.
+    private func makeHEICData(width: Int, height: Int) -> Data? {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 0.1, green: 0.6, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let cgImage = context.makeImage()!
+
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(encoded, UTType.heic.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return encoded as Data
+    }
+
+    /// Two solid-color frames (red, then blue) — a minimal animated GIF, the
+    /// shape `PhotosPicker` can hand back for a GIF/Live Photo picked from
+    /// the library.
+    private func makeAnimatedGIFData(width: Int, height: Int) -> Data {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        func frame(_ color: CGColor) -> CGImage {
+            let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!
+            context.setFillColor(color)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            return context.makeImage()!
+        }
+        let red = frame(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let blue = frame(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
+
+        let encoded = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(encoded, UTType.gif.identifier as CFString, 2, nil)!
+        CGImageDestinationAddImage(destination, red, nil)
+        CGImageDestinationAddImage(destination, blue, nil)
+        CGImageDestinationFinalize(destination)
+        return encoded as Data
+    }
+
+    /// The single average pixel over the whole image — coarse, but enough
+    /// to tell "mostly red" from "mostly blue" through a lossy JPEG re-encode.
+    private func averageColor(of data: Data) -> (r: UInt8, g: UInt8, b: UInt8)? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (pixel[0], pixel[1], pixel[2])
+    }
+
+    /// A degenerate 1x1 source — the smallest possible image, nowhere near
+    /// `maxPixelSize` — the same "never scaled up" contract as
+    /// `testDoesNotUpscaleASmallerImage` above, at its most extreme boundary.
+    func testDoesNotUpscaleAOnePixelImage() async throws {
+        let input = makeTestImageData(width: 1, height: 1)
+        let output = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: 512)
+        let size = try XCTUnwrap(pixelSize(of: output))
+        XCTAssertEqual(size.width, 1)
+        XCTAssertEqual(size.height, 1)
+    }
+
+    /// There's no iterative/quality-reduction loop in `downsampledJPEG` —
+    /// one decode, one thumbnail, one JPEG encode — so running an
+    /// already-small (already-under-bound) image through it a SECOND time
+    /// must land on exactly the same dimensions as the first pass, never
+    /// shrink further.
+    func testReprocessingAnAlreadyDownsampledSmallImageDoesNotShrinkItFurther() async throws {
+        let input = makeTestImageData(width: 100, height: 80)
+        let firstPass = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: 512)
+        let secondPass = try await ImageProcessing.downsampledJPEG(firstPass, maxPixelSize: 512)
+
+        let firstSize = try XCTUnwrap(pixelSize(of: firstPass))
+        let secondSize = try XCTUnwrap(pixelSize(of: secondPass))
+        XCTAssertEqual(firstSize.width, secondSize.width)
+        XCTAssertEqual(firstSize.height, secondSize.height)
+    }
+
+    /// A 100:1 panorama — `kCGImageSourceThumbnailMaxPixelSize` bounds the
+    /// LONGER side only, so the short side shrinks proportionally rather
+    /// than getting cropped/padded to a square, and can legitimately land in
+    /// the single digits without becoming invalid (0px, or the thumbnail
+    /// call failing outright).
+    func testExtremeAspectRatioPanoramaIsBoundedOnTheLongerSideOnly() async throws {
+        let input = makeTestImageData(width: 10_000, height: 100)
+        let output = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: 512)
+
+        let size = try XCTUnwrap(pixelSize(of: output))
+        XCTAssertLessThanOrEqual(max(size.width, size.height), 512)
+        XCTAssertGreaterThan(size.height, 0, "the short side must stay a valid nonzero pixel count")
+        XCTAssertLessThan(size.height, 10, "100 * (512/10_000) should round to single digits, not stay near 100")
+    }
+
+    /// Photoshop-style CMYK JPEGs are a real (if uncommon) `PhotosPicker`
+    /// input.
+    func testDownsamplesACMYKJPEGSourceWithoutCrashingOrThrowing() async throws {
+        let input = makeCMYKJPEGData(width: 800, height: 600)
+        let output = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: 512)
+
+        let size = try XCTUnwrap(pixelSize(of: output))
+        XCTAssertLessThanOrEqual(max(size.width, size.height), 512)
+        XCTAssertEqual(uti(of: output), UTType.jpeg.identifier)
+    }
+
+    func testDownsamplesAGrayscaleJPEGSourceWithoutCrashingOrThrowing() async throws {
+        let input = makeGrayscaleJPEGData(width: 900, height: 700)
+        let output = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: 512)
+
+        let size = try XCTUnwrap(pixelSize(of: output))
+        XCTAssertLessThanOrEqual(max(size.width, size.height), 512)
+        XCTAssertEqual(uti(of: output), UTType.jpeg.identifier)
+    }
+
+    /// The common real-world case this file's other fixtures all sidestep:
+    /// `PhotosPicker`'s `loadTransferable(type: Data.self)` on a photo
+    /// actually taken on an iPhone hands back HEIC bytes, not JPEG/PNG.
+    func testDownsamplesARealHEICSourceNotJustPNGOrJPEGFixtures() async throws {
+        guard let input = makeHEICData(width: 1200, height: 900) else {
+            throw XCTSkip("this machine's ImageIO can't encode HEIC — nothing to feed the pipeline")
+        }
+        XCTAssertEqual(uti(of: input), UTType.heic.identifier, "fixture setup sanity check, not the pipeline itself")
+
+        let output = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: 512)
+        let size = try XCTUnwrap(pixelSize(of: output))
+        XCTAssertLessThanOrEqual(max(size.width, size.height), 512)
+        XCTAssertEqual(uti(of: output), UTType.jpeg.identifier)
+    }
+
+    /// `CGImageSourceCreateThumbnailAtIndex` is always called with index `0`
+    /// (`ImageProcessing.downsampledJPEG`'s own doc comment) — for a
+    /// multi-frame GIF, that's the first frame, regardless of how many
+    /// follow it. Doesn't pin success as the only acceptable outcome (same
+    /// reasoning as `testThrowsATypedErrorForNonImageInputInsteadOfCrashingOrSucceeding`
+    /// above) — only that an animated source can never crash, and any
+    /// failure is a typed error, never silent garbage. Confirmed empirically
+    /// on this ImageIO version: it succeeds, using frame 0 (red) — checked
+    /// below via the output's average color, never frame 1's blue.
+    func testAnimatedGIFEitherProcessesTheFirstFrameOrRejectsButNeverCrashes() async throws {
+        let input = makeAnimatedGIFData(width: 80, height: 60)
+        do {
+            let output = try await ImageProcessing.downsampledJPEG(input, maxPixelSize: 512)
+            let size = try XCTUnwrap(pixelSize(of: output))
+            XCTAssertLessThanOrEqual(max(size.width, size.height), 512)
+            let color = try XCTUnwrap(averageColor(of: output))
+            XCTAssertGreaterThan(color.r, color.b, "expected frame 0 (red) to win, never frame 1 (blue)")
+        } catch is ImageProcessingError {
+            // Also acceptable — a typed rejection, never a crash.
+        }
+    }
 }

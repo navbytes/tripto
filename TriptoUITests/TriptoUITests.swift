@@ -1088,4 +1088,112 @@ final class TriptoUITests: XCTestCase {
             attachScreenshot(named: "newtrip-cover-shuffle-\(attempt)", of: app)
         }
     }
+
+    // MARK: - P8a avatar-photos capture set (docs/UX_REDESIGN_ROADMAP.md,
+    // `.claude/company/ux-redesign/handoffs/P8-images-plan.md`) — same
+    // "config-agnostic test, appearance/Dynamic Type flipped from OUTSIDE
+    // between separate invocations" recipe as every capture test above.
+    // `-uitestSeedAvatarShowcase` (`DemoSeeder`'s additive flag) seeds the
+    // signed-in user's own local `Profile` row with a photo (Settings'
+    // profile section otherwise has no row to seed from at all — see the
+    // flag's own doc comment) plus a small dedicated "Osaka Weekend" trip
+    // with exactly two travellers, Asha (photo) and Kiran (initials only).
+    // The photo itself is never a live fetch — `DemoSeeder` primes Nuke's
+    // pipeline cache in-process for the exact URL each seeded path derives
+    // to, so this stays exactly as hermetic/no-network as the rest of the
+    // suite.
+
+    /// `unlinkedProfileRow`'s trailing role-chip `Menu` shares one fixed
+    /// "Role: Traveller" accessibility label across every non-account
+    /// traveller row on a trip (never the person's own name), so a plain
+    /// `app.buttons["Role: Traveller"]` lookup is ambiguous the moment a
+    /// trip has more than one — matches by vertical proximity to a
+    /// uniquely-named sibling (the traveller's own name `Text`) instead,
+    /// rather than depending on `unlinkedProfiles`' sort order.
+    private func button(labeled label: String, nearRowOf anchor: XCUIElement, in app: XCUIApplication) -> XCUIElement {
+        let candidates = app.buttons.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
+        let anchorMidY = anchor.frame.midY
+        return candidates.min { abs($0.frame.midY - anchorMidY) < abs($1.frame.midY - anchorMidY) } ?? app.buttons[label]
+    }
+
+    /// Settings' own "Profile" section with a photo already set — the
+    /// `AvatarPhotoPicker` row shows "Change photo"/"Remove photo" (rather
+    /// than "Add photo" alone) only once `avatarPath` is non-nil, so
+    /// asserting on "Change photo" also confirms the seeded photo actually
+    /// round-tripped into `SettingsView.myProfile`, not just that Settings
+    /// opened. Also the AX3 shot (external Dynamic Type toggle, same
+    /// convention as every capture test above).
+    func testCaptureSettingsProfilePhoto() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedAvatarShowcase", "-uitestOpenSettings"
+        ]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30), "Settings screen never appeared")
+        XCTAssertTrue(
+            app.buttons["Change photo"].waitForExistence(timeout: 10),
+            "seeded avatarPath never rendered the Change/Remove photo pair"
+        )
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "settings-profile", of: app)
+    }
+
+    /// Home's own `TripCard.AvatarStack(people: people)` (`TripCard.swift`,
+    /// via `HomeView.people(for:)`) for "Osaka Weekend" — Asha (photo) and
+    /// Kiran (initials) side by side, in the two-circle overlap
+    /// `AvatarStack` itself renders. Captured on Home directly, WITHOUT
+    /// opening the trip: `TripView`'s own hero (`TripHeroView`) takes only
+    /// a bare `tripProfileCount: Int`, never the people array — it renders a
+    /// "N people" count pill, not an `AvatarStack` at all (confirmed by
+    /// grepping every `AvatarStack(` call site in `Tripto/Sources` — `TripView
+    /// .swift`/`TripHeroView.swift` are absent from that list; only
+    /// `TripCard.swift`, `HeroFlight.swift` (Home's own live-trip preview),
+    /// `BoardingPassCard.swift`, and `TimelineRowViews.swift` (both
+    /// per-item assignees) actually use it). Whole-screen capture, same
+    /// convention as every other test in this file (`attachScreenshot`'s
+    /// own implementation is always a full-screen `app.screenshot()` —
+    /// there is no cropping mechanism used anywhere in this suite).
+    func testCaptureAvatarStackPhotoAndInitialsSideBySide() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedAvatarShowcase"]
+        app.launch()
+        let tripCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Osaka Weekend")).firstMatch
+        XCTAssertTrue(tripCard.waitForExistence(timeout: 30), "Osaka Weekend showcase trip never appeared on Home")
+        // Lets the card's own photo `LazyImage` settle before capturing.
+        Thread.sleep(forTimeInterval: 1.5)
+        attachScreenshot(named: "avatarstack-people", of: app)
+    }
+
+    /// `TripProfileFormSheet` in edit mode for Asha (the seeded photo
+    /// traveller) — reached via `ShareTripView`'s per-row "Edit" menu
+    /// action, not a dedicated autopilot hook (none exists for editing one
+    /// specific traveller). Light appearance only, per the brief.
+    func testCaptureTripProfileFormSheetWithPhoto() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedAvatarShowcase"]
+        app.launch()
+        let tripCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Osaka Weekend")).firstMatch
+        XCTAssertTrue(tripCard.waitForExistence(timeout: 30), "Osaka Weekend showcase trip never appeared on Home")
+        tripCard.tap()
+        XCTAssertTrue(app.staticTexts["Osaka Weekend"].waitForExistence(timeout: 15), "trip screen never opened")
+
+        let shareButton = app.buttons["Share trip"]
+        XCTAssertTrue(shareButton.waitForExistence(timeout: 10), "hero's Share entry point never appeared")
+        shareButton.tap()
+        XCTAssertTrue(app.navigationBars["Share this trip"].waitForExistence(timeout: 10), "Share screen never appeared")
+
+        let ashaName = app.staticTexts["Asha"]
+        XCTAssertTrue(ashaName.waitForExistence(timeout: 10), "Asha's traveller row never appeared")
+        button(labeled: "Role: Traveller", nearRowOf: ashaName, in: app).tap()
+        let editAction = app.buttons["Edit"]
+        XCTAssertTrue(editAction.waitForExistence(timeout: 5), "the row's Edit/Remove menu never opened")
+        editAction.tap()
+
+        XCTAssertTrue(
+            app.buttons["Remove photo"].waitForExistence(timeout: 10),
+            "TripProfileFormSheet never opened with the seeded photo"
+        )
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "tripprofile-photo-light", of: app)
+    }
 }

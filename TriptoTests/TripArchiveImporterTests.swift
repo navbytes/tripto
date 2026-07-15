@@ -302,4 +302,70 @@ final class TripArchiveImporterTests: XCTestCase {
         let profile = try XCTUnwrap(try context.fetch(FetchDescriptor<TripProfile>()).first)
         XCTAssertNil(profile.avatarPath)
     }
+
+    /// P8a: every test above builds its `ArchiveTrip`/`ArchiveDocument`
+    /// fixtures through the CURRENT app's own `Codable` structs/encoder —
+    /// which would trivially "support" a genuinely pre-P8a archive even if
+    /// some OTHER, unrelated required key had silently been added to the
+    /// decoder, since the app's own encoder would always emit whatever its
+    /// own current model needs. This instead hand-authors a raw JSON string
+    /// in the exact shape `docs/IMPORT_FORMAT.md` §8 documents (no avatar
+    /// keys exist in that spec at all — confirmed against
+    /// `Tripto/Sources/Support/TripArchive.swift`'s `ArchiveTrip`/
+    /// `ArchiveItem` `CodingKeys`, neither has ever had one), fed straight
+    /// into `importArchive` — the real "does a file exported by a version of
+    /// this app before avatar photos existed still import cleanly" regression
+    /// net that a round-trip-through-today's-own-encoder test can't be.
+    func testImportOfARawPreP8aStyleArchiveJSONWithNoAvatarKeysImportsCleanly() async throws {
+        let context = makeContext()
+        let userId = UUID()
+        let json = """
+        {
+          "format": "tripto-archive",
+          "version": 1,
+          "trips": [
+            {
+              "id": "2026-07-okinawa",
+              "title": "Okinawa",
+              "destination": "Okinawa, Japan",
+              "country_code": "JP",
+              "start_date": "2026-07-22",
+              "end_date": "2026-07-26",
+              "trip_type": "family",
+              "status": "upcoming",
+              "travellers": ["Asha", "Kiran"],
+              "items": [
+                {
+                  "id": "uo844",
+                  "category": "flight",
+                  "starts_at": "2026-07-22T14:25",
+                  "ends_at": "2026-07-22T18:05",
+                  "airline": "HK Express",
+                  "flight_no": "UO844",
+                  "from_iata": "HKG",
+                  "to_iata": "OKA",
+                  "confirmation": "PNR001"
+                }
+              ]
+            }
+          ]
+        }
+        """
+
+        let outcome = await TripArchiveImporter.importArchive(
+            data: Data(json.utf8), modelContext: context, syncEngine: nil, userId: userId
+        )
+        guard case .success(let report) = outcome else {
+            return XCTFail("expected success, got \(outcome)")
+        }
+        XCTAssertEqual(report.tripsImported, 1)
+        XCTAssertEqual(report.itemsImported, 1)
+        XCTAssertEqual(report.profilesImported, 2)
+
+        let trip = try XCTUnwrap(try context.fetch(FetchDescriptor<Trip>()).first)
+        XCTAssertEqual(trip.title, "Okinawa")
+        let profiles = try context.fetch(FetchDescriptor<TripProfile>())
+        XCTAssertEqual(Set(profiles.map(\.displayName)), ["Asha", "Kiran"])
+        XCTAssertTrue(profiles.allSatisfy { $0.avatarPath == nil }, "a pre-P8a archive has no avatar data to import")
+    }
 }
