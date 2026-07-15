@@ -362,6 +362,12 @@ struct ShareTripView: View {
                         Text("Anyone-can-view link")
                             .font(Typo.body(weight: .semibold))
                             .foregroundStyle(Palette.ink)
+                            // Fix-round N2: this exact string is also the
+                            // Toggle's own (visually `.labelsHidden()`, but
+                            // still spoken) accessibility label right below
+                            // — VoiceOver read it twice on this row. The
+                            // subtitle underneath is unique content, kept.
+                            .accessibilityHidden(true)
                         Text("Opens in any browser \u{2014} no app, no account.")
                             .font(Typo.body(Typo.Size.caption))
                             .foregroundStyle(Palette.slate)
@@ -697,6 +703,7 @@ struct ShareTripView: View {
             }
 
             addProfileButton
+            whoCanDoWhatDisclosure
         }
     }
 
@@ -724,6 +731,49 @@ struct ShareTripView: View {
         }
     }
 
+    /// Fix-round D1: deleting `ownRoleCard` removed the only place
+    /// explaining what each role/chip actually does. Restored the mockup's
+    /// own way (Share phone note 3 / "The role model" table in
+    /// design/ux-redesign-2026-07/tripto-redesign-dark.html) — a collapsed-
+    /// by-default disclosure at the bottom of the people list, not a
+    /// standing card. Static copy (not `TripRole.capabilityDescription`,
+    /// which `ownRoleCard` read): this also needs a Traveller line, which
+    /// isn't a `TripRole` case. Icons/colors reuse `roleBadge`/`travellerBadge`
+    /// so the chips and this legend never disagree on either.
+    private var whoCanDoWhatDisclosure: some View {
+        DisclosureGroup("Who can do what") {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                whoCanDoWhatRow(roleBadge(for: .organizer), capability: "Everything, incl. people & delete")
+                whoCanDoWhatRow(roleBadge(for: .companion), capability: "Add & edit their own plans")
+                whoCanDoWhatRow(roleBadge(for: .viewer), capability: "Read")
+                whoCanDoWhatRow(travellerBadge, capability: "Can be assigned plans, no account needed")
+            }
+            .padding(.top, Spacing.sm)
+        }
+        .font(Typo.body(weight: .semibold))
+        .foregroundStyle(Palette.ink)
+        .tint(Palette.slate)
+        .padding(.top, Spacing.sm)
+    }
+
+    /// One line per role — icon + role name + its one-line capability,
+    /// combined into a single VoiceOver stop ("Organizer. Everything,
+    /// including people and delete.") rather than two separate ones.
+    private func whoCanDoWhatRow(_ info: (icon: String, color: Color, label: String), capability: String) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: info.icon)
+                .foregroundStyle(info.color)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(info.label).font(Typo.body(weight: .semibold)).foregroundStyle(Palette.ink)
+                Text(capability).font(Typo.body(Typo.Size.caption)).foregroundStyle(Palette.slate)
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     /// The role pill's visual content, shared between the interactive
     /// (organizer-viewing-someone-else) and inert (everyone else, including
     /// the organizer's own row) presentations — finding 5: `.disabled()`
@@ -734,7 +784,15 @@ struct ShareTripView: View {
             Image(systemName: info.icon)
                 .font(.system(size: captionIconSize, weight: .semibold))
                 .accessibilityHidden(true)
-            Text(info.label).font(Typo.body(Typo.Size.caption, weight: .bold))
+            // Fix-round N3: "Traveller" wrapped mid-word ("Travell/er") at
+            // AX3 — the row's `Spacer` was squeezing this below its own
+            // single-line width. Same `.fixedSize()` idiom `SheetHeader`'s
+            // "Cancel" button already uses for the identical squeeze; a
+            // no-op at default sizes (natural width already fits), and it
+            // fixes every role chip uniformly, not just Traveller's.
+            Text(info.label)
+                .font(Typo.body(Typo.Size.caption, weight: .bold))
+                .fixedSize()
         }
         .foregroundStyle(info.color)
         .padding(.horizontal, Spacing.md)
@@ -1166,94 +1224,5 @@ struct ShareTripView: View {
     #endif
 }
 
-/// Role picker for a non-self member row (organizer only — `ShareTripView`
-/// gates presenting this sheet at all). Includes Organizer as a selectable
-/// option (the M3 brief's "can also promote to Organizer with a confirm"),
-/// unlike TripAppFamily.jsx's mockup menu, which only offers Companion/
-/// Viewer — the written brief wins per CLAUDE.md.
-private struct RolePickerSheet: View {
-    let currentRole: TripRole
-    let onSelect: (TripRole) -> Void
-    /// Finding 1: the only reachable path to removing a member — the old
-    /// `.swipeActions` on `memberRow` never fired (attached to a `VStack`
-    /// row inside a `ScrollView`, not a `List`). Defaults to `nil` so a
-    /// future non-removable presentation of this sheet doesn't have to
-    /// thread a callback through just to omit the row.
-    var onRemove: (() -> Void)?
-
-    @Environment(\.dismiss) private var dismiss
-
-    private struct Option {
-        let role: TripRole
-        let icon: String
-        let color: Color
-        let description: String
-    }
-
-    private let options: [Option] = [
-        Option(role: .organizer, icon: "crown.fill", color: Palette.amber, description: TripRole.organizer.capabilityDescription),
-        Option(role: .companion, icon: "pencil", color: CategoryColor.activity.fg, description: TripRole.companion.capabilityDescription),
-        Option(role: .viewer, icon: "eye.fill", color: CategoryColor.flight.fg, description: TripRole.viewer.capabilityDescription)
-    ]
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(options, id: \.role) { option in
-                    Button {
-                        dismiss()
-                        onSelect(option.role)
-                    } label: {
-                        HStack(spacing: Spacing.md) {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(option.color.opacity(0.15))
-                                .frame(width: 34, height: 34)
-                                .overlay { Image(systemName: option.icon).foregroundStyle(option.color) }
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(option.role.rawValue.capitalized)
-                                    .font(Typo.body(weight: .semibold))
-                                    .foregroundStyle(Palette.ink)
-                                Text(option.description)
-                                    .font(Typo.body(Typo.Size.caption))
-                                    .foregroundStyle(Palette.slate)
-                            }
-                            Spacer(minLength: 0)
-                            if option.role == currentRole {
-                                Image(systemName: "checkmark").foregroundStyle(Palette.amber)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    // Role picker row: value states whether it's the
-                    // current role, hint carries the capability description
-                    // (visible on screen either way) rather than folding it
-                    // into the label.
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(option.role.rawValue.capitalized)
-                    .accessibilityValue(option.role == currentRole ? "Selected" : "")
-                    .accessibilityHint(option.description)
-                }
-
-                if let onRemove {
-                    Button(role: .destructive) {
-                        dismiss()
-                        onRemove()
-                    } label: {
-                        Text("Remove from trip")
-                    }
-                }
-            }
-            .listStyle(.plain)
-            .navigationTitle("Change role")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-}
+// Fix-round D2: `RolePickerSheet` (the pre-P4.1 role-change sheet) deleted —
+// zero call sites since the inline chip `Menu` (`memberRow`) replaced it.

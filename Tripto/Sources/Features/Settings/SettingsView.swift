@@ -7,14 +7,6 @@ import UniformTypeIdentifiers
 /// `HomeView`'s avatar tap.
 struct SettingsView: View {
     @Query private var profiles: [Profile]
-    /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): backs the Export row's real
-    /// "N trips · M items" subtitle — the same two domains
-    /// `TripArchiveExporter.composeDocument(trips:items:profiles:)` already
-    /// counts, read live off the local store via `@Query` rather than a
-    /// one-off fetch, so the count on screen can never disagree with what
-    /// tapping the row will actually export.
-    @Query private var trips: [Trip]
-    @Query private var items: [ItineraryItem]
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
@@ -80,6 +72,23 @@ struct SettingsView: View {
     }
 
     private var isProfileChanged: Bool { isNameChanged || isColorChanged }
+
+    /// P4.3 (docs/UX_REDESIGN_ROADMAP.md): backs the Export row's real "N
+    /// trips · M items" subtitle. Fix-round N1: `modelContext.fetchCount`
+    /// instead of two unfiltered `@Query`s — those loaded (and kept
+    /// `@Query`-observing) every `Trip`/`ItineraryItem` row in the store just
+    /// to read a `.count`; `fetchCount` asks SwiftData for the row count
+    /// directly, same two domains `TripArchiveExporter.composeDocument`
+    /// counts, without materializing the objects. `exportArchive()` still
+    /// does its own real fetch at export time (it needs the actual rows,
+    /// not just a count) — untouched.
+    private var exportTripCount: Int {
+        (try? modelContext.fetchCount(FetchDescriptor<Trip>())) ?? 0
+    }
+
+    private var exportItemCount: Int {
+        (try? modelContext.fetchCount(FetchDescriptor<ItineraryItem>())) ?? 0
+    }
 
     var body: some View {
         Form {
@@ -172,7 +181,7 @@ struct SettingsView: View {
                         HStack {
                             Text("Export trips")
                             Spacer()
-                            Text(Self.exportCountsText(tripCount: trips.count, itemCount: items.count))
+                            Text(Self.exportCountsText(tripCount: exportTripCount, itemCount: exportItemCount))
                                 .font(Typo.body(Typo.Size.caption))
                                 .foregroundStyle(Palette.slate)
                         }

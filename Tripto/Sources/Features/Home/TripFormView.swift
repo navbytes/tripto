@@ -131,10 +131,23 @@ struct TripFormView: View {
     /// UX audit finding 8: gates the "Delete trip" confirmation — same
     /// dialog copy Home's own swipe/context-menu delete uses.
     @State private var isPresentingDeleteConfirm = false
+    /// Fix-round D4: `save()`'s create branch had no reentrancy guard, the
+    /// same hole P3 fixed in `AddItemSheet.save()` (`isSaving`) — a fast
+    /// double-tap (of either the "Create trip" CTA or, worse, "Start from a
+    /// booking email instead") could fire a second synchronous `save()`
+    /// before the first tap's insert/dismiss (or sheet-chain transition,
+    /// for the booking-email path) makes the button unhittable. Same shape
+    /// as `AddItemSheet.isSaving`: set synchronously as `save()`'s first
+    /// statement, released on every early return, guards both branches.
+    @State private var isSaving = false
     /// P4.4: set right before `save()` by `bookingEmailSecondaryAction` —
     /// `save()`'s create branch reads this to also populate
     /// `tripForBookingImport` instead of (not in addition to) its normal
     /// immediate `dismiss()`. Create-mode only; edit-mode never sets it.
+    /// Fix-round D3: reset back to `false` on every one of `save()`'s
+    /// create-branch early returns (`.signedOut`, `.writeFailed`) — left
+    /// `true`, a signed-out or failed attempt would make a *later*, distinct
+    /// plain "Create trip" tap wrongly chain into `AddItemSheet` too.
     @State private var isCreatingForBookingImport = false
     /// P4.4: non-nil right after "Start from a booking email instead"
     /// successfully creates the trip — presents `AddItemSheet` (the exact
@@ -602,7 +615,7 @@ struct TripFormView: View {
                     .shadow(color: canSubmit ? Palette.amber.opacity(0.45) : .clear, radius: 10, y: 5)
             }
             .buttonStyle(.plain)
-            .disabled(!canSubmit)
+            .disabled(!canSubmit || isSaving)
         }
     }
 
@@ -637,7 +650,7 @@ struct TripFormView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(!canSubmit)
+            .disabled(!canSubmit || isSaving)
             .padding(.top, Spacing.xs)
         }
     }
@@ -772,7 +785,8 @@ struct TripFormView: View {
     }
 
     private func save() {
-        guard isValid else { return }
+        guard isValid, !isSaving else { return }
+        isSaving = true
         saveError = nil
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         // Whitespace-only pasted destinations shouldn't persist as visible
@@ -785,6 +799,8 @@ struct TripFormView: View {
         case .create:
             guard let userId = authManager.userId else {
                 saveError = .signedOut
+                isSaving = false
+                isCreatingForBookingImport = false
                 return
             }
             let trip = Trip(
@@ -818,6 +834,8 @@ struct TripFormView: View {
                 try modelContext.save()
             } catch {
                 saveError = .writeFailed
+                isSaving = false
+                isCreatingForBookingImport = false
                 return
             }
             let dto = trip.toDTO()
@@ -845,6 +863,7 @@ struct TripFormView: View {
                 try modelContext.save()
             } catch {
                 saveError = .writeFailed
+                isSaving = false
                 return
             }
             let dto = trip.toDTO()
@@ -865,6 +884,13 @@ struct TripFormView: View {
         // save (including every `.edit`) dismisses immediately, unchanged.
         if tripForBookingImport == nil {
             dismiss()
+        } else {
+            // The chained `AddItemSheet` covers this view instead of
+            // dismissing it (`body`'s `.sheet(item: $tripForBookingImport)`)
+            // — release the reentrancy guard same as `AddItemSheet.save
+            // (andDismiss: false)` does, so this instance stays consistent
+            // rather than permanently "mid-save" underneath the child sheet.
+            isSaving = false
         }
     }
 
