@@ -293,17 +293,26 @@ struct HomeView: View {
                     if let pending = mergePendingConfirm { startMerge(shell: pending.shell, survivor: pending.survivor) }
                     mergePendingConfirm = nil
                 }
-                // P7 award-audit (MED, VoiceOver escape): this dialog
-                // renders as an anchored/popover-style card in this build,
-                // not a bottom action sheet (`merge-confirm-dialog-*.png`
-                // shows a rounded card + tail with only "Merge" visible) —
-                // documented `UIAlertController` behavior silently OMITS a
-                // `role: .cancel` action in that presentation, since "tap
-                // outside" is assumed to cover it. That's not a reachable
-                // escape for VoiceOver. A plain (no-role) button is never
-                // elided this way, regardless of presentation style — same
-                // dismiss, now actually explicit and labeled.
-                Button("Cancel") { mergePendingConfirm = nil }
+                // P7 award-audit (MED, VoiceOver escape) — reviewer follow-up:
+                // empirically confirmed (accessibility-tree dump, both an
+                // iPhone-compact and iPad-regular sim) this dialog renders as
+                // a genuine `Popover` element in this OS build on BOTH size
+                // classes, not just regular — a `PopoverDismissRegion` sibling
+                // and exactly one action button ("Merge") is everything in
+                // the tree; NEITHER a plain-role NOR a `.cancel`-role second
+                // button ever renders, on either width. So role choice here
+                // doesn't change what's on screen either way — kept
+                // `role: .cancel` (semantically correct, and consistent with
+                // the "Delete trip" dialog above) rather than the plain
+                // button an earlier pass here swapped in on a theory this
+                // data doesn't support. The dismiss that DOES work
+                // everywhere: tapping outside (`PopoverDismissRegion`, always
+                // present) and VoiceOver's system-standard scrub/escape
+                // gesture on the presented popover — both platform-provided,
+                // not app-wired — and this dialog's own `isPresented`
+                // binding `set` above already resets `mergePendingConfirm`
+                // on exactly that path, button-independent.
+                Button("Cancel", role: .cancel) { mergePendingConfirm = nil }
             } message: {
                 if let pending = mergePendingConfirm {
                     Text(
