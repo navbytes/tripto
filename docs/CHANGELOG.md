@@ -4,7 +4,16 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
-### Data import & export (2026-07-14)
+### Code quality — principles review & fixes (2026-07-17)
+
+#### Changed
+- **Internal quality pass across the app (no user-facing changes):** duplicated pure helpers single-homed in `Platform/Shared` (widgets no longer carry silently-drifting copies); share-link/invite writes moved from `ShareTripView` into `SyncEngine` with the standard `SyncBackoff`; the primary-CTA capsule and empty-state scaffolds extracted to `Design/Components` (9 + 4 sites); the email-import-address consent/retry state machine shared once (`ImportAddressLoader`, was hand-copied in 3 views); storage upload path/URL builders unified (`StorageBucketPaths`, preserving the RLS lowercase-uid rule).
+
+#### Fixed
+- **Outbox push order is now guaranteed:** ops carry a monotonic `seq` (pre-migration ties broken by `createdAt`), and trip-merge enqueues its shell-trip delete strictly after every repoint in one sequential chain — closing a latent reorder that could cascade-delete server-side children mid-merge.
+
+#### Added
+- **Share-link leakage regression tests:** the `ShareSummary` sanitizer is pinned by sentinel tests (confirmation codes, notes, emails, reservation names can never enter the public payload). Push-loop tests run deterministically (offline skips and sleep-based ordering removed); UI tests wait on real conditions (42 fixed sleeps → 8 justified survivors). Unit suite 938 → 949.
 
 #### Added
 - **Tripto Archive v1 — import & export:** Settings → "Import trips" accepts JSON archives from other apps or previous Tripto exports; deterministic on-device conversion, no AI/consent required, idempotent re-import via UUIDv5 deduplication. Settings → "Export trips" writes the same format for data portability. Time zone resolution per IATA airport tables, category-specific defaults; report shows summaries + skipped items with reasons. Spec: `docs/IMPORT_FORMAT.md` with LLM-conversion appendix for source-app migration. Unit test suite 509→610.
