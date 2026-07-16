@@ -48,6 +48,11 @@ enum DemoSeeder {
         // this file's configured ceiling from five prior showcase-flag
         // checks — doesn't grow by another branch for a sixth.
         primeCoverShowcaseImageCacheIfFlagged()
+        // P8c cover-SEARCH capture set (distinct from the cover-SHOWCASE
+        // priming above — see this function's own doc comment): same
+        // "unconditional, every launch, before the idempotence guard"
+        // reasoning.
+        primeCoverSearchStubIfFlagged()
         // Idempotence guard, checked against the STORE (not callers' @Query
         // state, which can be un-hydrated at launch — the W1-B evidence run
         // caught a double-seed race exactly that way: two "Lisbon" rows from
@@ -538,7 +543,22 @@ enum DemoSeeder {
             startDate: deviceCalendar.date(byAdding: .day, value: 18, to: today) ?? today,
             endDate: deviceCalendar.date(byAdding: .day, value: 24, to: today) ?? today,
             coverGradient: "dusk", tripTypeRaw: TripType.family.rawValue, createdBy: userId,
-            createdAt: now, updatedAt: now, updatedBy: nil, coverImagePath: coverShowcasePhotoPath
+            createdAt: now, updatedAt: now, updatedBy: nil, coverImagePath: coverShowcasePhotoPath,
+            // P8c: seeded as though a `CoverSearchSheet` pick already
+            // supplied this credit (rather than an own-photo pick, which
+            // would leave both nil) — `TripFormView.coverPhotoCreditLine`'s
+            // own capture (`TriptoUITests
+            // .testCaptureTripFormSearchedCoverCreditLine`) needs a trip
+            // that's ALREADY in this state; driving a live
+            // `CoverSearchSheet` search-and-pick isn't reachable in this
+            // hermetic suite (its own pipeline ends in a real Storage
+            // upload — see `CoverSearchStubURLProtocol`'s doc comment for
+            // why only the SEARCH response itself, not the pick pipeline,
+            // is stubbed). Independent of `CoverSearchStubURLProtocol`'s own
+            // canned photographers below — this credit is never searched
+            // for, just pre-seeded — so the two additive P8c flags stay
+            // decoupled.
+            coverCreditName: "Priya Nair", coverCreditUrl: "https://pexels.com/photo/700142"
         )
         let photoMember = TripMember(id: UUID(), tripId: photoTripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
         // Real items — not just this trip's date-range gap-fill — so the
@@ -625,6 +645,41 @@ enum DemoSeeder {
     private static func seedCoverShowcaseIfFlagged(modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date) async {
         if ProcessInfo.processInfo.arguments.contains("-uitestSeedCoverShowcase") {
             await seedCoverShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
+        }
+    }
+
+    // MARK: - P8c cover-search capture stub (`-uitestStubCoverSearch{Results,
+    // Empty,Error}`) — `CoverSearchSheet`'s search RESULTS grid, empty
+    // state, and error state, hermetically. Unlike every other showcase flag
+    // above, this doesn't seed rows — it registers `CoverSearchStubURLProtocol`
+    // (declared top-level, at the bottom of this file, alongside — not
+    // nested inside — `DemoSeeder`: a `URLProtocol` subclass can't nest more
+    // than one level deep either way, this file's own `nesting` lint
+    // ceiling), which intercepts the one live network call `CoverSearchSheet`'s
+    // own default `SupabaseCoverSearchProvider` makes. See that type's own
+    // doc comment for the full "why this is the only reachable UI-test
+    // boundary" reasoning.
+
+    /// `seed()`'s own flag-check wrapper (see `primeCoverShowcaseImageCache
+    /// IfFlagged`'s doc comment for why this is a plain unconditional call
+    /// from `seed()` rather than an inline `if` there): registers the stub
+    /// `URLProtocol` above — harmless/idempotent to re-register, Foundation
+    /// just re-adds it to its global list — and primes Nuke's memory cache
+    /// for every URL the standard/slow canned photos can return, exactly
+    /// the same "cheap, in-memory, must survive THIS process's own empty
+    /// cache" reasoning `primeAvatarShowcaseImageCache`'s doc comment
+    /// already covers in full.
+    private static func primeCoverSearchStubIfFlagged() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-uitestStubCoverSearchResults")
+            || arguments.contains("-uitestStubCoverSearchEmpty")
+            || arguments.contains("-uitestStubCoverSearchError")
+        else { return }
+        URLProtocol.registerClass(CoverSearchStubURLProtocol.self)
+        _ = AppImagePipeline.configured
+        guard let photo = syntheticCoverPhoto() else { return }
+        for url in CoverSearchStubURLProtocol.stubImageURLs() {
+            ImagePipeline.shared.cache[url] = ImageContainer(image: photo)
         }
     }
 
@@ -1345,6 +1400,180 @@ enum DemoSeeder {
         components.hour = hour
         components.minute = minute
         return calendar.date(from: components) ?? shifted
+    }
+}
+
+/// P8c cover-search capture stub — see `DemoSeeder.primeCoverSearchStub
+/// IfFlagged`'s doc comment for the registration/priming side. Intercepts
+/// the one live network call `CoverSearchSheet`'s own default
+/// `SupabaseCoverSearchProvider` makes (`Supa.invoke("search-covers", ...)`)
+/// — the only "UI-test boundary" seam reachable from this pass's file scope
+/// (TriptoTests/TriptoUITests/DemoSeeder, additive) without touching
+/// `CoverSearchSheet`/`TripFormView`: that view's `searchProvider` has no
+/// test-only override hook, and the one call site that could pass one in
+/// (`TripFormView.body`'s `.sheet(isPresented: $isPresentingCoverSearch)`)
+/// is production code outside this pass's scope. `URLProtocol
+/// .registerClass` is a process-wide hook honored by any session
+/// (including `.shared`) that hasn't set its own custom `protocolClasses`
+/// — confirmed against supabase-swift's own source (`FunctionsClient`'s
+/// documented default fetch handler is bare `URLSession.shared.data(for:)`,
+/// `sessionConfiguration: .default`), so this intercepts the real call with
+/// no SDK-side changes needed. Never registered unless one of the three
+/// `-uitestStubCoverSearch…` flags is present — every other launch (the
+/// whole rest of this hermetic suite) is completely unaffected — and it
+/// still throws `FunctionsError`/decodes `CoverSearchResponse` through the
+/// exact real, already-tested code paths (`CoverSearchSheetTests`) — only
+/// the bytes on the wire are fabricated. Top-level (a sibling of
+/// `DemoSeeder`, not nested inside it): this file's own nesting ceiling
+/// allows one level, and `Scenario` below already needs that one level for
+/// itself.
+private final class CoverSearchStubURLProtocol: URLProtocol {
+    override static func canInit(with request: URLRequest) -> Bool {
+        request.url?.path.hasSuffix("/search-covers") == true
+    }
+
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let scenario = Self.scenario(for: request)
+        // A real round trip always has SOME latency; a query containing
+        // "slow" gets an exaggerated one on purpose — the hook
+        // `TriptoUITests.testRapidQueryChangeNeverLetsAStaleSlowResultSurface`
+        // needs to actually race a superseding query against a
+        // still-in-flight one, not just a theoretical one.
+        let delay: DispatchTimeInterval = scenario == .slowResults ? .milliseconds(1_200) : .milliseconds(20)
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
+            respond(scenario: scenario)
+        }
+    }
+
+    override func stopLoading() {}
+
+    private enum Scenario { case results, slowResults, empty, error }
+
+    private static func scenario(for request: URLRequest) -> Scenario {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-uitestStubCoverSearchError") { return .error }
+        if arguments.contains("-uitestStubCoverSearchEmpty") { return .empty }
+        return query(from: request).lowercased().contains("slow") ? .slowResults : .results
+    }
+
+    /// `CoverSearchRequest`'s own wire shape — plain camelCase (`Supa
+    /// .invoke`'s contract) — read loosely here (a bare `JSONSerialization`
+    /// dictionary, not the real type): decoding the real request type would
+    /// gain nothing (this only ever reads the one `query` field back out),
+    /// and the real type stays the one source of truth for the WIRE
+    /// contract, exercised end to end by `CoverSearchSheetTests`.
+    private static func query(from request: URLRequest) -> String {
+        guard let body = request.httpBody,
+            let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+            let query = json["query"] as? String
+        else { return "" }
+        return query
+    }
+
+    private func respond(scenario: Scenario) {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        let statusCode = scenario == .error ? 503 : 200
+        guard let response = HTTPURLResponse(
+            url: url, statusCode: statusCode, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        ) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        // A non-2xx status is all `FunctionsClient.rawInvoke` needs to throw
+        // `FunctionsError.httpError` (`CoverSearchSheet.friendlyMessage(for:)`
+        // then maps 503 to the "Couldn't reach Pexels" copy, exactly as
+        // `CoverSearchSheetTests` already pins) — the body content past
+        // that point is never decoded, so the error scenario's own empty
+        // `Data()` is enough.
+        let data = scenario == .error ? Data() : Self.cannedResponseJSON(for: scenario)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    /// Six photos, distinct photographer names (the per-result caption's own
+    /// differentiator — `resultCell`'s accessibility label combines "Photo,
+    /// by {name}") and distinct `medium`/`large2x` URLs (each individually
+    /// primed into Nuke's memory cache — `stubImageURLs()` below — same
+    /// "prime the exact URL a `LazyImage` will request" trick `DemoSeeder
+    /// .primeCoverShowcaseImageCache` already established for trip covers).
+    private static let standardPhotographers = [
+        "Aiko Tanaka", "Marco Rossi", "Elena Petrova", "Sam Okafor", "Nadia Haddad", "Tom Becker"
+    ]
+
+    private static func standardPhotos() -> [CoverSearchResponse.Photo] {
+        standardPhotographers.enumerated().map { index, name in
+            photo(id: 900_001 + index, photographerName: name)
+        }
+    }
+
+    /// The "still in flight when superseded" photo — a photographer name
+    /// distinctive enough that its accidental appearance in a capture or in
+    /// `testRapidQueryChangeNeverLetsAStaleSlowResultSurface` is
+    /// unambiguous, never confusable with any of the six standard names
+    /// above.
+    private static let slowPhoto = photo(id: 999_999, photographerName: "Stale Slow Result")
+
+    private static func photo(id: Int, photographerName: String) -> CoverSearchResponse.Photo {
+        CoverSearchResponse.Photo(
+            id: id, alt: nil, photographerName: photographerName, photographerUrl: nil,
+            photoPageUrl: "https://pexels.com/photo/\(id)",
+            src: .init(
+                large2x: "https://images.pexels.com/uitest-cover-search/\(id)-large2x.jpg",
+                large: "https://images.pexels.com/uitest-cover-search/\(id)-large.jpg",
+                medium: "https://images.pexels.com/uitest-cover-search/\(id)-medium.jpg"
+            )
+        )
+    }
+
+    /// Builds the canned wire body directly via `JSONSerialization` rather
+    /// than `CoverSearchResponse`/`JSONEncoder`: that type only conforms to
+    /// `Decodable` (the app never has a reason to SEND one — `Encodable`
+    /// synthesis can't be added retroactively from this file either, Swift
+    /// only synthesizes `Codable` conformances declared alongside the
+    /// original type). Also deliberately omits `alt`/`photographerUrl`
+    /// entirely rather than encoding them as `null`, exercising the exact
+    /// "keys absent, not just null" tolerance `CoverSearchSheetTests
+    /// .testDecodesWithAltAndPhotographerUrlKeysMissingEntirely` already
+    /// pins, instead of a redundant third shape no test covers.
+    private static func cannedResponseJSON(for scenario: Scenario) -> Data {
+        let photos: [CoverSearchResponse.Photo]
+        let nextPage: Bool
+        switch scenario {
+        case .results:
+            photos = standardPhotos()
+            nextPage = true
+        case .slowResults:
+            photos = [slowPhoto]
+            nextPage = false
+        case .empty, .error:
+            photos = []
+            nextPage = false
+        }
+        let photosJSON: [[String: Any]] = photos.map { photo in
+            [
+                "id": photo.id, "photographerName": photo.photographerName, "photoPageUrl": photo.photoPageUrl,
+                "src": ["large2x": photo.src.large2x, "large": photo.src.large, "medium": photo.src.medium]
+            ]
+        }
+        let json: [String: Any] = [
+            "photos": photosJSON, "page": 1, "totalResults": photos.count, "nextPage": nextPage
+        ]
+        return (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
+    }
+
+    /// Every URL any canned photo above can return — `DemoSeeder
+    /// .primeCoverSearchStubIfFlagged()`'s own Nuke memory-cache-priming
+    /// loop, so a result cell's `LazyImage(url: photo.src.medium)` finds a
+    /// hit instead of attempting (and, hermetically, failing) a real fetch.
+    fileprivate static func stubImageURLs() -> [URL] {
+        (standardPhotos() + [slowPhoto]).compactMap { URL(string: $0.src.medium) }
     }
 }
 #endif

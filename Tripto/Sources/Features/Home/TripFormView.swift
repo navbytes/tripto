@@ -98,6 +98,19 @@ struct TripFormView: View {
     @State private var coverImagePath: String?
     @State private var coverPickerItem: PhotosPickerItem?
     @State private var isUploadingCoverPhoto = false
+    /// P8c: draft credit pair for `coverImagePath`, kept in lockstep with it
+    /// at all three write sites below (`uploadCoverPhoto` and
+    /// `removeCoverPhoto` clear both; a `CoverSearchSheet` pick sets both) —
+    /// by construction, whichever values live here always describe whichever
+    /// photo is currently selected, so `save()` and `coverPhotoCreditLine`
+    /// below can just read them directly with no extra "does this still
+    /// match the photo" check. Seeded from `trip.coverCreditName`/
+    /// `.coverCreditUrl` in edit mode, `nil` for a brand-new create-mode trip
+    /// (mirrors `coverImagePath`'s own seeding, see `init` below).
+    @State private var coverCreditName: String?
+    @State private var coverCreditUrl: String?
+    /// P8c: "Search photos" beside "Choose a photo" — see `CoverSearchSheet`.
+    @State private var isPresentingCoverSearch = false
 
     /// F6: surfaced above the CTA when `modelContext.save()` throws, instead
     /// of the old silent `try?` — the save simply stops, nothing is
@@ -246,6 +259,8 @@ struct TripFormView: View {
             _tripType = State(initialValue: seed.tripType)
             _coverGradientKey = State(initialValue: seed.coverGradientKey)
             _coverImagePath = State(initialValue: nil)
+            _coverCreditName = State(initialValue: nil)
+            _coverCreditUrl = State(initialValue: nil)
             initialValues = InitialValues(
                 title: seed.title, destination: seed.destination, countryCode: seed.countryCode,
                 startDate: seed.startDate, endDate: seed.endDate,
@@ -260,6 +275,8 @@ struct TripFormView: View {
             _tripType = State(initialValue: trip.tripType)
             _coverGradientKey = State(initialValue: trip.coverGradient)
             _coverImagePath = State(initialValue: trip.coverImagePath)
+            _coverCreditName = State(initialValue: trip.coverCreditName)
+            _coverCreditUrl = State(initialValue: trip.coverCreditUrl)
             initialValues = InitialValues(
                 title: trip.title, destination: trip.destination, countryCode: trip.countryCode,
                 startDate: trip.startDate, endDate: trip.endDate,
@@ -317,19 +334,6 @@ struct TripFormView: View {
             // not-saved title — the uploaded object itself is simply left as
             // an orphan, same v1 policy `CoverStorage`'s doc comment accepts.
             || coverImagePath != initialValues.coverImagePath
-    }
-
-    /// P8b: read-only in this phase — nothing here ever writes a non-nil
-    /// value (P8c's Pexels search flow will); only rendered when editing an
-    /// existing trip that already has both (see `coverSection`).
-    private var coverCreditName: String? {
-        if case .edit(let trip) = mode { return trip.coverCreditName }
-        return nil
-    }
-
-    private var coverCreditUrl: String? {
-        if case .edit(let trip) = mode { return trip.coverCreditUrl }
-        return nil
     }
 
     /// F6: the live snapshot `.onChange` diffs against `initialValues`
@@ -396,6 +400,17 @@ struct TripFormView: View {
                 tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy,
                 onToast: { message in toast = message }
             )
+        }
+        // P8c: "Search photos" — reports the picked path + Pexels credit
+        // pair back into this sheet's own draft state, together; nothing is
+        // written to `trip` until this sheet's own Create/Save (same
+        // draft-until-Save semantics as the PhotosPicker path above).
+        .sheet(isPresented: $isPresentingCoverSearch) {
+            CoverSearchSheet(uploaderUserId: authManager.userId) { path, creditName, creditUrl in
+                coverImagePath = path
+                coverCreditName = creditName
+                coverCreditUrl = creditUrl
+            }
         }
         .background(
             // Finding 5: surfaces the same "Discard changes?" dialog Cancel
@@ -603,14 +618,22 @@ struct TripFormView: View {
         }
     }
 
-    /// "Choose a photo"/"Change photo" + (once set) "Remove photo" — same
-    /// pill/44pt-target styling as `AvatarPhotoPicker`'s identical pair, not
-    /// reused directly: that component is a fixed-diameter CIRCLE preview
-    /// (one profile-photo shape everywhere), while this section's own
-    /// preview is the wide gradient card above: `AvatarPhotoPicker`'s actual
-    /// preview half doesn't fit here, only its button recipe does.
+    /// "Choose a photo"/"Change photo" + "Search photos" (P8c) + (once set)
+    /// "Remove photo" — same pill/44pt-target styling as `AvatarPhotoPicker`'s
+    /// identical pair, not reused directly: that component is a
+    /// fixed-diameter CIRCLE preview (one profile-photo shape everywhere),
+    /// while this section's own preview is the wide gradient card above:
+    /// `AvatarPhotoPicker`'s actual preview half doesn't fit here, only its
+    /// button recipe does.
+    ///
+    /// P8c: `WrapLayout` instead of a plain `HStack` — a third pill now has
+    /// to fit alongside "Choose/Change a photo" and (once set) "Remove
+    /// photo", which would overflow an `HStack` at larger Dynamic Type sizes
+    /// (`WrapLayout`'s own established use: `TimelineCardRow`'s
+    /// assignees+tags row hit the identical problem first). No trailing
+    /// `Spacer` — `WrapLayout` already left-aligns and wraps on its own.
     private var coverPhotoPickerRow: some View {
-        HStack(spacing: Spacing.md) {
+        WrapLayout(horizontalSpacing: Spacing.md, verticalSpacing: Spacing.sm) {
             PhotosPicker(selection: $coverPickerItem, matching: .images) {
                 Text(coverImagePath == nil ? "Choose a photo" : "Change photo")
                     .font(Typo.body(Typo.Size.caption, weight: .bold))
@@ -625,9 +648,11 @@ struct TripFormView: View {
             }
             .disabled(isUploadingCoverPhoto)
 
+            searchPhotosButton
+
             if coverImagePath != nil {
                 Button(role: .destructive) {
-                    coverImagePath = nil
+                    removeCoverPhoto()
                 } label: {
                     Text("Remove photo")
                         .font(Typo.body(Typo.Size.caption, weight: .semibold))
@@ -637,33 +662,82 @@ struct TripFormView: View {
                 }
                 .disabled(isUploadingCoverPhoto)
             }
-            Spacer(minLength: 0)
         }
     }
 
-    /// P8c render slot (brief: "build the render slot now so P8c is
-    /// copy-only") — this phase never writes a non-nil credit, so this never
-    /// renders today; once P8c's Pexels search flow starts writing
-    /// `coverCreditName`/`coverCreditUrl`, it appears with zero further UI
-    /// work. Gated on `coverImagePath == initialValues.coverImagePath` (not
-    /// just the credit fields being present) — mid-session, the moment the
-    /// user picks a different photo or removes it, `save()` is about to
-    /// clear the ORIGINAL photo's credit (see that method's own comment), so
-    /// this must stop crediting it immediately too, rather than keep
-    /// pointing at a photo that's no longer even selected.
+    /// P8c: opens `CoverSearchSheet` — the second, independent entry point
+    /// into the same draft `coverImagePath` `coverPhotoPickerRow`'s
+    /// `PhotosPicker` already writes. Neutral secondary pill (`Palette.mist`
+    /// fill / `Palette.ink` text — the app's own default running-text-on-
+    /// surface pairing, already relied on everywhere, not a new contrast to
+    /// justify) so it doesn't compete with the amber CTA weight of
+    /// "Choose/Change a photo".
+    private var searchPhotosButton: some View {
+        Button {
+            isPresentingCoverSearch = true
+        } label: {
+            Text("Search photos")
+                .font(Typo.body(Typo.Size.caption, weight: .bold))
+                .foregroundStyle(Palette.ink)
+                .padding(.horizontal, Spacing.md)
+                .background(Palette.mist, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(isUploadingCoverPhoto)
+    }
+
+    /// P8c: now backed by real draft state (`coverCreditName`/
+    /// `coverCreditUrl` above) instead of P8b's read-only mirror of the
+    /// stored trip — shows whenever THIS session's draft credit is set,
+    /// whether that's a freshly-picked `CoverSearchSheet` photo (immediate
+    /// feedback before Save) or an unchanged existing one from `.edit` mode.
+    /// The old P8b gate (`coverImagePath == initialValues.coverImagePath`)
+    /// is gone: it only existed because that phase's credit had no draft of
+    /// its own, so it had to hide the instant the live picker diverged from
+    /// what the sheet opened with. Now `coverCreditName`/`coverCreditUrl`
+    /// are kept in lockstep with `coverImagePath` at all three write sites
+    /// (`uploadCoverPhoto`/`removeCoverPhoto` clear both; a
+    /// `CoverSearchSheet` pick sets both) — by construction, whichever
+    /// values live here always describe whichever photo is currently
+    /// selected, so no extra "does this still match" check is needed here.
+    ///
+    /// Legibility fix (P8b inherited nit, DECISIONS.md 2026-07-16): was
+    /// `Typo.body(10.5)` + `.underline()` only — below the ~12pt bar, and
+    /// relying on underline as the sole "this is a link" affordance. Now the
+    /// same external-link recipe as `PrivacySummaryView`'s "Read the full
+    /// privacy policy" (`Palette.amberInk` — already measured ~5.0:1 on
+    /// `Palette.paper` in light mode, ~7.7:1 in dark, per that token's own
+    /// doc comment — plus an `arrow.up.forward.square` glyph) at
+    /// `Typo.Size.caption` (12.5pt, clears the bar). `.fixedSize` so the
+    /// text wraps rather than getting compressed by the fixed-size glyph
+    /// sharing the `HStack` (CONTRACTS: "credit line wraps").
     @ViewBuilder
     private var coverPhotoCreditLine: some View {
-        if coverImagePath == initialValues.coverImagePath,
-            let coverCreditName, let coverCreditUrl, let creditURL = URL(string: coverCreditUrl) {
-            Link(destination: creditURL) {
-                Text("Photo by \(coverCreditName) on Pexels")
-                    .font(Typo.body(10.5))
-                    .foregroundStyle(Palette.slate)
-                    .underline()
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+        if let presentation = Self.coverCreditPresentation(creditName: coverCreditName, creditUrl: coverCreditUrl) {
+            Link(destination: presentation.url) {
+                HStack(spacing: Spacing.xs) {
+                    Text("Photo by \(presentation.name) on Pexels")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "arrow.up.forward.square")
+                        .accessibilityHidden(true)
+                }
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.amberInk)
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
         }
+    }
+
+    /// Pure presentation gate for `coverPhotoCreditLine`, mirroring
+    /// `ctaGuidance`'s "static, testable, exposed for exactly this" shape —
+    /// both fields must be non-nil AND the URL string must actually parse;
+    /// any single failure hides the line entirely rather than rendering a
+    /// half-credited or dead-link row.
+    static func coverCreditPresentation(creditName: String?, creditUrl: String?) -> (name: String, url: URL)? {
+        guard let creditName, let creditUrl, let url = URL(string: creditUrl) else { return nil }
+        return (creditName, url)
     }
 
     private func uploadCoverPhoto(_ item: PhotosPickerItem) async {
@@ -692,9 +766,25 @@ struct TripFormView: View {
             // `catch`'s toast.
             let path = try await CoverStorage.upload(jpeg, for: userId)
             coverImagePath = path
+            // P8c: an own-photo pick has no Pexels credit — clear any
+            // existing one (e.g. replacing a `CoverSearchSheet` pick from
+            // earlier this same session) together with the new path, never
+            // leaving a credit pointing at a photo that's no longer selected.
+            coverCreditName = nil
+            coverCreditUrl = nil
         } catch {
             toast = "Couldn\u{2019}t upload that photo. Try again."
         }
+    }
+
+    /// P8c: "Remove photo" — same "clear the credit together with the path"
+    /// rule as `uploadCoverPhoto`'s success case above, factored out since
+    /// both `coverPhotoPickerRow`'s button and (indirectly) tests reference
+    /// this exact triple.
+    private func removeCoverPhoto() {
+        coverImagePath = nil
+        coverCreditName = nil
+        coverCreditUrl = nil
     }
 
     private var shuffleButton: some View {
@@ -1002,12 +1092,15 @@ struct TripFormView: View {
                 updatedAt: .now,
                 updatedBy: nil,
                 // P8b: atomic by construction — `coverImagePath` only ever
-                // holds a path once `uploadCoverPhoto` has already awaited a
-                // SUCCESSFUL `CoverStorage.upload`; a brand-new trip with no
-                // photo picked keeps this `nil`, same as before P8b.
-                // `coverCreditName`/`coverCreditUrl` are never set on
-                // create — a new trip can't already have a Pexels credit.
-                coverImagePath: coverImagePath
+                // holds a path once `uploadCoverPhoto`/a `CoverSearchSheet`
+                // pick has already awaited a SUCCESSFUL upload; a brand-new
+                // trip with no photo picked keeps this `nil`, same as before
+                // P8b. P8c: `coverCreditName`/`coverCreditUrl` carry over
+                // too — a trip CAN already have a Pexels credit the moment
+                // it's first created, if that's how its cover was picked.
+                coverImagePath: coverImagePath,
+                coverCreditName: coverCreditName,
+                coverCreditUrl: coverCreditUrl
             )
             modelContext.insert(trip)
 
@@ -1050,18 +1143,22 @@ struct TripFormView: View {
             trip.tripType = tripType
             trip.coverGradient = coverGradientKey
             trip.coverImagePath = coverImagePath
-            // P8c render-slot correctness (brief: this phase never WRITES a
-            // credit, but must keep the invariant sound ahead of P8c): a
-            // credit names one specific photo, so it must never survive
-            // whatever replaced or removed that photo. Compared against
-            // `initialValues.coverImagePath` (what this sheet actually
-            // opened with), not the trip's own live property, so re-saving
-            // with the SAME photo (every other field only) leaves an
-            // existing Pexels credit untouched.
-            if coverImagePath != initialValues.coverImagePath {
-                trip.coverCreditName = nil
-                trip.coverCreditUrl = nil
-            }
+            // P8c: a plain paired write, no conditional needed — a credit
+            // names one specific photo, and `coverCreditName`/
+            // `coverCreditUrl` are now real draft state kept in lockstep
+            // with `coverImagePath` at every write site (own-photo pick and
+            // Remove clear both; a `CoverSearchSheet` pick sets both), so
+            // whichever values are in the draft already correctly describe
+            // whichever photo is currently selected — including the "no
+            // change this session" case, where both drafts still equal
+            // whatever `initialValues` captured. (P8b's version of this
+            // guarded with `if coverImagePath != initialValues.coverImagePath
+            // { clear }`, back when the credit had no draft of its own to
+            // stay in sync — that guard would now wrongly null out a
+            // freshly-picked Pexels credit on the very save meant to
+            // persist it.)
+            trip.coverCreditName = coverCreditName
+            trip.coverCreditUrl = coverCreditUrl
             trip.updatedAt = .now
             trip.updatedBy = authManager.userId
             do {
