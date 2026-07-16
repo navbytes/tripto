@@ -71,7 +71,7 @@ enum ItineraryDayBucketing {
         calendar: Calendar = Calendar(identifier: .gregorian)
     ) -> [Section] {
         var utcCalendar = calendar
-        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        utcCalendar.timeZone = ItineraryTimeZone.utc
 
         var rowsByDay: [DayDate: [Row]] = [:]
 
@@ -129,7 +129,7 @@ enum ItineraryDayBucketing {
     /// whatever day happens to have the earliest item.
     static func dayNumber(for day: DayDate, tripStart: DayDate, calendar: Calendar) -> Int {
         var utcCalendar = calendar
-        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        utcCalendar.timeZone = ItineraryTimeZone.utc
         return dayCount(from: tripStart, to: day, calendar: utcCalendar) + 1
     }
 
@@ -137,7 +137,7 @@ enum ItineraryDayBucketing {
     /// subtraction — used both for "N nights" and for "Day N" numbering.
     static func dayCount(from: DayDate, to: DayDate, calendar: Calendar) -> Int {
         var utcCalendar = calendar
-        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        utcCalendar.timeZone = ItineraryTimeZone.utc
         return utcCalendar.dateComponents(
             [.day], from: from.asDate(calendar: utcCalendar), to: to.asDate(calendar: utcCalendar)
         ).day ?? 0

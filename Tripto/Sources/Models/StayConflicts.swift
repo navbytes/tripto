@@ -106,7 +106,9 @@ enum StayConflicts {
         let (bStart, bEnd) = nightRange(b)
         let sharedStart = max(aStart, bStart)
         let sharedEnd = min(aEnd, bEnd)
-        let sharedNights = max(1, ItineraryDayBucketing.dayCount(from: sharedStart, to: sharedEnd, calendar: utcCalendar))
+        let sharedNights = max(
+            1, ItineraryDayBucketing.dayCount(from: sharedStart, to: sharedEnd, calendar: ItineraryTimeZone.utcCalendar)
+        )
         let isFull = sharedStart == aStart && sharedEnd == aEnd && sharedStart == bStart && sharedEnd == bEnd
 
         return Conflict(
@@ -150,18 +152,13 @@ enum StayConflicts {
         return (startDay.asDate(calendar: calendar), endDay.asDate(calendar: calendar))
     }
 
-    private static var utcCalendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        return calendar
-    }
-
     /// Same "step a `DayDate` by one calendar day via a UTC calendar" recipe
     /// `ItineraryDayBucketing.sections` already uses for its own day-by-day
     /// walk — kept local here rather than added to `DayDate` itself, which
-    /// is outside this work package's file scope.
+    /// is outside this work package's file scope. The UTC calendar itself
+    /// is `ItineraryTimeZone.utcCalendar` (DRY L2), not rebuilt here.
     private static func addingOneDay(to day: DayDate) -> DayDate {
-        let calendar = utcCalendar
+        let calendar = ItineraryTimeZone.utcCalendar
         guard let next = calendar.date(byAdding: .day, value: 1, to: day.asDate(calendar: calendar)) else {
             return day
         }

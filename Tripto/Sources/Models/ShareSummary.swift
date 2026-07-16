@@ -50,12 +50,10 @@ enum ShareSummary {
     }
 
     /// "Wed May 14" in the item's own zone — a fixed POSIX-locale format so
-    /// the summary reads the same on every sender's device.
+    /// the summary reads the same on every sender's device. The recipe
+    /// itself is `ItineraryTimeZone.dayLabel` (DRY M3), shared with
+    /// `TimelineBuilder.dayTitleText`'s own day header.
     private static func formattedDay(_ date: Date, in tz: TimeZone) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE MMM d"
-        formatter.timeZone = tz
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: date)
+        ItineraryTimeZone.dayLabel(date, in: tz)
     }
 }
