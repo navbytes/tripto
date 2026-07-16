@@ -174,7 +174,7 @@ dedupe normalization.
 Verify wave: tester, reviewer, **security-auditor** (merge touches shared
 trip data + RLS assumptions), qa-verifier. Size: **L**.
 
-## Phase 7 — Award audit + fix cycle ✅ (fix PRs #41–#43, #45–#46; verdict: SHIP, 11/11 verified fixed, 0 regressions. Images program: P8-0 backend, P8a avatars #44; P8b/P8c queued)
+## Phase 7 — Award audit + fix cycle ✅ (fix PRs #41–#43, #45–#46; verdict: SHIP, 11/11 verified fixed, 0 regressions. Images program: P8-0 backend, P8a avatars #44, P8b photo covers #49, P8c Pexels search #50 — complete)
 
 1. Build the app in the simulator; capture the full screen set (light +
    dark, default + AX type sizes) to `.claude/company/ux-redesign/handoffs/`.
