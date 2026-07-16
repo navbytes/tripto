@@ -443,7 +443,7 @@ struct CoverSearchSheet: View {
             onPick(result.path, result.creditName, result.creditUrl)
             dismiss()
         } catch {
-            toast = "Couldn\u{2019}t use that photo. Try again."
+            toast = PhotoUploadFeedback.message(for: error)
         }
     }
 

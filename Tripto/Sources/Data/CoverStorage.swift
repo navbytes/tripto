@@ -41,7 +41,11 @@ enum CoverStorage {
     static func upload(
         _ jpegData: Data, for userId: UUID, via storage: AvatarBucketUploading = SupabaseCoverBucket()
     ) async throws -> String {
-        let path = "\(userId.uuidString)/\(UUID().uuidString).jpg"
+        // Owner-folder segment lowercased to match the RLS `auth.uid()::text`
+        // check — see `AvatarStorage.upload`'s comment for the full reason
+        // (Postgres `uuid::text` is lowercase, Foundation `uuidString` is
+        // uppercase; an uppercase folder fails every authenticated upload).
+        let path = "\(userId.uuidString.lowercased())/\(UUID().uuidString).jpg"
         try await storage.upload(path, data: jpegData, options: FileOptions(contentType: "image/jpeg"))
         return path
     }

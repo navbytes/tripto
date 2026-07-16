@@ -33,7 +33,9 @@ final class CoverStorageTests: XCTestCase {
         _ = try await CoverStorage.upload(jpeg, for: userId, via: stub)
 
         let path = try XCTUnwrap(stub.uploadedPath)
-        XCTAssertTrue(path.hasPrefix("\(userId.uuidString)/"))
+        // Lowercased owner folder — matches the storage RLS `auth.uid()::text`
+        // check (see `testUploadFolderSegmentIsLowercasedToMatchRLSAuthUidText`).
+        XCTAssertTrue(path.hasPrefix("\(userId.uuidString.lowercased())/"))
         XCTAssertTrue(path.hasSuffix(".jpg"))
         // Owner-folder segment, then a fresh UUID filename (plan D2) —
         // exactly two path components, never nested deeper.
@@ -48,6 +50,25 @@ final class CoverStorageTests: XCTestCase {
         let stub = StubCoverBucket()
         let path = try await CoverStorage.upload(Data([0x01]), for: UUID(), via: stub)
         XCTAssertEqual(path, stub.uploadedPath)
+    }
+
+    /// Regression (photo-upload RLS): identical to `AvatarStorageTests`'
+    /// same-named test — the owner-folder segment MUST be the lowercased uid
+    /// so it matches the write policy's `(storage.foldername(name))[1] =
+    /// auth.uid()::text` (backend migration 20260715164057; Postgres
+    /// `uuid::text` is lowercase, Foundation `UUID.uuidString` is UPPERCASE).
+    /// This is the `trip-covers` sibling of the same 100%-reproducible bug,
+    /// covering the own-photo (`TripFormView`) and Pexels (`CoverSearchSheet`)
+    /// covers that both route through `CoverStorage.upload`.
+    func testUploadFolderSegmentIsLowercasedToMatchRLSAuthUidText() async throws {
+        let stub = StubCoverBucket()
+        let userId = try XCTUnwrap(UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"))
+
+        _ = try await CoverStorage.upload(Data([0x01]), for: userId, via: stub)
+
+        let folder = String(try XCTUnwrap(try XCTUnwrap(stub.uploadedPath).split(separator: "/").first))
+        XCTAssertEqual(folder, userId.uuidString.lowercased())
+        XCTAssertNotEqual(folder, userId.uuidString, "an uppercase folder fails the RLS auth.uid()::text check")
     }
 
     /// Two uploads for the same user never collide on a filename — each

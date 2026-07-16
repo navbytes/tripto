@@ -34,7 +34,9 @@ final class AvatarStorageTests: XCTestCase {
         _ = try await AvatarStorage.upload(jpeg, for: userId, via: stub)
 
         let path = try XCTUnwrap(stub.uploadedPath)
-        XCTAssertTrue(path.hasPrefix("\(userId.uuidString)/"))
+        // Lowercased owner folder — matches the storage RLS `auth.uid()::text`
+        // check (see `testUploadFolderSegmentIsLowercasedToMatchRLSAuthUidText`).
+        XCTAssertTrue(path.hasPrefix("\(userId.uuidString.lowercased())/"))
         XCTAssertTrue(path.hasSuffix(".jpg"))
         // Owner-folder segment, then a fresh UUID filename (plan D2) —
         // exactly two path components, never nested deeper.
@@ -49,6 +51,27 @@ final class AvatarStorageTests: XCTestCase {
         let stub = StubAvatarBucket()
         let path = try await AvatarStorage.upload(Data([0x01]), for: UUID(), via: stub)
         XCTAssertEqual(path, stub.uploadedPath)
+    }
+
+    /// Regression (photo-upload RLS): the owner-folder segment MUST be the
+    /// lowercased uid. The storage write policy (backend migration
+    /// 20260715164057) gates every authenticated insert on
+    /// `(storage.foldername(name))[1] = auth.uid()::text`, and Postgres
+    /// renders `uuid::text` in lowercase. Foundation's `UUID.uuidString` is
+    /// UPPERCASE, so an unlowercased folder segment fails the policy's
+    /// `with check` on every real upload — the exact 100%-reproducible
+    /// client-reported "Couldn't use that photo" failure. The stubbed bucket
+    /// never hit real RLS, so only this string-shape assertion catches it.
+    /// Uses a uid with hex letters so upper- and lower-case forms differ.
+    func testUploadFolderSegmentIsLowercasedToMatchRLSAuthUidText() async throws {
+        let stub = StubAvatarBucket()
+        let userId = try XCTUnwrap(UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"))
+
+        _ = try await AvatarStorage.upload(Data([0x01]), for: userId, via: stub)
+
+        let folder = String(try XCTUnwrap(try XCTUnwrap(stub.uploadedPath).split(separator: "/").first))
+        XCTAssertEqual(folder, userId.uuidString.lowercased())
+        XCTAssertNotEqual(folder, userId.uuidString, "an uppercase folder fails the RLS auth.uid()::text check")
     }
 
     /// Two uploads for the same user never collide on a filename — each

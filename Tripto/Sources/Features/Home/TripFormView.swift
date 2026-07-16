@@ -773,7 +773,7 @@ struct TripFormView: View {
             coverCreditName = nil
             coverCreditUrl = nil
         } catch {
-            toast = "Couldn\u{2019}t upload that photo. Try again."
+            toast = PhotoUploadFeedback.message(for: error)
         }
     }
 
