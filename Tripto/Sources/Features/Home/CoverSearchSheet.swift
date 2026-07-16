@@ -66,7 +66,9 @@ struct CoverSearchSheet: View {
     /// accessibility sizes, rather than shrinking cells to fit a fixed count.
     @ScaledMetric(relativeTo: .body) private var gridCellMinWidth: CGFloat = 108
 
-    private enum SearchState: Equatable {
+    /// Not `private` (D2 fix round) \u{2014} `searchApplication(for:)` below
+    /// returns one of these, and needs to be directly testable.
+    enum SearchState: Equatable {
         case idle
         case loading
         case loaded
@@ -206,21 +208,20 @@ struct CoverSearchSheet: View {
         .scrollDismissesKeyboard(.interactively)
     }
 
-    /// Deliberately heavier scrim (up to 70% black) than the app's own
-    /// `CoverGradient.textScrim` (45% max): that gradient's exact stops were
-    /// measured against the app's 3 KNOWN curated gradients (`PaletteExtras
-    /// .swift`'s own doc comment) \u{2014} these are arbitrary third-party
-    /// search results, so there's no fixed backdrop to pre-compute a ratio
-    /// against. ponytail: can't prove AA for an unknown photographic
-    /// backdrop the way a fixed-palette gradient can; erring stronger here
-    /// is the honest substitute, not a computed guarantee.
-    private static let resultCaptionScrim = LinearGradient(
-        stops: [
-            .init(color: .clear, location: 0.45),
-            .init(color: .black.opacity(0.72), location: 1.0)
-        ],
-        startPoint: .top, endPoint: .bottom
-    )
+    /// Solid (not fading) chip backing, review D3 fix: the old top-to-bottom
+    /// gradient (clear until 45% down) couldn't cover a WRAPPED 2-line
+    /// caption's top line \u{2014} over a bright/white worst-case photo that
+    /// line composited to white-on-near-white, ~1.6:1 (reviewer estimate).
+    /// A solid chip sized to the text's own bounds (below) always covers
+    /// every line instead, at a computed, provable ratio: 0.72 black over a
+    /// worst-case pure-white photo (the least favorable backdrop possible)
+    /// composites to sRGB gray ~0.28 -> relative luminance ~0.064, giving
+    /// white text (~1.0) a WCAG ratio of ~9.2:1 \u{2014} clears the 4.5:1 AA
+    /// bar (this 11pt caption doesn't qualify as "large text", so 4.5:1 is
+    /// the real bar, not 3:1) with a wide margin, regardless of what's
+    /// underneath. Same opacity value the old gradient used at its darkest
+    /// stop, just applied as a uniform fill instead of a fade.
+    private static let resultCaptionBacking = Color.black.opacity(0.72)
 
     private func resultCell(_ photo: CoverSearchResponse.Photo) -> some View {
         Button {
@@ -241,12 +242,21 @@ struct CoverSearchSheet: View {
                         // through, same contract as `CoverImage`.
                     }
                 }
-                Self.resultCaptionScrim
-                Text("Photo by \(photo.photographerName)")
-                    .font(Typo.body(Typo.Size.helper, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .padding(Spacing.xs)
+                // Review D4: a blank photographer name would otherwise
+                // render "Photo by " with nothing after it — the header's
+                // "Photos provided by Pexels" link already satisfies the
+                // attribution requirement on its own, so this caption is
+                // just omitted rather than shown empty.
+                if photo.hasPhotographerCredit {
+                    Text("Photo by \(photo.photographerName)")
+                        .font(Typo.body(Typo.Size.helper, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .padding(.horizontal, Spacing.xs)
+                        .padding(.vertical, 2)
+                        .background(Self.resultCaptionBacking, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .padding(Spacing.xs)
+                }
                 if pickingPhotoId == photo.id {
                     Color.black.opacity(0.4)
                     ProgressView().tint(.white)
@@ -260,7 +270,11 @@ struct CoverSearchSheet: View {
         .disabled(pickingPhotoId != nil)
         // Results announce photographer (brief) \u{2014} one combined
         // VoiceOver stop rather than the caption/glyph reading separately.
-        .accessibilityLabel("\(photo.accessibleDescription), by \(photo.photographerName)")
+        // D4: omit the dangling "by" when there's no name to attach it to.
+        .accessibilityLabel(
+            photo.hasPhotographerCredit
+                ? "\(photo.accessibleDescription), by \(photo.photographerName)" : photo.accessibleDescription
+        )
         .accessibilityHint("Use this photo as your trip cover")
     }
 
@@ -301,8 +315,10 @@ struct CoverSearchSheet: View {
     /// Not the stdlib `Result` — its `Failure` generic requires `Error`
     /// conformance, and the friendly, already-mapped message here is a plain
     /// `String` (`Self.friendlyMessage(for:)` already did the one-time
-    /// error-to-copy conversion by the time this returns).
-    private enum PageOutcome {
+    /// error-to-copy conversion by the time this returns). Not `private`
+    /// (D2 fix round) — `searchApplication`/`loadMoreApplication` below take
+    /// one of these, and need to be directly testable.
+    enum PageOutcome {
         case success(CoverSearchResponse)
         case failure(String)
     }
@@ -315,33 +331,98 @@ struct CoverSearchSheet: View {
         }
     }
 
+    /// 4 named fields, not a tuple — SwiftLint's `large_tuple` caps tuples at
+    /// 3 members, and a struct reads just as well here.
+    struct SearchApplication: Equatable {
+        var photos: [CoverSearchResponse.Photo]
+        var currentPage: Int
+        var hasNextPage: Bool
+        var state: SearchState
+    }
+
+    /// A fresh query's result (mirrors `processAndUpload`'s "static, no
+    /// `@State`" shape — review D2's own suggested unblock) — always page 1,
+    /// win or lose, since a new query fully replaces whatever an earlier
+    /// query (at whatever page `loadMore` had advanced it to) left on
+    /// screen. `runSearch()` just applies this to its own `@State`.
+    static func searchApplication(for outcome: PageOutcome) -> SearchApplication {
+        switch outcome {
+        case .success(let response):
+            return SearchApplication(photos: response.photos, currentPage: 1, hasNextPage: response.nextPage, state: .loaded)
+        case .failure(let message):
+            return SearchApplication(photos: [], currentPage: 1, hasNextPage: false, state: .failed(message))
+        }
+    }
+
     private func runSearch() async {
         state = .loading
-        switch await requestPage(1) {
+        // D2: a fresh search always supersedes whatever `loadMore` was
+        // doing for the PREVIOUS query — reset its flags here rather than
+        // leaving them for a stale `loadMore()` call to clean up (it may
+        // never get the chance to, see `loadMoreApplication` below).
+        isLoadingMore = false
+        loadMoreError = nil
+        let outcome = await requestPage(1)
+        guard !Task.isCancelled else { return } // a newer query already superseded this one
+        let application = Self.searchApplication(for: outcome)
+        photos = application.photos
+        currentPage = application.currentPage
+        hasNextPage = application.hasNextPage
+        state = application.state
+    }
+
+    /// 4 named fields, not a tuple — same `large_tuple` reasoning as
+    /// `SearchApplication` above.
+    struct LoadMoreApplication: Equatable {
+        var photos: [CoverSearchResponse.Photo]
+        var currentPage: Int
+        var hasNextPage: Bool
+        var loadMoreError: String?
+    }
+
+    /// D2 (review — real race): "Show more" dispatches a page fetch for
+    /// whatever query is on screen at tap time, but nothing stopped the user
+    /// from retyping before it resolves — the old query's next page would
+    /// then append onto (and desync `currentPage` against) whatever the NEW
+    /// query's own search already put on screen. `nil` means the query
+    /// changed mid-flight: the caller must leave `photos`/`currentPage`/
+    /// `hasNextPage` completely untouched, not just skip the increment.
+    /// Mirrors `processAndUpload`'s "static, no `@State`" testable shape.
+    static func loadMoreApplication(
+        outcome: PageOutcome, issuedForQuery: String, liveQuery: String,
+        existingPhotos: [CoverSearchResponse.Photo], existingPage: Int
+    ) -> LoadMoreApplication? {
+        guard issuedForQuery == liveQuery else { return nil }
+        switch outcome {
         case .success(let response):
-            guard !Task.isCancelled else { return } // a newer query already superseded this one
-            currentPage = 1
-            photos = response.photos
-            hasNextPage = response.nextPage
-            state = .loaded
+            return LoadMoreApplication(
+                photos: existingPhotos + response.photos, currentPage: existingPage + 1,
+                hasNextPage: response.nextPage, loadMoreError: nil
+            )
         case .failure(let message):
-            guard !Task.isCancelled else { return }
-            state = .failed(message)
+            return LoadMoreApplication(photos: existingPhotos, currentPage: existingPage, hasNextPage: true, loadMoreError: message)
         }
     }
 
     private func loadMore() async {
         guard hasNextPage, !isLoadingMore else { return }
+        // Captured BEFORE the await — `trimmedQuery` at completion time
+        // reflects whatever the user has typed BY THEN, which is exactly
+        // what `loadMoreApplication` needs to compare against.
+        let issuedQuery = trimmedQuery
         isLoadingMore = true
         loadMoreError = nil
-        switch await requestPage(currentPage + 1) {
-        case .success(let response):
-            currentPage += 1
-            photos += response.photos
-            hasNextPage = response.nextPage
-        case .failure(let message):
-            loadMoreError = message
+        let outcome = await requestPage(currentPage + 1)
+        guard let application = Self.loadMoreApplication(
+            outcome: outcome, issuedForQuery: issuedQuery, liveQuery: trimmedQuery,
+            existingPhotos: photos, existingPage: currentPage
+        ) else {
+            return // stale — `runSearch()` for the new query already reset isLoadingMore/loadMoreError
         }
+        photos = application.photos
+        currentPage = application.currentPage
+        hasNextPage = application.hasNextPage
+        loadMoreError = application.loadMoreError
         isLoadingMore = false
     }
 
@@ -389,11 +470,20 @@ struct CoverSearchSheet: View {
     /// result \u{2014} on any step's failure, same "atomic: no result
     /// without a fully successful pipeline" contract `CoverStorage.upload`
     /// itself already documents.
+    ///
+    /// Trust-boundary fix (review D1): the response body names its own
+    /// image URLs \u{2014} without a host check this app would fetch
+    /// (and, worse, re-upload into our own bucket) whatever host a
+    /// compromised/malicious response pointed at. Pinned to the one CDN
+    /// host the real function ever returns.
     static func processAndUpload(
         _ photo: CoverSearchResponse.Photo, for userId: UUID,
         downloader: CoverPhotoDownloading, uploadVia storage: AvatarBucketUploading
     ) async throws -> (path: String, creditName: String, creditUrl: String) {
         guard let remoteURL = URL(string: photo.src.large2x) ?? URL(string: photo.src.large) else {
+            throw CoverSearchError.noUsableImageURL
+        }
+        guard remoteURL.scheme == "https", remoteURL.host == "images.pexels.com" else {
             throw CoverSearchError.noUsableImageURL
         }
         let rawData = try await downloader.data(from: remoteURL)
@@ -514,6 +604,15 @@ struct CoverSearchResponse: Decodable, Equatable {
         var accessibleDescription: String {
             let trimmed = alt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return trimmed.isEmpty ? "Photo" : trimmed
+        }
+
+        /// Review D4: blank in practice only for a defensively-decoded
+        /// incomplete record (the real function always returns a
+        /// photographer string) — gates the per-result caption/VoiceOver
+        /// credit so neither renders "Photo by " (or ", by ") with nothing
+        /// after it.
+        var hasPhotographerCredit: Bool {
+            !photographerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 

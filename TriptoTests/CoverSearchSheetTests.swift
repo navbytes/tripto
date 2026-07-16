@@ -461,6 +461,133 @@ final class CoverSearchSheetTests: XCTestCase {
         XCTAssertNil(bucket.uploadedData)
     }
 
+    // MARK: - D1 (fix round): trust boundary — only images.pexels.com, only https
+
+    func testProcessAndUploadThrowsWhenLarge2xHostIsNotImagesPexelsCom() async throws {
+        let downloader = StubDownloader(dataToReturn: makeTestImageData())
+        let bucket = StubUploadBucket()
+        // Syntactically valid (so the pre-D1 fallback would have "won" on
+        // this candidate alone) but an untrusted host — must still throw
+        // rather than fetch/upload it, even though `large` below is fine.
+        let photo = makePhoto(large2x: "https://evil.example.com/1.jpg", large: "https://images.pexels.com/1/large.jpg")
+
+        do {
+            _ = try await CoverSearchSheet.processAndUpload(photo, for: UUID(), downloader: downloader, uploadVia: bucket)
+            XCTFail("expected processAndUpload to throw for an untrusted host")
+        } catch let error as CoverSearchError {
+            XCTAssertEqual(error, .noUsableImageURL)
+        }
+        XCTAssertNil(bucket.uploadedPath, "must never download/upload from an untrusted host")
+    }
+
+    func testProcessAndUploadThrowsWhenSchemeIsNotHttps() async throws {
+        let downloader = StubDownloader(dataToReturn: makeTestImageData())
+        let bucket = StubUploadBucket()
+        let photo = makePhoto(large2x: "http://images.pexels.com/1/large2x.jpg", large: "")
+
+        do {
+            _ = try await CoverSearchSheet.processAndUpload(photo, for: UUID(), downloader: downloader, uploadVia: bucket)
+            XCTFail("expected processAndUpload to throw for a non-https scheme")
+        } catch let error as CoverSearchError {
+            XCTAssertEqual(error, .noUsableImageURL)
+        }
+        XCTAssertNil(bucket.uploadedPath)
+    }
+
+    // MARK: - D2 (fix round): searchApplication / loadMoreApplication — the
+    // race where "Show more" for query A resolves after the user has
+    // already retyped to query B.
+
+    func testSearchApplicationAlwaysResetsToPageOneOnSuccess() {
+        let photo = makePhoto(id: 9)
+        let response = CoverSearchResponse(photos: [photo], page: 1, totalResults: 1, nextPage: true)
+
+        let application = CoverSearchSheet.searchApplication(for: .success(response))
+
+        XCTAssertEqual(application.currentPage, 1, "a fresh search's result is always page 1, even after loadMore advanced it")
+        XCTAssertEqual(application.photos, [photo])
+        XCTAssertTrue(application.hasNextPage)
+        XCTAssertEqual(application.state, .loaded)
+    }
+
+    func testSearchApplicationResetsToPageOneAndClearsPhotosOnFailureToo() {
+        let application = CoverSearchSheet.searchApplication(for: .failure("offline"))
+
+        XCTAssertEqual(application.currentPage, 1)
+        XCTAssertTrue(application.photos.isEmpty)
+        XCTAssertFalse(application.hasNextPage)
+        XCTAssertEqual(application.state, .failed("offline"))
+    }
+
+    func testLoadMoreApplicationAppendsAndAdvancesPageWhenQueryUnchanged() throws {
+        let existing = [makePhoto(id: 1)]
+        let newPhoto = makePhoto(id: 2)
+        let response = CoverSearchResponse(photos: [newPhoto], page: 2, totalResults: 2, nextPage: false)
+
+        let application = try XCTUnwrap(CoverSearchSheet.loadMoreApplication(
+            outcome: .success(response), issuedForQuery: "beach", liveQuery: "beach",
+            existingPhotos: existing, existingPage: 1
+        ))
+
+        XCTAssertEqual(application.photos, existing + [newPhoto])
+        XCTAssertEqual(application.currentPage, 2)
+        XCTAssertFalse(application.hasNextPage)
+        XCTAssertNil(application.loadMoreError)
+    }
+
+    /// The core D2 invariant: a page fetch issued for one query, resolving
+    /// after the live query has changed, must produce `nil` — the caller
+    /// then leaves `photos`/`currentPage` completely untouched, so the old
+    /// query's page can never append onto the new query's results.
+    func testLoadMoreApplicationIsNilWhenQueryChangedMidFlightSoTheOldPageNeverAppends() {
+        let existing = [makePhoto(id: 1)]
+        let staleResponse = CoverSearchResponse(photos: [makePhoto(id: 999)], page: 2, totalResults: 2, nextPage: false)
+
+        let application = CoverSearchSheet.loadMoreApplication(
+            outcome: .success(staleResponse), issuedForQuery: "beach", liveQuery: "mountain",
+            existingPhotos: existing, existingPage: 1
+        )
+
+        XCTAssertNil(application, "a page resolved for a superseded query must never be applied")
+    }
+
+    /// Same bail, on the failure branch — a stale error must not clobber
+    /// whatever the new query's own search already put on screen either.
+    func testLoadMoreApplicationIsNilWhenQueryChangedMidFlightEvenOnFailure() {
+        let application = CoverSearchSheet.loadMoreApplication(
+            outcome: .failure("stale error"), issuedForQuery: "beach", liveQuery: "mountain",
+            existingPhotos: [makePhoto(id: 1)], existingPage: 1
+        )
+        XCTAssertNil(application)
+    }
+
+    func testLoadMoreApplicationSurfacesTheErrorAndKeepsHasNextPageWhenQueryUnchanged() throws {
+        let existing = [makePhoto(id: 1)]
+        let application = try XCTUnwrap(CoverSearchSheet.loadMoreApplication(
+            outcome: .failure("Couldn\u{2019}t reach Pexels right now. Try again."), issuedForQuery: "beach", liveQuery: "beach",
+            existingPhotos: existing, existingPage: 1
+        ))
+
+        XCTAssertEqual(application.photos, existing, "a failed page fetch must not lose the results already on screen")
+        XCTAssertEqual(application.currentPage, 1, "an unadvanced page number — nothing new actually loaded")
+        XCTAssertTrue(application.hasNextPage, "still offer retry — the failure doesn't mean there's no next page")
+        XCTAssertEqual(application.loadMoreError, "Couldn\u{2019}t reach Pexels right now. Try again.")
+    }
+
+    // MARK: - D4 (fix round): blank photographerName omits the caption line
+
+    func testHasPhotographerCreditFalseWhenNameIsBlank() {
+        XCTAssertFalse(makePhoto(photographerName: "").hasPhotographerCredit)
+    }
+
+    func testHasPhotographerCreditFalseWhenNameIsWhitespaceOnly() {
+        XCTAssertFalse(makePhoto(photographerName: "   ").hasPhotographerCredit)
+    }
+
+    func testHasPhotographerCreditTrueWhenNamePresent() {
+        XCTAssertTrue(makePhoto(photographerName: "Priya Rao").hasPhotographerCredit)
+    }
+
     // MARK: - Fixtures
 
     private func makePhoto(
