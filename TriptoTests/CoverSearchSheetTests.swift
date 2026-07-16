@@ -381,7 +381,7 @@ final class CoverSearchSheetTests: XCTestCase {
         XCTAssertEqual(result.creditUrl, "https://pexels.com/photo/55")
         let uploadedPath = try XCTUnwrap(bucket.uploadedPath)
         XCTAssertEqual(result.path, uploadedPath)
-        XCTAssertTrue(uploadedPath.hasPrefix("\(userId.uuidString)/"), "must upload into the acting user's own folder")
+        XCTAssertTrue(uploadedPath.hasPrefix("\(userId.uuidString.lowercased())/"), "must upload into the acting user's own folder (lowercased for RLS)")
         // Sanity: the uploaded bytes actually re-encoded to JPEG, confirming
         // the real `ImageProcessing.downsampledJPEG` ran, not a passthrough.
         let uploadedData = try XCTUnwrap(bucket.uploadedData)

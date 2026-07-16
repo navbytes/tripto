@@ -47,7 +47,15 @@ enum AvatarStorage {
     static func upload(
         _ jpegData: Data, for userId: UUID, via storage: AvatarBucketUploading = SupabaseAvatarBucket()
     ) async throws -> String {
-        let path = "\(userId.uuidString)/\(UUID().uuidString).jpg"
+        // The uid FOLDER segment is lowercased so it matches the storage
+        // write RLS `(storage.foldername(name))[1] = auth.uid()::text`
+        // (backend migration 20260715164057): Postgres renders `uuid::text`
+        // lowercase, but Foundation's `UUID.uuidString` is UPPERCASE — an
+        // unlowercased folder fails the policy's `with check` on every
+        // authenticated upload (the client-reported "couldn't use that photo"
+        // failure). Only segment [1] is checked, so the filename's case is
+        // irrelevant; lowercasing the uid alone is the whole fix.
+        let path = "\(userId.uuidString.lowercased())/\(UUID().uuidString).jpg"
         try await storage.upload(path, data: jpegData, options: FileOptions(contentType: "image/jpeg"))
         return path
     }

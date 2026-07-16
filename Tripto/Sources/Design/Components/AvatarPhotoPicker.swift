@@ -145,7 +145,7 @@ struct AvatarPhotoPicker: View {
             let path = try await AvatarStorage.upload(jpeg, for: uploaderUserId)
             avatarPath = path
         } catch {
-            toast = "Couldn\u{2019}t upload that photo. Try again."
+            toast = PhotoUploadFeedback.message(for: error)
         }
     }
 }
