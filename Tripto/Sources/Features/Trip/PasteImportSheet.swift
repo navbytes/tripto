@@ -733,7 +733,10 @@ struct PasteImportSheet: View {
 
     /// Maps `ingest-text`'s documented error responses (this milestone's
     /// brief) to one clear, friendly message each — never surfaces a raw
-    /// status code or the server's internal error slug to the user.
+    /// status code or the server's internal error slug to the user. The
+    /// shared generic-fallback skeleton lives in `FriendlyFunctionsMessage`
+    /// (DRY finding L5); only these per-code strings are genuinely this
+    /// endpoint's own.
     ///
     /// Testability gap: `static` (touches no `self` state) so
     /// `TriptoTests/PasteImportSheetFriendlyMessageTests.swift` can call it
@@ -742,28 +745,13 @@ struct PasteImportSheet: View {
     /// `private` instance method is file-scoped and un-callable even via
     /// `@testable import Tripto`.
     static func friendlyMessage(for error: Error) -> String {
-        guard let functionsError = error as? FunctionsError else {
-            return "Something went wrong. Check your connection and try again."
-        }
-        switch functionsError {
-        case .relayError:
-            return "Something went wrong. Check your connection and try again."
-        case .httpError(let code, _):
-            switch code {
-            case 400:
-                return "That didn\u{2019}t look like valid text. Try pasting it again."
-            case 401:
-                return "You\u{2019}re signed out, so this can\u{2019}t be imported right now. Sign back in and try again."
-            case 404:
-                return "Couldn\u{2019}t access that trip."
-            case 429:
-                return "You\u{2019}ve imported a lot recently \u{2014} try again in an hour."
-            case 502:
-                return "Couldn\u{2019}t process that text. Try again."
-            default:
-                return "Something went wrong. Try again."
-            }
-        }
+        FriendlyFunctionsMessage.map(error, perCode: [
+            400: "That didn\u{2019}t look like valid text. Try pasting it again.",
+            401: "You\u{2019}re signed out, so this can\u{2019}t be imported right now. Sign back in and try again.",
+            404: "Couldn\u{2019}t access that trip.",
+            429: "You\u{2019}ve imported a lot recently \u{2014} try again in an hour.",
+            502: "Couldn\u{2019}t process that text. Try again."
+        ])
     }
 }
 

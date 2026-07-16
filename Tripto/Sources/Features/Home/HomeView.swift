@@ -1545,18 +1545,10 @@ struct HomeView: View {
             return false
         }
 
-        let movedItems = moved.items
-        let movedPacking = moved.packing
-        let movedProfiles = moved.profiles
+        let ops = MergeOutbox.performMergeOps(moved, shellId: shellId, survivorId: survivorId)
         Task {
-            for item in movedItems {
-                await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: survivorId, payload: item.toDTO())
-            }
-            for packingItem in movedPacking {
-                await syncEngine?.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: survivorId, payload: packingItem.toDTO())
-            }
-            for profile in movedProfiles {
-                await syncEngine?.enqueueUpsert(table: .tripProfiles, rowId: profile.id, tripId: survivorId, payload: profile.toDTO())
+            for op in ops {
+                await enqueueMergedRowUpsert(op)
             }
         }
 
@@ -1572,6 +1564,36 @@ struct HomeView: View {
             delete(shellTrip)
         }
         return true
+    }
+
+    /// D5 (reviewer, MED): op shape/order now comes from `MergeOutbox
+    /// .performMergeOps` (`Models/MergeOutbox.swift`, mirrors this exact
+    /// loop and is asserted byte-for-byte in `OutboxCoalescingTests`), not a
+    /// hand-rolled loop re-typed here — this just decodes each op's payload
+    /// back into its table's DTO and replays the same `syncEngine?
+    /// .enqueueUpsert` call the old inline loop made directly. Only
+    /// `.upsert` ops are replayed: the shell's own trailing `.trips` delete
+    /// is, per that function's own doc comment, `performMerge`'s existing
+    /// call into `delete(_:)` above, not a second enqueue to make here.
+    private func enqueueMergedRowUpsert(_ op: MergeOutboxOp) async {
+        guard op.op == .upsert else { return }
+        let data = Data(op.payloadJSON.utf8)
+        switch op.table {
+        case .itineraryItems:
+            if let dto = try? JSONCoding.decoder.decode(ItineraryItemDTO.self, from: data) {
+                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
+            }
+        case .packingItems:
+            if let dto = try? JSONCoding.decoder.decode(PackingItemDTO.self, from: data) {
+                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
+            }
+        case .tripProfiles:
+            if let dto = try? JSONCoding.decoder.decode(TripProfileDTO.self, from: data) {
+                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
+            }
+        default:
+            break
+        }
     }
 
     /// The countdown's own UI — same visual language as `ToastOverlay`'s

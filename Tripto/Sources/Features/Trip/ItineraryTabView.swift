@@ -81,23 +81,13 @@ struct ItineraryTabView: View {
     /// app offering a manual refresh). `nil` only in previews/tests.
     var onRefresh: (() async -> Void)?
 
-    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address
-    /// (`get_or_create_trip_import_address`), fetched once per trip visit
-    /// and cached here rather than re-requested on every render — see
-    /// `fetchImportAddressIfNeeded()`. Reviewer should-fix: a durable RPC
-    /// failure used to leave `.loading`'s spinner up forever (never surfaced
-    /// as `.failed`) — `importTeaser` now renders a tap-to-retry row instead,
-    /// wired to `retryImportAddressFetch()`.
-    ///
-    /// A5 (`docs/BACKLOG.md`): starts `.needsConsent` instead of `.loading`
-    /// when email-import consent (`EmailImportConsent`, `TripImportAddress
-    /// .swift`) isn't on record yet — resolved synchronously here (a plain
-    /// `UserDefaults` read) so a not-yet-consented user never sees a
-    /// "Loading…" flash before the pre-consent card. `fetchImportAddressIfNeeded()`
-    /// never overrides this back to `.loading` on its own; only granting
-    /// consent (`grantEmailImportConsentAndFetch()`) does.
-    @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
-    @State private var hasFetchedImportAddress = false
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address —
+    /// load-once, consent-gated, tap-to-retry state machine shared with
+    /// `AddItemSheet`/`ShareTripView` (SOC finding F4: previously re-hosted
+    /// verbatim in all three) — see `ImportAddressLoader`. `canEdit`/
+    /// `trip.id` are threaded through per call below since they're this
+    /// view's own permission gate and trip id, not the loader's.
+    @State private var importLoader = ImportAddressLoader()
     /// Finding F1: feeds the full `DynamicTypeSize` into the row views below
     /// as `typeSize`, both so `TimelineLayout.gutterWidth` can step the
     /// gutter width with it and so their `.equatable()` short-circuit can't
@@ -328,62 +318,12 @@ struct ItineraryTabView: View {
         // EI-2: fetched once per trip visit regardless of which branch
         // above is showing — `importTeaser` only renders in the settled
         // -empty branch, but caching ahead of that means it's not waiting on
-        // an RPC round trip the moment someone reaches it.
-        .task { await fetchImportAddressIfNeeded() }
-    }
-
-    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): `get_or_create_trip_import_address`
-    /// — any trip member may call it, but this is only ever invoked for
-    /// editors (`canEdit`), since `importTeaser` (its only reader) is itself
-    /// `canEdit`-gated at the call site in `emptyState`. `canEdit` arrives as
-    /// a plain `let` (synchronously known at init, unlike `ShareTripView`'s
-    /// `@Query`-derived `myRole` — see that view's matching doc comment), so
-    /// the one-shot `.task` this backs doesn't need to re-run on a later gate
-    /// flip the way `ShareTripView`'s does.
-    /// A5 (`docs/BACKLOG.md`): the new second guard clause is the actual
-    /// fetch gate — not-yet-consented leaves `importLoadState` exactly as
-    /// its `.needsConsent` initial value already is (see that property's
-    /// doc comment) and, critically, does NOT set `hasFetchedImportAddress`,
-    /// so a later `grantEmailImportConsentAndFetch()` call still gets its
-    /// one real fetch attempt.
-    private func fetchImportAddressIfNeeded() async {
-        guard canEdit, !hasFetchedImportAddress else { return }
-        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
-        hasFetchedImportAddress = true
-        await fetchImportAddress()
-    }
-
-    /// The actual RPC call, split out from the one-shot guard above so
-    /// `retryImportAddressFetch()` can re-run it without re-triggering
-    /// `hasFetchedImportAddress`'s guard.
-    private func fetchImportAddress() async {
-        do {
-            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: trip.id))
-        } catch {
-            importLoadState = .failed
-        }
-    }
-
-    /// Reviewer should-fix: `importTeaser`'s tap-to-retry action on a
-    /// `.failed` state.
-    private func retryImportAddressFetch() {
-        importLoadState = .loading
-        Task { await fetchImportAddress() }
-    }
-
-    /// A5 (`docs/BACKLOG.md`): `importTeaser`'s `.needsConsent` card ->
-    /// `onConsentGranted` — the consent dialog's "Continue" button. Records
-    /// consent, then reuses `retryImportAddressFetch()`'s exact `.loading` +
-    /// fetch shape (this IS a first fetch attempt, not a retry after
-    /// failure, but the mechanics are identical). `hasFetchedImportAddress`
-    /// is set directly here rather than through `fetchImportAddressIfNeeded()`
-    /// — that guard already ran once (and bailed on consent) for this view's
-    /// one-shot `.task`; this is the deferred completion of that same single
-    /// attempt, not a second one.
-    private func grantEmailImportConsentAndFetch() {
-        EmailImportConsent.grant()
-        hasFetchedImportAddress = true
-        retryImportAddressFetch()
+        // an RPC round trip the moment someone reaches it. Plain `.task`
+        // (not `.task(id:)`): `canEdit` arrives as a plain `let`
+        // (synchronously known at init, unlike `ShareTripView`'s
+        // `@Query`-derived `myRole`), so this one-shot fetch doesn't need to
+        // re-run on a later gate flip the way that view's does.
+        .task { await importLoader.fetchIfNeeded(tripId: trip.id, canFetch: canEdit) }
     }
 
     @ViewBuilder
@@ -1019,15 +959,15 @@ struct ItineraryTabView: View {
     /// / `SuggestedItemsSheet`) once EI-1's `ingest-email` function ships. No
     /// more fake "coming soon"/waitlist-counter copy; this either shows the
     /// real address or a loading state while it's fetched
-    /// (`fetchImportAddressIfNeeded`).
+    /// (`importLoader.fetchIfNeeded`).
     private var importTeaser: some View {
         VStack(alignment: .center, spacing: Spacing.sm) {
-            ImportAddressCard(state: importLoadState) { address in
+            ImportAddressCard(state: importLoader.state) { address in
                 toast = ClipboardFeedback.copy(address, label: "Import address")
             } onRetry: {
-                retryImportAddressFetch()
+                importLoader.retry(tripId: trip.id)
             } onConsentGranted: {
-                grantEmailImportConsentAndFetch()
+                importLoader.grantConsentAndFetch(tripId: trip.id)
             }
         }
         .padding(.horizontal, Spacing.xl)

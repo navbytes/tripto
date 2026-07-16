@@ -65,13 +65,11 @@ struct ShareTripView: View {
     /// before (and as `AddItemSheet`'s own copy) — no second copy of the
     /// disclosure.
     @State private var isPresentingImportAddress = false
-    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address,
-    /// fetched once per screen visit and cached here — mirrors
-    /// `AddItemSheet`/`ItineraryTabView`'s own identically-shaped pair.
-    /// A5 (`docs/BACKLOG.md`): starts `.needsConsent` (not `.loading`) when
-    /// consent isn't on record yet, same reasoning as those two.
-    @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
-    @State private var hasFetchedImportAddress = false
+    /// EI-2 (`docs/EMAIL_IMPORT_PLAN.md`): this trip's real import address —
+    /// load-once, consent-gated, tap-to-retry state machine shared with
+    /// `AddItemSheet`/`ItineraryTabView` (SOC finding F4: previously
+    /// re-hosted verbatim in all three) — see `ImportAddressLoader`.
+    @State private var importLoader = ImportAddressLoader()
     /// P6.3 (docs/UX_REDESIGN_ROADMAP.md): the traveller-dedupe banner's
     /// "Review" destination.
     @State private var isPresentingDedupeReview = false
@@ -128,12 +126,12 @@ struct ShareTripView: View {
                 VStack(spacing: 0) {
                     SheetHeader(title: "Forward booking emails", onCancel: { isPresentingImportAddress = false })
                     ScrollView {
-                        ImportAddressCard(state: importLoadState) { address in
+                        ImportAddressCard(state: importLoader.state) { address in
                             toast = ClipboardFeedback.copy(address, label: "Import address")
                         } onRetry: {
-                            retryImportAddressFetch()
+                            importLoader.retry(tripId: tripId)
                         } onConsentGranted: {
-                            grantEmailImportConsentAndFetch()
+                            importLoader.grantConsentAndFetch(tripId: tripId)
                         }
                         .padding(Spacing.xl)
                     }
@@ -256,8 +254,8 @@ struct ShareTripView: View {
         // before member sync completes) — re-running on every `myRole`
         // change (rather than a plain one-shot `.task`) is what lets a
         // later sync-in retry the one real fetch attempt
-        // `fetchImportAddressIfNeeded()`'s own guard only allows once.
-        .task(id: myRole) { await fetchImportAddressIfNeeded() }
+        // `ImportAddressLoader.fetchIfNeeded`'s own guard only allows once.
+        .task(id: myRole) { await importLoader.fetchIfNeeded(tripId: tripId, canFetch: ItemPermissions.canAdd(role: myRole)) }
     }
 
     // MARK: - Derived
@@ -551,38 +549,6 @@ struct ShareTripView: View {
             .buttonStyle(.plain)
             .accessibilityHint("Opens your trip's email-import address")
         }
-    }
-
-    /// Same one-shot-per-visit shape as `AddItemSheet.fetchImportAddressIfNeeded()`
-    /// (identical reasoning — `myRole` resolves asynchronously via `@Query`,
-    /// so `.task(id: myRole)` above re-invokes this on every change rather
-    /// than firing once).
-    private func fetchImportAddressIfNeeded() async {
-        guard ItemPermissions.canAdd(role: myRole), !hasFetchedImportAddress else { return }
-        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
-        hasFetchedImportAddress = true
-        await fetchImportAddress()
-    }
-
-    /// The actual RPC call, split out so `retryImportAddressFetch()` can
-    /// re-run it without re-triggering `hasFetchedImportAddress`'s guard.
-    private func fetchImportAddress() async {
-        do {
-            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: tripId))
-        } catch {
-            importLoadState = .failed
-        }
-    }
-
-    private func retryImportAddressFetch() {
-        importLoadState = .loading
-        Task { await fetchImportAddress() }
-    }
-
-    private func grantEmailImportConsentAndFetch() {
-        EmailImportConsent.grant()
-        hasFetchedImportAddress = true
-        retryImportAddressFetch()
     }
 
     // MARK: - Invite section
@@ -1094,75 +1060,18 @@ struct ShareTripView: View {
     // with no server-generated value, so that still goes through the
     // normal outbox.)
 
-    private struct CreateShareLinkPayload: Encodable {
-        let id: UUID
-        let tripId: UUID
-        let scope: String
-        let revoked: Bool
-    }
-
-    private struct CreateInvitePayload: Encodable {
-        let id: UUID
-        let tripId: UUID
-        let role: String
-        let createdBy: UUID
-        let revoked: Bool
-    }
-
-    /// Inserting with the representation requested back (`.select()`
-    /// chained onto `.insert()`) makes PostgREST evaluate the table's
-    /// SELECT policy against the RETURNING clause *as part of the same
-    /// INSERT statement* — confirmed live (curl, bypassing this app
-    /// entirely): the identical insert 42501s with `Prefer:
-    /// return=representation` and succeeds (201) with `return=minimal`.
-    /// `share_links_all`/`invites_all` are single `FOR ALL` policies whose
-    /// one `trip_role(trip_id) = 'organizer'` expression backs both the
-    /// INSERT's WITH CHECK and (for RETURNING) the SELECT side, and
-    /// evaluating both within one statement is the trap — exactly the
-    /// class of bug `SyncEngine+Push.swift`'s `pushUpsert` doc comment
-    /// already documents for `trips`/`trips_select`, just not previously
-    /// hit here because nothing on this screen used `.select()` after an
-    /// insert until now. Fix: insert with a minimal return, then read the
-    /// row back with a *separate* plain SELECT — its own request, evaluated
-    /// once the INSERT (and the trigger-created membership every
-    /// `share_links`/`invites` write depends on) has already committed.
-    private func insertAndReadBack<Payload: Encodable, Row: Decodable>(
-        table: SyncTable,
-        id: UUID,
-        payload: Payload,
-        as _: Row.Type
-    ) async throws -> Row {
-        try await Supa.client.from(table.rawValue).insert(payload, returning: .minimal).execute()
-        return try await Supa.client.from(table.rawValue).select().eq("id", value: id).single().execute().value
-    }
-
-    /// A brand-new trip's own `trips` row (and the `trip_members` row a
-    /// server trigger creates from it) may not have finished the normal
-    /// debounced-outbox round trip yet, so a share link/invite created
-    /// moments after the trip itself can transiently 42501 regardless of
-    /// the fix above. Retried a few times with a short backoff; a
-    /// *persistent* 42501 still surfaces as a failure once exhausted.
-    private func withOrganizerRaceRetry<T>(_ attempt: () async throws -> T) async throws -> T {
-        var lastError: Error = CancellationError()
-        for attemptIndex in 0..<5 {
-            do {
-                return try await attempt()
-            } catch let error as PostgrestError where error.code == "42501" {
-                lastError = error
-                try? await Task.sleep(nanoseconds: 500_000_000 * UInt64(attemptIndex + 1))
-            }
-        }
-        throw lastError
-    }
-
+    /// D-structure F1: request-shaping + retry now live on `SyncEngine`
+    /// (`SyncEngine+ShareLinks.swift`'s `createShareLink`/`createInvite` +
+    /// `withOrganizerRaceRetry`, reusing `SyncBackoff.delay`) — this view
+    /// keeps only the local insert + toast, same as every other mutation.
     @discardableResult
     private func createShareLink() async -> TripShareLink? {
-        let id = UUID()
-        let payload = CreateShareLinkPayload(id: id, tripId: tripId, scope: ShareScope.view.rawValue, revoked: false)
+        guard let syncEngine else {
+            toast = "Couldn\u{2019}t create a share link \u{2014} check your connection."
+            return nil
+        }
         do {
-            let dto: ShareLinkDTO = try await withOrganizerRaceRetry {
-                try await insertAndReadBack(table: .shareLinks, id: id, payload: payload, as: ShareLinkDTO.self)
-            }
+            let dto = try await syncEngine.createShareLink(tripId: tripId)
             let link = TripShareLink(dto: dto)
             modelContext.insert(link)
             try? modelContext.save()
@@ -1210,12 +1119,12 @@ struct ShareTripView: View {
     @discardableResult
     private func createInvite(role: TripRole, presentShareSheet: Bool = true) async -> Invite? {
         guard let userId = authManager.userId else { return nil }
-        let id = UUID()
-        let payload = CreateInvitePayload(id: id, tripId: tripId, role: role.rawValue, createdBy: userId, revoked: false)
+        guard let syncEngine else {
+            toast = "Couldn\u{2019}t create an invite link \u{2014} check your connection."
+            return nil
+        }
         do {
-            let dto: InviteDTO = try await withOrganizerRaceRetry {
-                try await insertAndReadBack(table: .invites, id: id, payload: payload, as: InviteDTO.self)
-            }
+            let dto = try await syncEngine.createInvite(role: role, tripId: tripId, createdBy: userId)
             let invite = Invite(dto: dto)
             modelContext.insert(invite)
             try? modelContext.save()
@@ -1327,20 +1236,43 @@ struct ShareTripView: View {
             return
         }
 
-        for itemId in result.itemIdsToUnassignFromDuplicate {
-            await syncEngine?.enqueueDeleteItemAssignee(itemId: itemId, profileId: duplicateId, tripId: tripId)
+        let ops = MergeOutbox.mergeDuplicateProfilesOps(result, survivorId: survivorId, duplicateId: duplicateId, tripId: tripId)
+        for op in ops {
+            await enqueueMergedProfileOp(op)
         }
-        for itemId in result.itemIdsToAssignToSurvivor {
-            await syncEngine?.enqueueUpsert(
-                table: .itemAssignees, rowId: ItemAssignee.compositeId(itemId: itemId, profileId: survivorId),
-                tripId: tripId, payload: ItemAssigneeDTO(itemId: itemId, profileId: survivorId)
-            )
-        }
-        for packingItem in result.repointedPackingItems {
-            await syncEngine?.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: tripId, payload: packingItem.toDTO())
-        }
-        await syncEngine?.enqueueDelete(table: .tripProfiles, rowId: duplicateId, tripId: tripId)
         toast = "Merged into \(survivor.displayName)"
+    }
+
+    /// D5 (reviewer, MED): op shape/order now comes from `MergeOutbox
+    /// .mergeDuplicateProfilesOps` (`Models/MergeOutbox.swift`, mirrors this
+    /// exact loop and is asserted byte-for-byte in `OutboxCoalescingTests`),
+    /// not a hand-rolled loop re-typed here — decodes each op's payload back
+    /// into its table's DTO and replays the same enqueue call the old
+    /// inline loop made directly. `.itemAssignees` deletes route through
+    /// `enqueueDeleteItemAssignee` (not the generic `enqueueDelete`)
+    /// because the push path needs the real itemId/profileId pair, not
+    /// just the composite `rowId` — same reason the original loop called
+    /// that method instead.
+    private func enqueueMergedProfileOp(_ op: MergeOutboxOp) async {
+        let data = Data(op.payloadJSON.utf8)
+        switch (op.table, op.op) {
+        case (.itemAssignees, .delete):
+            if let dto = try? JSONCoding.decoder.decode(ItemAssigneeDTO.self, from: data) {
+                await syncEngine?.enqueueDeleteItemAssignee(itemId: dto.itemId, profileId: dto.profileId, tripId: op.tripId)
+            }
+        case (.itemAssignees, .upsert):
+            if let dto = try? JSONCoding.decoder.decode(ItemAssigneeDTO.self, from: data) {
+                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
+            }
+        case (.packingItems, .upsert):
+            if let dto = try? JSONCoding.decoder.decode(PackingItemDTO.self, from: data) {
+                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
+            }
+        case (.tripProfiles, .delete):
+            await syncEngine?.enqueueDelete(table: op.table, rowId: op.rowId, tripId: op.tripId)
+        default:
+            break
+        }
     }
 
     // MARK: - DEBUG verify-drill autopilot

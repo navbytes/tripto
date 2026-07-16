@@ -391,17 +391,6 @@ struct TripView: View {
     private func applyUITestAutopilotIfNeeded() async {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        // EI-2: seeds one `status: .suggested` item on this trip so the
-        // review banner/inbox/confirm/dismiss flow is reachable without a
-        // live `ingest-email` pipeline (`docs/EMAIL_IMPORT_PLAN.md` EI-1,
-        // not shipped yet) — see `DemoSeeder.seedSuggestedItem`'s doc
-        // comment.
-        if arguments.contains("-uitestSeedSuggestedItem") {
-            let id = tripId
-            await DemoSeeder.seedSuggestedItem(
-                tripId: id, modelContext: modelContext, syncEngine: syncEngine, authManager: authManager
-            )
-        }
         if arguments.contains("-uitestOpenBookings") {
             selectedTab = .bookings
         }
