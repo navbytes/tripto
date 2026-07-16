@@ -22,9 +22,9 @@ struct SupabaseCoverBucket: AvatarBucketUploading {
 /// `AvatarStorage`'s doc comments are avatar/profile-specific throughout
 /// (its `Profile`/`TripProfile` uploader-folder reasoning), so generalizing
 /// it would mean rewriting those to stay accurate for a bucket they were
-/// never about. The actual duplicated surface is small and stable (one
-/// upload path-builder, one URL-builder, ~15 lines) — cheaper to keep in
-/// sync by hand than to abstract.
+/// never about. The path/URL scheme itself (the part with no per-bucket
+/// logic) lives once in `StorageBucketPaths`; only the bucket-specific doc
+/// comments and any future per-bucket fields stay separate.
 enum CoverStorage {
     static let bucket = "trip-covers"
 
@@ -42,17 +42,18 @@ enum CoverStorage {
         _ jpegData: Data, for userId: UUID, via storage: AvatarBucketUploading = SupabaseCoverBucket()
     ) async throws -> String {
         // Owner-folder segment lowercased to match the RLS `auth.uid()::text`
-        // check — see `AvatarStorage.upload`'s comment for the full reason
-        // (Postgres `uuid::text` is lowercase, Foundation `uuidString` is
-        // uppercase; an uppercase folder fails every authenticated upload).
-        let path = "\(userId.uuidString.lowercased())/\(UUID().uuidString).jpg"
+        // check — see `StorageBucketPaths.ownerScopedPath`'s doc comment for
+        // the full reason (Postgres `uuid::text` is lowercase, Foundation
+        // `uuidString` is uppercase; an uppercase folder fails every
+        // authenticated upload).
+        let path = StorageBucketPaths.ownerScopedPath(for: userId)
         try await storage.upload(path, data: jpegData, options: FileOptions(contentType: "image/jpeg"))
         return path
     }
 
-    /// See `AvatarStorage.publicURL(for:)` — identical path-not-URL builder,
-    /// just this bucket's name instead.
+    /// See `StorageBucketPaths.publicURL(bucket:path:)` — identical
+    /// path-not-URL builder, just this bucket's name instead.
     static func publicURL(for path: String) -> URL? {
-        URL(string: "\(Config.SUPABASE_URL.absoluteString)/storage/v1/object/public/\(bucket)/\(path)")
+        StorageBucketPaths.publicURL(bucket: bucket, path: path)
     }
 }

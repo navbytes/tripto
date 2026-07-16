@@ -88,20 +88,20 @@ final class OutboxCoalescingTests: XCTestCase {
         XCTAssertEqual(ops[1].op, .delete, "the shell trip's own delete — a distinct rowId, so it queues alongside rather than colliding")
     }
 
-    /// D5 (reviewer, MED — zero coverage on the outbox glue): the exact op
-    /// SET `HomeView.performMerge` (+ its call to the existing `delete(_:)`)
-    /// enqueues for a real merge — one upsert per moved item/packing/profile
-    /// row, re-pointed to the SURVIVOR's `tripId`, then the shell's own
-    /// `.trips` delete. `Moved` comes from a REAL `TripMerge.execute` call
-    /// (not hand-typed), so this can't drift from what the SwiftData half
-    /// actually produces; the enqueue calls themselves mirror
-    /// `performMerge`'s own code, in order — same "SyncStore-level, no
-    /// SyncEngine/network" shape as every other test in this file.
+    /// D5 (reviewer, MED — zero coverage on the outbox glue): the exact
+    /// ordered op list `HomeView.performMerge` enqueues for a real merge —
+    /// one upsert per moved item/packing/profile row, re-pointed to the
+    /// SURVIVOR's `tripId`, then the shell's own `.trips` delete LAST (a
+    /// server-side `ON DELETE CASCADE` racing ahead of the re-point above
+    /// would orphan rows still mid-move). `moved` comes from a REAL
+    /// `TripMerge.execute` call (not hand-typed); `MergeOutbox
+    /// .performMergeOps` is the SAME producer `performMerge` itself would
+    /// call, so this can no longer drift into re-implementing the view's own
+    /// enqueue loop the way this test used to (reviewer finding).
     @MainActor
     func testPerformMergeOpShapeIsOneUpsertPerMovedRowThenTheShellDelete() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let context = ModelContext(container)
-        let store = SyncStore(modelContainer: container)
         let shellId = UUID()
         let survivorId = UUID()
 
@@ -121,43 +121,64 @@ final class OutboxCoalescingTests: XCTestCase {
         )
         let moved = try XCTUnwrap(mergeOutcome)
 
-        // Mirrors `HomeView.performMerge`'s own enqueue loop, in order.
-        for movedItem in moved.items {
-            try await store.enqueueUpsert(table: .itineraryItems, rowId: movedItem.id, tripId: survivorId, payloadJSON: "{}")
-        }
-        for movedPacking in moved.packing {
-            try await store.enqueueUpsert(table: .packingItems, rowId: movedPacking.id, tripId: survivorId, payloadJSON: "{}")
-        }
-        for movedProfile in moved.profiles {
-            try await store.enqueueUpsert(table: .tripProfiles, rowId: movedProfile.id, tripId: survivorId, payloadJSON: "{}")
-        }
-        // The shell trip's own delete — `HomeView.delete(_:)`'s existing,
-        // unchanged enqueue call.
-        try await store.enqueueDelete(table: .trips, rowId: shellId, tripId: shellId)
+        let ops = MergeOutbox.performMergeOps(moved, shellId: shellId, survivorId: survivorId)
 
-        let ops = try await store.pendingOps()
         XCTAssertEqual(ops.count, 4, "one upsert per moved row, plus the shell's own trips delete")
-        XCTAssertEqual(Set(ops.map(\.table)), [.itineraryItems, .packingItems, .tripProfiles, .trips])
-        XCTAssertEqual(ops.filter { $0.op == .upsert }.count, 3)
-        let tripsDelete = try XCTUnwrap(ops.first { $0.table == .trips })
-        XCTAssertEqual(tripsDelete.op, .delete)
-        XCTAssertEqual(tripsDelete.rowId, shellId)
-        // Every moved row's upsert carries the SURVIVOR's tripId, not the
-        // shell's — the whole point of a merge.
-        XCTAssertTrue(ops.filter { $0.table != .trips }.allSatisfy { $0.tripId == survivorId })
+        // Exact shape AND order. Payloads are asserted by decoding back into
+        // the DTO and comparing structs, not by comparing JSON strings
+        // byte-for-byte (`JSONCoding.encoder` has no `.sortedKeys`, so two
+        // independent `encode()` calls of the same value aren't guaranteed
+        // identical key order) — and the *expected* side is round-tripped
+        // through the same encoder/decoder too (`roundTripped` below),
+        // since its ISO8601-with-fractional-seconds date strategy is only
+        // millisecond-precision, coarser than `Date.now`'s own resolution;
+        // comparing an un-round-tripped `Date` against a round-tripped one
+        // would fail on that precision gap alone. `item.toDTO()`/
+        // `packing.toDTO()`/`profile.toDTO()` read each row's state as
+        // `TripMerge.execute` already left it (re-pointed to `survivorId`),
+        // the same instances `moved` carries, so this also confirms the
+        // producer encodes the row's real DTO rather than a stand-in payload.
+        XCTAssertEqual(ops[0].table, .itineraryItems)
+        XCTAssertEqual(ops[0].op, .upsert)
+        XCTAssertEqual(ops[0].rowId, item.id)
+        XCTAssertEqual(ops[0].tripId, survivorId)
+        XCTAssertEqual(try decodedPayload(ops[0], as: ItineraryItemDTO.self), try roundTripped(item.toDTO()))
+
+        XCTAssertEqual(ops[1].table, .packingItems)
+        XCTAssertEqual(ops[1].op, .upsert)
+        XCTAssertEqual(ops[1].rowId, packing.id)
+        XCTAssertEqual(ops[1].tripId, survivorId)
+        XCTAssertEqual(try decodedPayload(ops[1], as: PackingItemDTO.self), try roundTripped(packing.toDTO()))
+
+        XCTAssertEqual(ops[2].table, .tripProfiles)
+        XCTAssertEqual(ops[2].op, .upsert)
+        XCTAssertEqual(ops[2].rowId, profile.id)
+        XCTAssertEqual(ops[2].tripId, survivorId)
+        XCTAssertEqual(try decodedPayload(ops[2], as: TripProfileDTO.self), try roundTripped(profile.toDTO()))
+
+        XCTAssertEqual(
+            ops[3],
+            MergeOutboxOp(table: .trips, op: .delete, rowId: shellId, tripId: shellId, payloadJSON: ""),
+            "the shell's own delete must be LAST, after every moved row's re-point"
+        )
     }
 
-    /// D5: the exact op set `ShareTripView.mergeDuplicateProfiles` enqueues
-    /// — a composite-key `.itemAssignees` delete per item unassigned from
-    /// the duplicate, an `.itemAssignees` upsert per item that needed a
-    /// fresh survivor pairing, a `.packingItems` upsert per repointed row,
-    /// and one final `.tripProfiles` delete for the duplicate profile
-    /// itself. `MergeResult` comes from a REAL `ProfileDedupe.merge` call.
+    /// D5: the exact ordered op list `ShareTripView.mergeDuplicateProfiles`
+    /// enqueues — a composite-key `.itemAssignees` delete per item
+    /// unassigned from the duplicate, an `.itemAssignees` upsert per item
+    /// that needed a fresh survivor pairing, a `.packingItems` upsert per
+    /// repointed row, and one final `.tripProfiles` delete for the duplicate
+    /// profile itself. `result` comes from a REAL `ProfileDedupe.merge`
+    /// call; `MergeOutbox.mergeDuplicateProfilesOps` is the SAME producer
+    /// the view would call, so this asserts on its real output rather than
+    /// re-implementing the enqueue loop (reviewer finding) — the fixture
+    /// includes a repointed packing item too, closing a gap the old
+    /// hand-rolled version of this test never actually exercised (its own
+    /// doc comment claimed packing coverage with no packing fixture at all).
     @MainActor
     func testMergeDuplicateProfilesOpShapeIsAssigneeAndPackingOpsThenTheProfileDelete() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let context = ModelContext(container)
-        let store = SyncStore(modelContainer: container)
         let tripId = UUID()
         let survivor = TripProfile(id: UUID(), tripId: tripId, displayName: "Mom", avatarColor: "amber", linkedUserId: nil, createdAt: .now)
         let duplicate = TripProfile(id: UUID(), tripId: tripId, displayName: "Mom", avatarColor: "moss", linkedUserId: nil, createdAt: .now)
@@ -165,6 +186,11 @@ final class OutboxCoalescingTests: XCTestCase {
         context.insert(duplicate)
         let itemId = UUID()
         context.insert(ItemAssignee(itemId: itemId, profileId: duplicate.id))
+        let packing = PackingItem(
+            id: UUID(), tripId: tripId, label: "Sunscreen", groupKeyRaw: PackingGroupKey.shared.rawValue,
+            assigneeProfileId: duplicate.id, isDone: false, createdBy: nil, createdAt: .now, updatedAt: .now, updatedBy: nil
+        )
+        context.insert(packing)
         try context.save()
 
         let mergeOutcome = await ProfileDedupe.merge(
@@ -172,36 +198,53 @@ final class OutboxCoalescingTests: XCTestCase {
         )
         let result = try XCTUnwrap(mergeOutcome)
 
-        // Mirrors `ShareTripView.mergeDuplicateProfiles`'s own enqueue loop,
-        // in order — the `.itemAssignees` delete's payload matches what
-        // `enqueueDeleteItemAssignee` actually encodes (`ItemAssigneeSyncTests`'
-        // own convention for this one composite-key table).
-        for unassignedItemId in result.itemIdsToUnassignFromDuplicate {
-            let dto = ItemAssigneeDTO(itemId: unassignedItemId, profileId: duplicate.id)
-            let json = String(data: try JSONCoding.encoder.encode(dto), encoding: .utf8)!
-            try await store.enqueueDelete(
-                table: .itemAssignees, rowId: ItemAssignee.compositeId(itemId: unassignedItemId, profileId: duplicate.id),
-                tripId: tripId, payloadJSON: json
-            )
-        }
-        for assignedItemId in result.itemIdsToAssignToSurvivor {
-            try await store.enqueueUpsert(
-                table: .itemAssignees, rowId: ItemAssignee.compositeId(itemId: assignedItemId, profileId: survivor.id),
-                tripId: tripId, payloadJSON: "{}"
-            )
-        }
-        for packingItem in result.repointedPackingItems {
-            try await store.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: tripId, payloadJSON: "{}")
-        }
-        try await store.enqueueDelete(table: .tripProfiles, rowId: duplicate.id, tripId: tripId)
+        let ops = MergeOutbox.mergeDuplicateProfilesOps(result, survivorId: survivor.id, duplicateId: duplicate.id, tripId: tripId)
 
-        let ops = try await store.pendingOps()
-        XCTAssertEqual(ops.count, 3, "one assignee delete, one assignee upsert (repointed), one profile delete")
-        XCTAssertEqual(ops.filter { $0.table == .itemAssignees && $0.op == .delete }.count, 1)
-        XCTAssertEqual(ops.filter { $0.table == .itemAssignees && $0.op == .upsert }.count, 1)
-        let profileDelete = try XCTUnwrap(ops.first { $0.table == .tripProfiles })
-        XCTAssertEqual(profileDelete.op, .delete)
-        XCTAssertEqual(profileDelete.rowId, duplicate.id)
+        // See the previous test's comment for why payloads are decoded and
+        // compared as structs rather than as raw JSON strings.
+        XCTAssertEqual(ops.count, 4, "one assignee delete, one assignee upsert (repointed), one packing upsert, one profile delete")
+
+        XCTAssertEqual(ops[0].table, .itemAssignees)
+        XCTAssertEqual(ops[0].op, .delete, "unassign from the duplicate first")
+        XCTAssertEqual(ops[0].rowId, ItemAssignee.compositeId(itemId: itemId, profileId: duplicate.id))
+        XCTAssertEqual(ops[0].tripId, tripId)
+        XCTAssertEqual(try decodedPayload(ops[0], as: ItemAssigneeDTO.self), ItemAssigneeDTO(itemId: itemId, profileId: duplicate.id))
+
+        XCTAssertEqual(ops[1].table, .itemAssignees)
+        XCTAssertEqual(ops[1].op, .upsert, "then re-pair to the survivor")
+        XCTAssertEqual(ops[1].rowId, ItemAssignee.compositeId(itemId: itemId, profileId: survivor.id))
+        XCTAssertEqual(ops[1].tripId, tripId)
+        XCTAssertEqual(try decodedPayload(ops[1], as: ItemAssigneeDTO.self), ItemAssigneeDTO(itemId: itemId, profileId: survivor.id))
+
+        XCTAssertEqual(ops[2].table, .packingItems)
+        XCTAssertEqual(ops[2].op, .upsert, "the repointed packing row")
+        XCTAssertEqual(ops[2].rowId, packing.id)
+        XCTAssertEqual(ops[2].tripId, tripId)
+        XCTAssertEqual(try decodedPayload(ops[2], as: PackingItemDTO.self), try roundTripped(packing.toDTO()))
+
+        XCTAssertEqual(
+            ops[3],
+            MergeOutboxOp(table: .tripProfiles, op: .delete, rowId: duplicate.id, tripId: tripId, payloadJSON: ""),
+            "the duplicate profile's own delete is LAST"
+        )
+    }
+
+    /// Shared by both merge-op-shape tests above — `JSONCoding.decoder`
+    /// undoes `MergeOutbox`'s own `JSONCoding.encoder` (snake_case ->
+    /// camelCase), so decoding back into the DTO and comparing structs is
+    /// order-independent, unlike comparing the raw JSON strings.
+    private func decodedPayload<T: Decodable>(_ op: MergeOutboxOp, as type: T.Type) throws -> T {
+        try JSONCoding.decoder.decode(type, from: Data(op.payloadJSON.utf8))
+    }
+
+    /// Same encode-then-decode idiom `DTORoundTripTests` uses for its own
+    /// fidelity checks — needed here because `JSONCoding.encoder`'s
+    /// ISO8601-with-fractional-seconds date strategy is only millisecond-
+    /// precision, coarser than `Date.now`'s actual resolution. Comparing an
+    /// un-round-tripped expected DTO against one that came back through
+    /// `decodedPayload` above would spuriously fail on that precision gap.
+    private func roundTripped<T: Codable>(_ value: T) throws -> T {
+        try JSONCoding.decoder.decode(T.self, from: JSONCoding.encoder.encode(value))
     }
 
     func testDistinctRowsQueueSeparateOps() async throws {

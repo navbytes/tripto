@@ -34,22 +34,25 @@ import XCTest
 /// network), just not instantly torn down. Not worth restructuring
 /// `scheduleRetry` to avoid.
 final class SyncEnginePushLoopTests: XCTestCase {
+    /// `forcedOnline: true` — a test-only mirror of the `-simulateOffline`
+    /// seam (`SyncEngine`'s own doc comment) — so these run deterministically
+    /// regardless of the test host's real network/`NWPathMonitor` timing,
+    /// rather than skipping when that raced offline.
     private func makeEngine() async throws -> (engine: SyncEngine, store: SyncStore) {
         let container = AppSchema.makeContainer(inMemory: true)
-        let engine = SyncEngine(modelContainer: container, status: await SyncStatus())
-        let isOffline = await engine.isEffectivelyOffline
-        try XCTSkipIf(isOffline, "flushPush() gates on a satisfied network path (interface-level only — no request is ever made here); none available in this environment.")
+        let engine = SyncEngine(modelContainer: container, status: await SyncStatus(), forcedOnline: true)
         return (engine, SyncStore(modelContainer: container))
     }
 
     /// Three ops, oldest-first, each with a `payloadJSON` that fails to
     /// decode as JSON — see the file doc comment for why that's a
-    /// deterministic, network-free push failure.
+    /// deterministic, network-free push failure. FIFO order comes from
+    /// `OutboxOp.seq` (assigned in enqueue order), not wall-clock timing, so
+    /// no inter-enqueue delay is needed to keep it deterministic.
     private func enqueueThreeUnpushableOps(_ store: SyncStore) async throws -> (a: UUID, b: UUID, c: UUID) {
         let a = UUID(), b = UUID(), c = UUID()
         for rowId in [a, b, c] {
             try await store.enqueueUpsert(table: .trips, rowId: rowId, tripId: rowId, payloadJSON: "not valid json")
-            try await Task.sleep(nanoseconds: 10_000_000) // distinct createdAt for FIFO order, see SyncIssueLifecycleTests
         }
         return (a, b, c)
     }

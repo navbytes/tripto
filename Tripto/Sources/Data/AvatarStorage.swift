@@ -37,7 +37,11 @@ enum AvatarStorage {
     /// name. The old object (if any) is left behind — orphans accepted in
     /// v1, no cleanup job (`docs/BACKLOG.md` candidate); "Remove photo"
     /// follows the same policy by only ever clearing the path column, never
-    /// calling `.remove` on the bucket.
+    /// calling `.remove` on the bucket. Path scheme itself (owner-folder +
+    /// fresh filename, lowercased uid for the RLS check) is
+    /// `StorageBucketPaths.ownerScopedPath`'s one home, shared with
+    /// `CoverStorage` — see that type's doc comment for why the uid is
+    /// lowercased.
     ///
     /// Atomicity (P8a brief): this either returns the new path or throws —
     /// it never mutates any model/row itself. Callers write the returned
@@ -47,26 +51,14 @@ enum AvatarStorage {
     static func upload(
         _ jpegData: Data, for userId: UUID, via storage: AvatarBucketUploading = SupabaseAvatarBucket()
     ) async throws -> String {
-        // The uid FOLDER segment is lowercased so it matches the storage
-        // write RLS `(storage.foldername(name))[1] = auth.uid()::text`
-        // (backend migration 20260715164057): Postgres renders `uuid::text`
-        // lowercase, but Foundation's `UUID.uuidString` is UPPERCASE — an
-        // unlowercased folder fails the policy's `with check` on every
-        // authenticated upload (the client-reported "couldn't use that photo"
-        // failure). Only segment [1] is checked, so the filename's case is
-        // irrelevant; lowercasing the uid alone is the whole fix.
-        let path = "\(userId.uuidString.lowercased())/\(UUID().uuidString).jpg"
+        let path = StorageBucketPaths.ownerScopedPath(for: userId)
         try await storage.upload(path, data: jpegData, options: FileOptions(contentType: "image/jpeg"))
         return path
     }
 
-    /// Path, not URL, is what's stored (plan D3) — this is the pure builder
-    /// the app derives a renderable URL from, matching the exact
-    /// `{project}/storage/v1/object/public/{bucket}/{path}` shape
-    /// supabase-swift's own `StorageFileApi.getPublicURL` builds (`avatars`
-    /// is a public-read bucket, so this is a plain string join, never a
-    /// signed/expiring URL — no network/auth needed to derive it).
+    /// Path, not URL, is what's stored (plan D3) — see `StorageBucketPaths
+    /// .publicURL(bucket:path:)`, this bucket's one-line facade onto it.
     static func publicURL(for path: String) -> URL? {
-        URL(string: "\(Config.SUPABASE_URL.absoluteString)/storage/v1/object/public/\(bucket)/\(path)")
+        StorageBucketPaths.publicURL(bucket: bucket, path: path)
     }
 }

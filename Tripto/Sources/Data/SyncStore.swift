@@ -41,12 +41,14 @@ extension SyncStore {
     /// Coalescing rule: one pending upsert per `rowId`; a newer local edit
     /// replaces the previous op's payload rather than queuing a second one.
     func enqueueUpsert(table: SyncTable, rowId: UUID, tripId: UUID?, payloadJSON: String) throws {
+        let seq = try nextSeq()
         if let existing = try fetchOp(rowId: rowId) {
             existing.tableRaw = table.rawValue
             existing.op = .upsert
             existing.tripId = tripId
             existing.payloadJSON = payloadJSON
             existing.createdAt = .now
+            existing.seq = seq
             // A fresh edit deserves a fresh retry budget rather than
             // inheriting a near-exhausted one from an unrelated earlier op.
             existing.attempts = 0
@@ -58,7 +60,8 @@ extension SyncStore {
                     opRaw: OutboxOpKind.upsert.rawValue,
                     rowId: rowId,
                     tripId: tripId,
-                    payloadJSON: payloadJSON
+                    payloadJSON: payloadJSON,
+                    seq: seq
                 )
             )
         }
@@ -75,12 +78,14 @@ extension SyncStore {
     /// here so the push path can build the right `.eq(...).eq(...)` filter —
     /// see `ItemAssignee`'s doc comment.
     func enqueueDelete(table: SyncTable, rowId: UUID, tripId: UUID?, payloadJSON: String = "") throws {
+        let seq = try nextSeq()
         if let existing = try fetchOp(rowId: rowId) {
             existing.tableRaw = table.rawValue
             existing.op = .delete
             existing.tripId = tripId
             existing.payloadJSON = payloadJSON
             existing.createdAt = .now
+            existing.seq = seq
             existing.attempts = 0
             existing.lastError = nil
         } else {
@@ -90,17 +95,28 @@ extension SyncStore {
                     opRaw: OutboxOpKind.delete.rawValue,
                     rowId: rowId,
                     tripId: tripId,
-                    payloadJSON: payloadJSON
+                    payloadJSON: payloadJSON,
+                    seq: seq
                 )
             )
         }
         try modelContext.save()
     }
 
-    /// FIFO-by-creation snapshot of every queued op, oldest first (push
-    /// sends ops in this order).
+    /// Next monotonic `seq` value, derived from the current on-disk max
+    /// rather than an in-process counter — an actor-local counter would
+    /// reset to 0 on relaunch and could collide with ops still queued from a
+    /// previous run; re-deriving from disk survives that.
+    private func nextSeq() throws -> Int {
+        var descriptor = FetchDescriptor<OutboxOp>(sortBy: [SortDescriptor(\.seq, order: .reverse)])
+        descriptor.fetchLimit = 1
+        return ((try modelContext.fetch(descriptor).first?.seq) ?? -1) + 1
+    }
+
+    /// FIFO-by-`seq` snapshot of every queued op, oldest first (push sends
+    /// ops in this order).
     func pendingOps() throws -> [OutboxOpSnapshot] {
-        let descriptor = FetchDescriptor<OutboxOp>(sortBy: [SortDescriptor(\.createdAt, order: .forward)])
+        let descriptor = FetchDescriptor<OutboxOp>(sortBy: [SortDescriptor(\.seq, order: .forward)])
         return try modelContext.fetch(descriptor).compactMap { op in
             guard let table = op.table else { return nil }
             return OutboxOpSnapshot(
