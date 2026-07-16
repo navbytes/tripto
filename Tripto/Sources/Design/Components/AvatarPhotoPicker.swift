@@ -66,22 +66,26 @@ struct AvatarPhotoPicker: View {
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                // Same pill treatment + 44pt floor as `SettingsView
-                // .conversionPromptFeatureCard`'s "Copy the prompt" button —
-                // `.frame(minHeight:)` BEFORE `.contentShape(Rectangle())` is
-                // what makes the whole 44pt-tall frame tappable: contentShape
-                // fixes the hit-test rectangle to whatever size the view
-                // already is at that point in the chain, so applying it
-                // first (against the tighter text bounds) leaves the frame's
-                // own padding as a dead zone instead of expanding the hit area.
+                // Fix-round (client-reported bug): the visual pill rendered
+                // bare-text small (~20pt) despite a correct 44pt hit band —
+                // `.background` used to sit BEFORE `.frame(minHeight:)`, so
+                // the painted capsule sized itself to the unpadded text,
+                // floating small inside the invisible 44pt frame around it.
+                // `.frame(minHeight:)` before `.contentShape` (still) is what
+                // makes the whole frame tappable; `.background` LAST is what
+                // makes the capsule actually fill it — same order as every
+                // other 44pt pill CTA already shipped in this codebase
+                // (`HomeView`, `BookingsTabView`, `PackingListView`,
+                // `ItineraryTabView`, `TripView`, `BookingDetailView`).
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Text(avatarPath == nil ? "Add photo" : "Change photo")
                         .font(Typo.body(Typo.Size.caption, weight: .bold))
                         .foregroundStyle(Palette.onAmber)
                         .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.md)
+                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                        .contentShape(Capsule())
                         .background(Palette.amber, in: Capsule())
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
                 }
                 .disabled(isUploading)
 
