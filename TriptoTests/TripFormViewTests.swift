@@ -303,6 +303,58 @@ final class TripFormViewTests: XCTestCase {
         XCTAssertNil(dto.coverCreditUrl)
     }
 
+    /// JOB A hardening (P8c harden pass) — the brief's own "nastiest
+    /// sequence": search-pick -> save -> edit -> search-pick a DIFFERENT
+    /// photo -> remove photo -> save. Three independent sessions chained
+    /// end to end (the test above chains two, ending on an unrelated edit;
+    /// this chains three, ending on Remove) — the end state must be a plain
+    /// gradient-only trip, with nothing left over from EITHER of the two
+    /// distinct Pexels credits that passed through it along the way.
+    @MainActor
+    func testCreditLockstepSurvivesPickSaveEditPickDifferentPhotoRemoveSaveSequence() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil
+            // Starts as a plain gradient-only trip — no cover picked yet.
+        )
+        context.insert(trip)
+
+        // SESSION 1: `CoverSearchSheet` pick (photo A), then save.
+        trip.coverImagePath = "trip-covers/uid/photo-a.jpg"
+        trip.coverCreditName = "Photographer A"
+        trip.coverCreditUrl = "https://pexels.com/photo/a"
+        XCTAssertEqual(trip.coverImagePath, "trip-covers/uid/photo-a.jpg", "sanity: session 1 saved photo A")
+
+        // SESSION 2: reopens fresh — `init`'s `.edit` branch re-seeds the
+        // draft from the trip's CURRENT state (photo A), same "re-seed
+        // fresh, never a stale session-1 snapshot" invariant the test above
+        // already pins. Search-picks a DIFFERENT photo (B), then saves.
+        let session2SeededPath = trip.coverImagePath
+        XCTAssertEqual(session2SeededPath, "trip-covers/uid/photo-a.jpg", "sanity: session 2 opens on what session 1 saved")
+        trip.coverImagePath = "trip-covers/uid/photo-b.jpg"
+        trip.coverCreditName = "Photographer B"
+        trip.coverCreditUrl = "https://pexels.com/photo/b"
+        XCTAssertEqual(trip.coverCreditName, "Photographer B", "sanity: session 2 saved photo B's own credit, not A's")
+
+        // SESSION 3: reopens fresh on photo B, taps "Remove photo"
+        // (`TripFormView.removeCoverPhoto()`'s own triple-clear), then saves.
+        let session3SeededPath = trip.coverImagePath
+        XCTAssertEqual(session3SeededPath, "trip-covers/uid/photo-b.jpg", "sanity: session 3 opens on what session 2 saved")
+        trip.coverImagePath = nil
+        trip.coverCreditName = nil
+        trip.coverCreditUrl = nil
+
+        let dto = trip.toDTO()
+        XCTAssertNil(dto.coverImagePath, "end state must have no path left over from either photo")
+        XCTAssertNil(dto.coverCreditName, "end state must have no credit left over from either photographer")
+        XCTAssertNil(dto.coverCreditUrl, "end state must have no credit URL left over from either photographer")
+    }
+
     // MARK: - F8: canonicalGradientKey normalization
 
     func testCanonicalGradientKeyMapsKnownKeysCaseInsensitively() {

@@ -206,6 +206,107 @@ final class CoverSearchSheetTests: XCTestCase {
         }
     }
 
+    /// JOB A hardening: "a response with zero results renders the empty
+    /// state not the error state." `content`'s own `case .loaded where
+    /// photos.isEmpty` vs `.failed` switch is private/`@State`-bound (no
+    /// SwiftUI-hosting harness in this suite to drive it directly — see the
+    /// Tester report for the exact gap), but the switch's OWN input is fully
+    /// determined by this seam: a successful response — even an empty one —
+    /// must behave exactly like `testStubSearchProviderReturnsItsCanned
+    /// ResponseForTheRequestedPage` above (returns normally), never like
+    /// `testStubSearchProviderPropagatesAThrownError` (throws). Only an
+    /// actual thrown error reaches `.failed`; an empty `photos` array is
+    /// data, not an error.
+    func testStubSearchProviderReturnsZeroResultsSuccessfullyRatherThanThrowing() async throws {
+        let empty = CoverSearchResponse(photos: [], page: 1, totalResults: 0, nextPage: false)
+        let stub = StubCoverSearchProvider(response: empty)
+
+        let result = try await stub.search(query: "zzzznoresults", page: 1) // must not throw
+        XCTAssertEqual(result, empty)
+        XCTAssertTrue(result.photos.isEmpty)
+    }
+
+    /// JOB A hardening: "empty-query and 1-char query never invoke the
+    /// provider." `shouldSearch` (already pinned above) IS the exact guard
+    /// `.task(id: query)` checks before ever reaching `requestPage`/the
+    /// provider — this ties that boundary directly to provider invocation
+    /// (a call-counting stub) rather than just an abstract Bool, for the
+    /// precise inputs the brief names plus their whitespace variants.
+    /// `@MainActor`: `CoverSearchSheet` is a `View`, so `shouldSearch` (like
+    /// every member of a `View`-conforming type) is MainActor-isolated —
+    /// this is an `async` test method, unlike the plain synchronous
+    /// `testShouldSearchFalseBelowMinimumLength` above, so it needs the
+    /// explicit annotation to call it without a compiler warning.
+    @MainActor
+    func testShouldSearchGateStopsEmptyAndOneCharQueriesFromEverReachingTheProvider() async throws {
+        final class CallCountingProvider: CoverSearchProviding, @unchecked Sendable {
+            private(set) var callCount = 0
+            func search(query: String, page: Int) async throws -> CoverSearchResponse {
+                callCount += 1
+                return CoverSearchResponse(photos: [], page: page, totalResults: 0, nextPage: false)
+            }
+        }
+        let provider = CallCountingProvider()
+        // Mirrors `.task(id: query)`'s own guard, verbatim: a caller checks
+        // `shouldSearch` BEFORE ever reaching the provider, never after.
+        for query in ["", "a", " ", " a ", "  "] where CoverSearchSheet.shouldSearch(query: query) {
+            _ = try await provider.search(query: query, page: 1)
+        }
+        XCTAssertEqual(provider.callCount, 0, "empty/1-char/whitespace-only queries must never reach the search provider")
+    }
+
+    // MARK: - Task-cancellation contract (JOB A hardening): "rapid query
+    // changes ... assert stale-query results never surface (task
+    // cancellation actually cancels, not just ignores)." The real defense
+    // lives in `CoverSearchSheet.body`'s `.task(id: query)` + `runSearch()`'s
+    // own `guard !Task.isCancelled else { return }` right after `await
+    // requestPage(1)` — both private/`@State`-bound, unreachable from
+    // XCTest without a SwiftUI-hosting harness this codebase has never
+    // needed (see the Tester report for the precise gap + the minimal
+    // extraction that would close it). The end-to-end race — a real,
+    // artificially slow query superseded by a real, fast one — IS covered,
+    // at the UI-test level: `TriptoUITests
+    // .testRapidQueryChangeNeverLetsAStaleSlowResultSurface`. This test
+    // instead pins the one-level-down MECHANICAL contract that guard
+    // depends on, directly against `CoverSearchProviding` with injected
+    // latency: a `Task` cancelled before a slow provider call resolves must
+    // still read `Task.isCancelled == true`, from INSIDE its own body, once
+    // that call finally resumes — the exact position `runSearch`'s guard
+    // checks from.
+
+    private struct DelayedStubCoverSearchProvider: CoverSearchProviding, @unchecked Sendable {
+        let response: CoverSearchResponse
+        let delayMilliseconds: UInt64
+
+        func search(query: String, page: Int) async throws -> CoverSearchResponse {
+            try await Task.sleep(for: .milliseconds(delayMilliseconds))
+            return response
+        }
+    }
+
+    func testTaskCancelledBeforeASlowProviderCallResolvesStillReadsCancelledOnceItResumes() async throws {
+        let stalePhoto = makePhoto(id: 1, photographerName: "Stale Query Result")
+        let stub = DelayedStubCoverSearchProvider(
+            response: CoverSearchResponse(photos: [stalePhoto], page: 1, totalResults: 1, nextPage: false),
+            delayMilliseconds: 500
+        )
+        // Mirrors `runSearch`'s exact shape: `switch await requestPage(1) {
+        // case .success: guard !Task.isCancelled else { return } ... }` —
+        // "a newer query already superseded this one" (that guard's own
+        // comment), reproduced with a REAL `Task` + REAL cancellation.
+        let staleTask = Task<Bool, Never> {
+            _ = try? await stub.search(query: "stale", page: 1)
+            return Task.isCancelled
+        }
+        staleTask.cancel()
+        let stillReadsCancelledAfterResuming = await staleTask.value
+        XCTAssertTrue(
+            stillReadsCancelledAfterResuming,
+            "a task cancelled before a slow provider call resolves must still read cancelled once that call " +
+                "resumes — the exact guard `runSearch`'s own `guard !Task.isCancelled else { return }` depends on"
+        )
+    }
+
     // MARK: - processAndUpload: the download -> process -> upload pipeline
 
     private struct StubDownloader: CoverPhotoDownloading, @unchecked Sendable {
@@ -222,14 +323,19 @@ final class CoverSearchSheetTests: XCTestCase {
     private final class StubUploadBucket: AvatarBucketUploading, @unchecked Sendable {
         private(set) var uploadedPath: String?
         private(set) var uploadedData: Data?
+        /// JOB A hardening: the OTHER atomic-failure stage — set to make a
+        /// successful download's own upload step fail.
+        var errorToThrow: Error?
 
         func upload(_ path: String, data: Data, options: FileOptions) async throws {
+            if let errorToThrow { throw errorToThrow }
             uploadedPath = path
             uploadedData = data
         }
     }
 
     private struct DownloadFailedError: Error {}
+    private struct UploadFailedError: Error {}
 
     /// A minimal real, decodable image (PNG, deliberately not JPEG — proves
     /// the pipeline re-encodes regardless of source format, same reasoning
@@ -326,6 +432,33 @@ final class CoverSearchSheetTests: XCTestCase {
             // Expected.
         }
         XCTAssertNil(bucket.uploadedPath)
+    }
+
+    /// JOB A hardening: the OTHER half of "pick-flow failure at the DOWNLOAD
+    /// stage vs the UPLOAD stage" — a successful download whose upload then
+    /// fails must equally throw and produce no result. `CoverSearchSheet
+    /// .pick()`'s own `do` block only calls `onPick(result.path, ...)` —
+    /// the one place `TripFormView`'s draft `coverImagePath`/
+    /// `coverCreditName`/`coverCreditUrl` ever change — past a fully
+    /// successful `processAndUpload` (see that method's own "atomic" doc
+    /// comment); its `catch` only sets a toast. Proving this throws is
+    /// therefore equivalent to proving the draft stays byte-for-byte
+    /// untouched: there is no code path where `onPick` runs with a partial
+    /// result.
+    func testProcessAndUploadPropagatesAnUploadFailureAfterASuccessfulDownload() async throws {
+        let downloader = StubDownloader(dataToReturn: makeTestImageData())
+        let bucket = StubUploadBucket()
+        bucket.errorToThrow = UploadFailedError()
+        let photo = makePhoto()
+
+        do {
+            _ = try await CoverSearchSheet.processAndUpload(photo, for: UUID(), downloader: downloader, uploadVia: bucket)
+            XCTFail("expected processAndUpload to throw")
+        } catch is UploadFailedError {
+            // Expected.
+        }
+        XCTAssertNil(bucket.uploadedPath, "a thrown upload must never be recorded as though it had succeeded")
+        XCTAssertNil(bucket.uploadedData)
     }
 
     // MARK: - Fixtures

@@ -1359,4 +1359,183 @@ final class TriptoUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "tripform-cover-photo", of: app)
     }
+
+    // MARK: - P8c cover-search capture set (`CoverSearchSheet` — results
+    // grid, empty state, error state — plus `TripFormView`'s own
+    // searched-cover credit line) + the rapid-query-change hardening test.
+    // `DemoSeeder`'s additive `CoverSearchStubURLProtocol`
+    // (`-uitestStubCoverSearch{Results,Empty,Error}`) stands in for the
+    // real `search-covers` edge function exactly the way P8a/P8b's own Nuke
+    // memory-cache priming stands in for a live image fetch — hermetic, no
+    // network, same "own flag, additive" recipe. See that type's own doc
+    // comment (`DemoSeeder.swift`) for the exact wiring: a process-wide
+    // `URLProtocol` intercepting the one live network call
+    // `SupabaseCoverSearchProvider` makes, never registered absent one of
+    // those three flags.
+
+    /// Reaches `CoverSearchSheet` via the seeded "Lisbon" trip's own edit
+    /// sheet ("Search photos", beside "Choose a photo") — no dedicated
+    /// autopilot hook needed, `TripFormView`'s "Edit trip" pencil is already
+    /// reachable via the shared `launch(_:)` helper's `-uitestOpenFirstTrip`.
+    private func openCoverSearchSheet(extraArgs: [String]) -> XCUIApplication {
+        let app = launch(extraArgs)
+        let editButton = app.buttons["Edit trip"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 30), "hero's pencil edit entry point never appeared")
+        editButton.tap()
+        let searchPhotosButton = app.buttons["Search photos"]
+        XCTAssertTrue(searchPhotosButton.waitForExistence(timeout: 10), "TripFormView never opened")
+        searchPhotosButton.tap()
+        let searchField = app.textFields["mountains, beaches, cities\u{2026}"]
+        XCTAssertTrue(searchField.waitForExistence(timeout: 10), "CoverSearchSheet's own search field never appeared")
+        return app
+    }
+
+    /// The results grid, both credit layers visible at once (the header's
+    /// persistent "Photos provided by Pexels" link + each result's own
+    /// "Photo by {name}" caption) — `DemoSeeder`'s `-uitestStubCoverSearchResults`
+    /// canned six photographers, standing in for a live `search-covers`
+    /// response. Config-agnostic (appearance/Dynamic Type flipped from
+    /// OUTSIDE between separate invocations, same recipe as every other
+    /// capture test in this file — see the Tester report for the exact
+    /// `xcrun simctl` commands).
+    func testCaptureCoverSearchResultsGrid() {
+        let app = openCoverSearchSheet(extraArgs: ["-uitestStubCoverSearchResults"])
+        let searchField = app.textFields["mountains, beaches, cities\u{2026}"]
+        searchField.tap()
+        searchField.typeText("mountains")
+        let firstResult = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Aiko Tanaka")).firstMatch
+        XCTAssertTrue(firstResult.waitForExistence(timeout: 10), "the stubbed results grid never rendered")
+        // Dismisses the keyboard (submits, same `.onSubmit { searchFocused =
+        // false }` the field itself wires up) — at AX3 specifically, the
+        // keyboard otherwise eats enough of the sheet's own scarce vertical
+        // space to cut a result's own caption off entirely, defeating the
+        // "both credit layers visible" ask this scene exists for.
+        searchField.typeText("\n")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "cover-search-results", of: app)
+    }
+
+    /// A query the stub maps to a successful-but-empty page —
+    /// `content`'s own `case .loaded where photos.isEmpty` branch, not the
+    /// error branch (`FunctionsError` is never thrown here). Light only.
+    func testCaptureCoverSearchEmptyState() {
+        let app = openCoverSearchSheet(extraArgs: ["-uitestStubCoverSearchEmpty"])
+        app.textFields["mountains, beaches, cities\u{2026}"].tap()
+        app.textFields["mountains, beaches, cities\u{2026}"].typeText("zzzznoresults")
+        let emptyMessage = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "No photos found")).firstMatch
+        XCTAssertTrue(emptyMessage.waitForExistence(timeout: 10), "the empty state never rendered")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "cover-search-empty", of: app)
+    }
+
+    /// A thrown `FunctionsError.httpError(503, ...)` — `CoverSearchSheet
+    /// .friendlyMessage(for:)`'s own Pexels-unavailable copy, plus the "Try
+    /// again" retry button. Light only.
+    func testCaptureCoverSearchErrorState() {
+        let app = openCoverSearchSheet(extraArgs: ["-uitestStubCoverSearchError"])
+        app.textFields["mountains, beaches, cities\u{2026}"].tap()
+        app.textFields["mountains, beaches, cities\u{2026}"].typeText("beaches")
+        let retryButton = app.buttons["Try again"]
+        XCTAssertTrue(retryButton.waitForExistence(timeout: 10), "the error state's retry button never appeared")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "cover-search-error", of: app)
+    }
+
+    /// `TripFormView`'s own credit-render slot (`coverPhotoCreditLine`) with
+    /// a trip that's ALREADY carrying a Pexels credit — reached via
+    /// `-uitestSeedCoverShowcase`'s existing "Zanzibar Escape" seed (P8b),
+    /// which this pass additively seeds with a `coverCreditName`/
+    /// `coverCreditUrl` pair too (`DemoSeeder.seedCoverShowcase`'s own doc
+    /// comment) rather than driving a live `CoverSearchSheet` search-and-pick
+    /// — that pipeline ends in a real Storage upload, not reachable in this
+    /// hermetic suite (`CoverSearchStubURLProtocol`'s own doc comment covers
+    /// why only the search RESPONSE, not the pick pipeline, is stubbed).
+    /// Light only, per the brief; the 12.5pt legibility-fix credit line is
+    /// this scene's own point, not a new appearance variant.
+    func testCaptureTripFormSearchedCoverCreditLine() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedCoverShowcase"]
+        app.launch()
+        let photoCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Zanzibar Escape")).firstMatch
+        XCTAssertTrue(photoCard.waitForExistence(timeout: 30), "'Zanzibar Escape' cover-photo showcase trip never appeared")
+        photoCard.tap()
+        XCTAssertTrue(app.staticTexts["Zanzibar Escape"].waitForExistence(timeout: 15), "trip screen never opened")
+
+        let editButton = app.buttons["Edit trip"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 10), "hero's pencil edit entry point never appeared")
+        editButton.tap()
+
+        // Type-agnostic (`.any`, not `.links`/`.buttons`): SwiftUI `Link`'s
+        // own XCUITest element type isn't pinned down elsewhere in this
+        // suite, so this matches on label alone regardless of which
+        // container type it surfaces as.
+        let creditLine = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Priya Nair")).firstMatch
+        XCTAssertTrue(creditLine.waitForExistence(timeout: 10), "the searched-cover credit line never rendered")
+        // `.exists` alone isn't enough — at AX3 this sheet's own `ScrollView`
+        // no longer fits the credit line (below the Cover section) in the
+        // unscrolled viewport, confirmed empirically the same way
+        // `testCaptureTripHeroCoverPhotoExpandedAndCollapsed` already had to
+        // account for. `isHittable` (on-screen position) is what actually
+        // confirms the scroll landed; at default type size the line already
+        // fits, so this loop performs zero swipes there.
+        for _ in 0..<15 where !creditLine.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(creditLine.isHittable, "the credit line never scrolled into frame")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "tripform-searched-cover-credit-light", of: app)
+    }
+
+    /// JOB A hardening, at the level that actually matters: the real view's
+    /// `.task(id: query)` + `runSearch()`'s own `guard !Task.isCancelled
+    /// else { return }` (both private/`@State`-bound, unreachable from
+    /// `TriptoTests` without a SwiftUI-hosting harness this codebase
+    /// doesn't have — see `CoverSearchSheetTests
+    /// .testTaskCancelledBeforeASlowProviderCallResolvesStillReadsCancelled
+    /// OnceItResumes` for the one-level-down mechanical-contract proxy, and
+    /// the Tester report for the exact gap). A query containing "slow" gets
+    /// an exaggerated artificial delay from `CoverSearchStubURLProtocol`
+    /// (~1.2s) specifically so a fast query typed shortly after has time to
+    /// actually supersede it while still in flight, not just in theory:
+    /// types a slow query, waits past the 400ms debounce (so the request
+    /// has actually STARTED, not merely been debounced away), types a fast
+    /// query before the slow one resolves, then waits past when the slow
+    /// one WOULD have resolved. The stale "Stale Slow Result" caption must
+    /// never surface, at any point — not while waiting, and not once its
+    /// own artificial delay elapses.
+    func testRapidQueryChangeNeverLetsAStaleSlowResultSurface() {
+        let app = openCoverSearchSheet(extraArgs: ["-uitestStubCoverSearchResults"])
+        let searchField = app.textFields["mountains, beaches, cities\u{2026}"]
+        searchField.tap()
+        let slowQuery = "slowquery"
+        searchField.typeText(slowQuery)
+        // Past the 400ms debounce — the slow request has actually started
+        // (and is now in flight, ~1.2s from resolving) before it gets
+        // superseded below.
+        Thread.sleep(forTimeInterval: 0.6)
+
+        // A plain `typeText` APPENDS after the cursor, and a query merely
+        // containing "slowquery" as a substring would still read as "slow"
+        // to the stub — clears it first, character by character, rather
+        // than leaving a hybrid string behind.
+        searchField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: slowQuery.count))
+        searchField.typeText("fastmountain")
+
+        let freshResult = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Aiko Tanaka")).firstMatch
+        XCTAssertTrue(freshResult.waitForExistence(timeout: 10), "the fresh (fast) query's own results never rendered")
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Stale Slow Result")).count, 0,
+            "the stale slow query's result must never surface once superseded"
+        )
+
+        // Waits past when the stale slow request WOULD have resolved
+        // (~1.2s artificial delay, well covered from here), then re-checks:
+        // a late-arriving stale result must never retroactively appear.
+        Thread.sleep(forTimeInterval: 2.0)
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Stale Slow Result")).count, 0,
+            "a late-arriving stale result must never surface even after its own artificial delay elapses"
+        )
+        XCTAssertTrue(freshResult.exists, "the fresh query's own result must still be showing")
+    }
 }
