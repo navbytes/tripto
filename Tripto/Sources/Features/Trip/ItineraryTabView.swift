@@ -1007,8 +1007,7 @@ struct ItineraryTabView: View {
     }
 
     private func skeletonDayTitleText(forDayOffset offset: Int) -> String {
-        var utcCalendar = Calendar(identifier: .gregorian)
-        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        let utcCalendar = ItineraryTimeZone.utcCalendar
         let date = utcCalendar.date(byAdding: .day, value: offset, to: tripStartDay.asDate(calendar: utcCalendar))
         let day = date.map { DayDate.from($0, calendar: utcCalendar) } ?? tripStartDay
         return TimelineBuilder.dayTitleText(day)
