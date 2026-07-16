@@ -9,8 +9,8 @@ import XCTest
 /// gate, so this gates revealing the address instead).
 ///
 /// `TripImportAddress.fetch` — the only call site that actually reaches the
-/// network — is reachable from exactly two places per surface (mirroring
-/// `AIImportConsentTests`' own reachability argument): `fetchImportAddressIfNeeded()`'s
+/// network — is reachable from exactly two places (mirroring
+/// `AIImportConsentTests`' own reachability argument): `ImportAddressLoader.fetchIfNeeded`'s
 /// `.fetchImmediately` branch, and `grantEmailImportConsentAndFetch()` (the
 /// consent dialog's "Continue" button, which calls `grant()` immediately
 /// before re-fetching). So exercising `fetchDecision`/`grant`/`isGranted`
@@ -40,8 +40,8 @@ final class EmailImportConsentTests: XCTestCase {
 
     /// Requirement: "not-granted ⇒ address not fetched until accept" — a
     /// first-ever visit must show the pre-consent card, not fetch.
-    /// `fetchImportAddressIfNeeded()` on both surfaces only calls
-    /// `TripImportAddress.fetch` on `.fetchImmediately`.
+    /// `ImportAddressLoader.fetchIfNeeded` (shared by all three surfaces)
+    /// only calls `TripImportAddress.fetch` on `.fetchImmediately`.
     func testFetchDecisionNeedsConsentWhenNotGranted() {
         XCTAssertEqual(EmailImportConsent.fetchDecision(defaults: defaults), .needsConsent)
     }
