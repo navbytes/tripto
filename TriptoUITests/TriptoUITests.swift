@@ -1230,4 +1230,133 @@ final class TriptoUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "tripprofile-photo-light", of: app)
     }
+
+    // MARK: - P8b photo-covers capture set (docs/UX_REDESIGN_ROADMAP.md,
+    // trip-covers bucket) — same "config-agnostic test, appearance flipped
+    // from OUTSIDE between separate invocations" recipe as every capture
+    // test above. `-uitestSeedCoverShowcase` (`DemoSeeder`'s additive flag)
+    // seeds "Zanzibar Escape" (ahead, WITH a photo cover — Home card, trip
+    // hero, and `TripFormView` edit all read the same seeded
+    // `coverImagePath`), "Helsinki Weekend" (ahead, no photo — the
+    // gradient-only control, framed alongside "Zanzibar Escape" on Home),
+    // and "Santorini Sunset" (been, WITH a photo cover — the 44pt thumb
+    // render). The photo itself is never a live fetch — same in-process
+    // Nuke memory-cache priming trick `-uitestSeedAvatarShowcase` (P8a)
+    // established — so this stays exactly as hermetic/no-network as the
+    // rest of the suite. No `-uitestOpenFirstTrip`: that hook targets
+    // `trips.first?.id`, which is "Santorini Sunset" (dated 2025, earlier
+    // than "Lisbon") once this showcase exists — the same landmine
+    // `seedRegisterShowcaseTrips`'s own doc comment already flags for every
+    // other showcase above; every test below finds its trip by title
+    // directly instead.
+
+    /// Home's own card for "Zanzibar Escape" (photo cover) framed alongside
+    /// "Helsinki Weekend" (gradient only, no photo) in the SAME screenshot —
+    /// the "photo vs. gradient" comparison this milestone's brief asked for,
+    /// same "put the comparison in one shot" recipe
+    /// `testCaptureAvatarStackPhotoAndInitialsSideBySide` (P8a) already
+    /// established for photo-vs-initials. Captured in both appearances
+    /// (external `xcrun simctl ui` flip, see the Tester report) since the
+    /// brief calls out glass-pill legibility over a PHOTO specifically in
+    /// both light and dark, not just the gradient case every existing
+    /// capture already covers.
+    func testCaptureHomeCoverPhotoCardAndGradientControl() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedCoverShowcase"]
+        app.launch()
+        let photoCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Zanzibar Escape")).firstMatch
+        XCTAssertTrue(photoCard.waitForExistence(timeout: 30), "'Zanzibar Escape' cover-photo showcase trip never appeared")
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Helsinki Weekend")).firstMatch.exists,
+            "'Helsinki Weekend' gradient-only control trip never appeared alongside it"
+        )
+        // Lets the card's own cover-photo LazyImage settle before capturing
+        // (same wait `testCaptureAvatarStackPhotoAndInitialsSideBySide` uses
+        // for its own seeded-photo LazyImage).
+        Thread.sleep(forTimeInterval: 1.5)
+        attachScreenshot(named: "home-cover-photo", of: app)
+    }
+
+    /// The trip hero itself, with a photo layered over its gradient
+    /// (`TripHeroView`'s own `CoverImage`) — expanded (the natural, just-
+    /// opened state) and then collapsed (scrolled past `HeroCollapse
+    /// .collapseDistance`). Light only, per the brief. Scrolls to "Day 7"
+    /// (the LAST day, well below the fold even with the seeded multi-night
+    /// hotel stay's own extra height — confirmed empirically: "Day 2"'s own
+    /// content, tried first, already sits inside the unscrolled viewport, so
+    /// a loop exiting on ITS visibility never actually swipes) — `isHittable`,
+    /// not `.exists`, matching `testCaptureItineraryStayStripAndFreeDay`'s
+    /// own reasoning: a row can already be instantiated (and thus `.exists`)
+    /// before any real scrolling, so only `isHittable` (on-screen position)
+    /// actually confirms the scroll landed.
+    func testCaptureTripHeroCoverPhotoExpandedAndCollapsed() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedCoverShowcase"]
+        app.launch()
+        let photoCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Zanzibar Escape")).firstMatch
+        XCTAssertTrue(photoCard.waitForExistence(timeout: 30), "'Zanzibar Escape' cover-photo showcase trip never appeared")
+        photoCard.tap()
+        XCTAssertTrue(app.staticTexts["Zanzibar Escape"].waitForExistence(timeout: 15), "trip screen never opened")
+
+        // Expanded — the hero's one-shot layout measurement + cover-photo
+        // LazyImage settle (same 1.5s wait `testCaptureItineraryScreen` uses
+        // for its own hero).
+        Thread.sleep(forTimeInterval: 1.5)
+        attachScreenshot(named: "trip-hero-cover-photo", of: app)
+
+        let lastDayText = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Day 7")).firstMatch
+        for _ in 0..<15 where !lastDayText.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(lastDayText.isHittable, "itinerary never scrolled — nothing to collapse the hero against")
+        Thread.sleep(forTimeInterval: 0.6)
+        attachScreenshot(named: "trip-hero-cover-photo-collapsed", of: app)
+    }
+
+    /// A "been" register row with a photo thumb — `BeenRow`'s own 44pt
+    /// `CoverImage(resizeTo:)` branch. Light only, per the brief. Same
+    /// bounded-swipe-until-visible recipe `testCaptureHomeBeenRowSwipeReveal`
+    /// already uses for a different been row.
+    func testCaptureHomeBeenRowCoverPhotoThumb() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedCoverShowcase"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
+        let beenRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Santorini Sunset")).firstMatch
+        for _ in 0..<15 where !beenRow.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(beenRow.waitForExistence(timeout: 10), "'Santorini Sunset' cover-photo been row never scrolled into view")
+        Thread.sleep(forTimeInterval: 0.5)
+        attachScreenshot(named: "home-been-cover-photo", of: app)
+    }
+
+    /// `TripFormView` in edit mode (reached via the hero's own pencil, the
+    /// discoverable organizer edit entry point — `HeroCollapse.swift`'s
+    /// `GlassCircleButton(accessibilityLabel: "Edit trip")`) on the trip
+    /// whose `coverImagePath` this showcase already seeded — "Change
+    /// photo"/"Remove photo" render immediately, with no `PhotosPicker`
+    /// interaction needed (that system UI isn't something XCUITest in this
+    /// suite ever drives). Light only, per the brief.
+    func testCaptureTripFormCoverPhotoChangeAndRemove() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedCoverShowcase"]
+        app.launch()
+        let photoCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Zanzibar Escape")).firstMatch
+        XCTAssertTrue(photoCard.waitForExistence(timeout: 30), "'Zanzibar Escape' cover-photo showcase trip never appeared")
+        photoCard.tap()
+        XCTAssertTrue(app.staticTexts["Zanzibar Escape"].waitForExistence(timeout: 15), "trip screen never opened")
+
+        let editButton = app.buttons["Edit trip"]
+        XCTAssertTrue(editButton.waitForExistence(timeout: 10), "hero's pencil edit entry point never appeared")
+        editButton.tap()
+
+        XCTAssertTrue(
+            app.buttons["Remove photo"].waitForExistence(timeout: 10),
+            "TripFormView never opened with the seeded cover photo"
+        )
+        XCTAssertTrue(app.buttons["Change photo"].exists, "the picker row must read \"Change photo\", not \"Choose a photo\"")
+        Thread.sleep(forTimeInterval: 0.3)
+        attachScreenshot(named: "tripform-cover-photo", of: app)
+    }
 }

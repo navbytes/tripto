@@ -578,4 +578,63 @@ final class DTORoundTripTests: XCTestCase {
         let redecoded = try JSONCoding.decoder.decode(TripDTO.self, from: reencoded)
         XCTAssertEqual(redecoded, dto)
     }
+
+    /// Job A hardening (P8b harden pass): a server (or a bulk-edit/admin
+    /// tool) could plausibly send `""` instead of `null` for any of these
+    /// three columns — `TripDTO`'s additive/nullable contract (see `Trip
+    /// .coverImagePath`'s own doc comment) says nothing about which one a
+    /// given row actually carries, and `String?` decoding treats an
+    /// explicit `""` as `Optional("")`, never folding it into `nil` the way
+    /// an absent key does. Confirms the whole DTO -> Model -> DTO chain (and
+    /// `apply(_:)`, the pull-path mutation of an already-existing local row)
+    /// preserves that exact distinction — an empty string stays an empty
+    /// string, never silently normalized to nil or vice versa — rather than
+    /// crashing or losing data in either direction.
+    func testTripDTORoundTripsEmptyStringCoverFieldsDistinctFromNil() throws {
+        let id = UUID()
+        let createdBy = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "title": "Lisbon",
+          "destination": "Lisbon, Portugal",
+          "country_code": "PT",
+          "start_date": "2026-05-14",
+          "end_date": "2026-05-20",
+          "cover_gradient": "dusk",
+          "cover_image_path": "",
+          "cover_credit_name": "",
+          "cover_credit_url": "",
+          "trip_type": "family",
+          "created_by": "\(createdBy.uuidString)",
+          "created_at": "2026-07-08T12:34:56.789+00:00",
+          "updated_at": "2026-07-08T12:34:56+00:00",
+          "updated_by": null
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(TripDTO.self, from: Data(json.utf8))
+        // The load-bearing assertion: an explicit "" decodes as a non-nil
+        // empty string, never folded into nil the way an absent key is.
+        XCTAssertNotNil(dto.coverImagePath)
+        XCTAssertEqual(dto.coverImagePath, "")
+        XCTAssertEqual(dto.coverCreditName, "")
+        XCTAssertEqual(dto.coverCreditUrl, "")
+
+        let model = Trip(dto: dto)
+        XCTAssertEqual(model.coverImagePath, "")
+        XCTAssertEqual(model.toDTO(), dto)
+
+        // `apply(_:)` must overwrite a REAL prior photo down to this empty
+        // string too, not leave the old value in place because "" reads as
+        // falsy — the pull path must never treat this as "nothing to apply."
+        let existing = TestFixtures.makeTrip(id: id, startDate: .now, endDate: .now, createdBy: createdBy)
+        existing.coverImagePath = "\(id.uuidString)/real-cover.jpg"
+        existing.apply(dto)
+        XCTAssertEqual(existing.coverImagePath, "")
+
+        let reencoded = try JSONCoding.encoder.encode(dto)
+        let redecoded = try JSONCoding.decoder.decode(TripDTO.self, from: reencoded)
+        XCTAssertEqual(redecoded, dto)
+    }
 }

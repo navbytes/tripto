@@ -104,6 +104,29 @@ final class CoverStorageTests: XCTestCase {
         }
     }
 
+    /// Job A hardening (P8b harden pass): the REPLACE flow — a row that
+    /// already has a cover photo, then a second upload succeeds — must end
+    /// up pointing at the NEW path, not the old one. Mirrors `TripFormView
+    /// .uploadCoverPhoto`'s exact `coverImagePath = try await CoverStorage
+    /// .upload(...)` assignment against a real (unattached) `Trip`, same
+    /// shape as `testFailedUploadLeavesAnExistingTripsCoverImagePathUntouched`
+    /// above but the SUCCESS side of that same scenario. Deliberately does
+    /// NOT assert anything about the OLD object ever being deleted/cleaned
+    /// up server-side — v1 orphans it on purpose (`CoverStorage`'s own doc
+    /// comment, a `docs/BACKLOG.md` candidate); this only pins the ROW's own
+    /// state, never a storage-bucket cleanup this app doesn't attempt.
+    func testReplacingAnExistingCoverPhotoPointsTheRowAtTheNewPathNotTheOld() async throws {
+        let stub = StubCoverBucket()
+        let trip = TestFixtures.makeTrip(startDate: .now, endDate: .now.addingTimeInterval(86_400))
+        let oldPath = "existing/old-cover.jpg"
+        trip.coverImagePath = oldPath
+
+        trip.coverImagePath = try await CoverStorage.upload(Data([0x02]), for: UUID(), via: stub)
+
+        XCTAssertNotEqual(trip.coverImagePath, oldPath, "replace must move the row off the old path")
+        XCTAssertEqual(trip.coverImagePath, stub.uploadedPath, "the row must point at exactly the path the upload wrote to")
+    }
+
     func testPublicURLBuildsTheExpectedSupabaseStorageURLUnderTheTripCoversBucket() {
         let url = CoverStorage.publicURL(for: "abc-123/def-456.jpg")
         XCTAssertEqual(
@@ -115,6 +138,25 @@ final class CoverStorageTests: XCTestCase {
     func testPublicURLIsPureAndDeterministicForTheSamePath() {
         let path = "\(UUID().uuidString)/\(UUID().uuidString).jpg"
         XCTAssertEqual(CoverStorage.publicURL(for: path), CoverStorage.publicURL(for: path))
+    }
+
+    /// Job A hardening: a server row could plausibly send `""` instead of
+    /// `null` for `cover_image_path` (`TripDTO.coverImagePath`'s additive/
+    /// nullable contract says nothing about which one) — this pins the
+    /// ACTUAL behavior rather than leaving it an unconfirmed assumption.
+    /// `URL(string:)` happily parses a trailing-empty path segment, so
+    /// `CoverImage.body`'s `if let coverImagePath, ...` guard treats `""` as
+    /// "has a photo" (non-nil) and would attempt a real load against the
+    /// bucket's own root rather than skipping straight to the gradient the
+    /// way a genuine `nil` does. Not a crash, not a broken render —
+    /// `CoverImage`'s gradient-first `ZStack` still shows through once that
+    /// load fails (same `.empty`/`.failure`-renders-nothing contract every
+    /// other photo miss already relies on) — just a wasted network attempt
+    /// this documents rather than assumes away.
+    func testPublicURLForEmptyStringPathIsNonNilRatherThanTreatedLikeNoPhoto() {
+        let url = CoverStorage.publicURL(for: "")
+        XCTAssertNotNil(url, "an empty path string still parses as a URL — CoverImage can't rely on nil to detect \"no photo\"")
+        XCTAssertEqual(url?.absoluteString, "https://qgtveaqukvbtyunupzhn.supabase.co/storage/v1/object/public/trip-covers/")
     }
 
     /// The one thing genuinely worth pinning about the sibling split (vs.
