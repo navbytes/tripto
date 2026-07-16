@@ -56,7 +56,7 @@ struct TripCard: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            CoverGradient.from(key: trip.coverGradient)
+            CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
             CoverGradient.textScrim
 
             VStack(alignment: .leading, spacing: 0) {

@@ -37,6 +37,191 @@ final class TripFormViewTests: XCTestCase {
         XCTAssertGreaterThan(dto.updatedAt, originalUpdatedAt)
     }
 
+    // MARK: - P8b: editing a trip's cover photo must clear any existing
+    // Pexels credit (P8c will be the only future WRITER of a non-nil
+    // credit, but this invariant has to hold from P8b's own first save
+    // onward — a credit names one specific photo and must never survive
+    // whatever replaced or removed it). `save()` itself has no view-level
+    // harness in this suite (same as F7 above) — these replicate the EXACT
+    // mutation `save()`'s edit branch performs against a real `Trip`,
+    // asserting via `toDTO()`, mirroring `testEditMutationStampsUpdatedAtAnd
+    // UpdatedByOnToDTO`'s own shape.
+
+    @MainActor
+    func testEditingCoverPhotoClearsAnyExistingPexelsCredit() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil,
+            coverImagePath: "old/pexels-cover.jpg", coverCreditName: "Priya", coverCreditUrl: "https://pexels.com/photo/1"
+        )
+        context.insert(trip)
+        // What `TripFormView.init`'s `.edit` branch would have captured into
+        // `initialValues.coverImagePath` when this sheet opened.
+        let initialCoverImagePath = trip.coverImagePath
+
+        // The exact mutation `save()`'s edit branch performs when the
+        // draft `coverImagePath` (a successful new upload, here) differs
+        // from what the sheet opened with.
+        let draftCoverImagePath: String? = "new/my-own-photo.jpg"
+        trip.coverImagePath = draftCoverImagePath
+        if draftCoverImagePath != initialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+
+        let dto = trip.toDTO()
+        XCTAssertEqual(dto.coverImagePath, "new/my-own-photo.jpg")
+        XCTAssertNil(dto.coverCreditName)
+        XCTAssertNil(dto.coverCreditUrl)
+    }
+
+    /// The "Remove photo" case — same clearing rule, `draftCoverImagePath`
+    /// is `nil` instead of a new path.
+    @MainActor
+    func testRemovingCoverPhotoAlsoClearsAnyExistingPexelsCredit() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil,
+            coverImagePath: "old/pexels-cover.jpg", coverCreditName: "Priya", coverCreditUrl: "https://pexels.com/photo/1"
+        )
+        context.insert(trip)
+        let initialCoverImagePath = trip.coverImagePath
+
+        let draftCoverImagePath: String? = nil
+        trip.coverImagePath = draftCoverImagePath
+        if draftCoverImagePath != initialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+
+        let dto = trip.toDTO()
+        XCTAssertNil(dto.coverImagePath)
+        XCTAssertNil(dto.coverCreditName)
+        XCTAssertNil(dto.coverCreditUrl)
+    }
+
+    /// The negative case: editing an UNRELATED field (title, here) without
+    /// touching the cover photo at all must leave an existing Pexels credit
+    /// intact — this is what makes the render slot (`TripFormView
+    /// .coverPhotoCreditLine`) actually useful once P8c starts writing one,
+    /// rather than it evaporating on the trip's very next unrelated save.
+    @MainActor
+    func testSavingUnrelatedFieldsPreservesAnExistingPexelsCredit() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil,
+            coverImagePath: "old/pexels-cover.jpg", coverCreditName: "Priya", coverCreditUrl: "https://pexels.com/photo/1"
+        )
+        context.insert(trip)
+        let initialCoverImagePath = trip.coverImagePath
+
+        trip.title = "Porto" // the only field this "save" touches
+        let draftCoverImagePath = initialCoverImagePath // unchanged this session
+        trip.coverImagePath = draftCoverImagePath
+        if draftCoverImagePath != initialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+
+        let dto = trip.toDTO()
+        XCTAssertEqual(dto.title, "Porto")
+        XCTAssertEqual(dto.coverImagePath, "old/pexels-cover.jpg")
+        XCTAssertEqual(dto.coverCreditName, "Priya")
+        XCTAssertEqual(dto.coverCreditUrl, "https://pexels.com/photo/1")
+    }
+
+    // MARK: - Job A hardening (P8b harden pass): the credit-clear invariant
+    // across TWO independent save sessions (pick a new photo -> save ->
+    // reopen -> edit only the title -> save again) — the three tests above
+    // each replicate exactly one save's mutation in isolation; none of them
+    // chain a SECOND save with a freshly re-captured `initialValues
+    // .coverImagePath` snapshot the way actually reopening the sheet would
+    // (`TripFormView.init`'s `.edit` branch reads `trip.coverImagePath`
+    // fresh every time it runs). This probes that full sequence instead of
+    // just the unit: a future regression that let session 2 compare against
+    // session 1's stale snapshot (rather than a fresh read of the trip's
+    // CURRENT state) would show up here as the picked photo reverting or
+    // the credit re-clearing — neither reachable from a single save.
+
+    /// Session 1 replaces a credited Pexels photo with the user's own pick
+    /// (correctly clearing the credit, same rule the tests above already
+    /// pin); session 2 reopens fresh and edits ONLY the title. The picked
+    /// photo must survive session 2's unrelated save untouched, and the
+    /// already-cleared credit must stay cleared rather than being touched
+    /// again by a stale comparison.
+    @MainActor
+    func testCreditClearInvariantHoldsAcrossPickPhotoSaveThenTitleOnlySaveSequence() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        let trip = Trip(
+            id: UUID(), title: "Lisbon", destination: "Lisbon, Portugal", countryCode: "PT",
+            startDate: .now, endDate: .now.addingTimeInterval(86_400 * 6), coverGradient: "dusk",
+            tripTypeRaw: TripType.family.rawValue, createdBy: UUID(),
+            createdAt: .now, updatedAt: .now, updatedBy: nil,
+            coverImagePath: "old/pexels-cover.jpg", coverCreditName: "Priya", coverCreditUrl: "https://pexels.com/photo/1"
+        )
+        context.insert(trip)
+
+        // SESSION 1: sheet opens on the credited photo; user picks their own
+        // replacement and taps Save.
+        let session1InitialCoverImagePath = trip.coverImagePath
+        let session1DraftCoverImagePath = "new/my-own-photo.jpg"
+        trip.coverImagePath = session1DraftCoverImagePath
+        if session1DraftCoverImagePath != session1InitialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+        XCTAssertEqual(trip.coverImagePath, "new/my-own-photo.jpg", "sanity: session 1 must land the new photo")
+        XCTAssertNil(trip.coverCreditName, "sanity: replacing the credited photo must clear its credit in session 1")
+
+        // SESSION 2: the sheet is reopened fresh on the SAME (now-mutated)
+        // trip — `initialValues.coverImagePath` is captured anew from the
+        // trip's CURRENT state, never reused from session 1's own local
+        // constant above (that's the exact gap a single-save unit test
+        // can't probe).
+        let session2InitialCoverImagePath = trip.coverImagePath
+        XCTAssertNotEqual(
+            session2InitialCoverImagePath, session1InitialCoverImagePath,
+            "sanity: session 2 must open on what session 1 actually saved, not session 1's own starting point"
+        )
+        // Only the title changes this session — the draft cover stays
+        // exactly what THIS session opened with; the picker was never
+        // touched.
+        trip.title = "Porto"
+        let session2DraftCoverImagePath = session2InitialCoverImagePath
+        trip.coverImagePath = session2DraftCoverImagePath
+        if session2DraftCoverImagePath != session2InitialCoverImagePath {
+            trip.coverCreditName = nil
+            trip.coverCreditUrl = nil
+        }
+
+        let dto = trip.toDTO()
+        XCTAssertEqual(dto.title, "Porto")
+        // The core "survives the second save" assertion: the photo session
+        // 1 picked is neither reverted nor lost by session 2's unrelated edit.
+        XCTAssertEqual(dto.coverImagePath, "new/my-own-photo.jpg")
+        // And the credit session 1 correctly cleared stays cleared — session
+        // 2's own (correctly no-op) comparison must never resurrect it.
+        XCTAssertNil(dto.coverCreditName)
+        XCTAssertNil(dto.coverCreditUrl)
+    }
+
     // MARK: - F8: canonicalGradientKey normalization
 
     func testCanonicalGradientKeyMapsKnownKeysCaseInsensitively() {

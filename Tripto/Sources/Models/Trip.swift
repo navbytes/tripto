@@ -14,6 +14,24 @@ final class Trip {
     var startDate: Date
     var endDate: Date
     var coverGradient: String
+    /// `trips.cover_image_path` (P8b, `.claude/company/ux-redesign/handoffs/
+    /// P8-images-plan.md` D3) — see `Profile.avatarPath`'s doc comment for
+    /// the path-not-URL/nullable/additive reasoning, identical here. `nil`
+    /// means no photo — `coverGradient` above is the permanent fallback,
+    /// never removed/replaced by adding this column.
+    var coverImagePath: String?
+    /// P8c (Pexels stock-photo covers, not yet written by any code path —
+    /// this app only ever writes `nil` here today): photographer display
+    /// name for the required "Photo by {name} on Pexels" attribution.
+    /// Present here (read-only from this phase's own writes) so the render
+    /// slot (`TripFormView`'s cover section) and the DTO/archive plumbing
+    /// are already in place — P8c only has to start WRITING a value.
+    var coverCreditName: String?
+    /// P8c: the credit's required link target (a real external URL, unlike
+    /// `coverImagePath` — see `TripDTO.coverCreditUrl`'s own doc comment for
+    /// why it's spelled `Url`, not `URL`). Null iff `coverImagePath` was
+    /// never sourced from Pexels.
+    var coverCreditUrl: String?
     var tripTypeRaw: String
     var createdBy: UUID
     var createdAt: Date
@@ -32,7 +50,10 @@ final class Trip {
         createdBy: UUID,
         createdAt: Date,
         updatedAt: Date,
-        updatedBy: UUID?
+        updatedBy: UUID?,
+        coverImagePath: String? = nil,
+        coverCreditName: String? = nil,
+        coverCreditUrl: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -41,6 +62,9 @@ final class Trip {
         self.startDate = startDate
         self.endDate = endDate
         self.coverGradient = coverGradient
+        self.coverImagePath = coverImagePath
+        self.coverCreditName = coverCreditName
+        self.coverCreditUrl = coverCreditUrl
         self.tripTypeRaw = tripTypeRaw
         self.createdBy = createdBy
         self.createdAt = createdAt
@@ -70,6 +94,23 @@ struct TripDTO: Codable, Sendable, Equatable {
     var startDate: DayDate
     var endDate: DayDate
     var coverGradient: String
+    /// See `Trip.coverImagePath`'s doc comment; defaulted for the same
+    /// "absent server column / plain memberwise init" reasons as
+    /// `ProfileDTO.avatarPath`.
+    var coverImagePath: String?
+    /// See `Trip.coverCreditName`'s doc comment.
+    var coverCreditName: String?
+    /// See `Trip.coverCreditUrl`'s doc comment. Spelled `Url`, not `URL`:
+    /// `JSONCoding`'s `.convertToSnakeCase`/`.convertFromSnakeCase` pair is
+    /// NOT a true inverse for a trailing all-caps acronym — confirmed
+    /// empirically, not assumed. `.convertToSnakeCase` on `coverCreditURL`
+    /// correctly produces `cover_credit_url`, but `.convertFromSnakeCase` on
+    /// `cover_credit_url` produces `coverCreditUrl` (lowercase `rl`), which
+    /// then fails to match a `coverCreditURL` property/CodingKey at all —
+    /// decodes as `nil` every time, silently. `coverCreditUrl` is the one
+    /// spelling that round-trips both directions through the shared
+    /// snake_case strategy; see `DTORoundTripTests` for the pinned proof.
+    var coverCreditUrl: String?
     var tripType: String
     var createdBy: UUID
     var createdAt: Date
@@ -91,7 +132,10 @@ extension Trip {
             createdBy: dto.createdBy,
             createdAt: dto.createdAt,
             updatedAt: dto.updatedAt,
-            updatedBy: dto.updatedBy
+            updatedBy: dto.updatedBy,
+            coverImagePath: dto.coverImagePath,
+            coverCreditName: dto.coverCreditName,
+            coverCreditUrl: dto.coverCreditUrl
         )
     }
 
@@ -102,6 +146,9 @@ extension Trip {
         startDate = dto.startDate.asDate()
         endDate = dto.endDate.asDate()
         coverGradient = dto.coverGradient
+        coverImagePath = dto.coverImagePath
+        coverCreditName = dto.coverCreditName
+        coverCreditUrl = dto.coverCreditUrl
         tripTypeRaw = dto.tripType
         createdBy = dto.createdBy
         createdAt = dto.createdAt
@@ -118,6 +165,9 @@ extension Trip {
             startDate: DayDate.from(startDate),
             endDate: DayDate.from(endDate),
             coverGradient: coverGradient,
+            coverImagePath: coverImagePath,
+            coverCreditName: coverCreditName,
+            coverCreditUrl: coverCreditUrl,
             tripType: tripTypeRaw,
             createdBy: createdBy,
             createdAt: createdAt,

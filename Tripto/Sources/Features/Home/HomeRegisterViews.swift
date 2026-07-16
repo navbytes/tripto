@@ -337,11 +337,18 @@ struct BeenRow: View {
             // register discipline (the roadmap's own "a 2019 trip shouldn't
             // shout as loudly as the live one," this type's own doc comment)
             // isn't just preserved by opacity/scale alone.
-            CoverGradient.from(key: trip.coverGradient)
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .saturation(0.75)
-                .opacity(0.92)
+            // P8b: `resizeTo` decodes a photo at this row's own 44pt size
+            // (P8a `AvatarPhotoCircle` precedent) rather than the full
+            // ~1600px stored JPEG — `.saturation`/`.opacity` below mute a
+            // photo exactly the same as they already mute the gradient.
+            CoverImage(
+                coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath,
+                resizeTo: CGSize(width: 44, height: 44)
+            )
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .saturation(0.75)
+            .opacity(0.92)
 
             VStack(alignment: .leading, spacing: 2) {
                 // P7b craft-audit fix: hard-truncated at 1 line even at AX3

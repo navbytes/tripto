@@ -40,6 +40,14 @@ enum DemoSeeder {
         if ProcessInfo.processInfo.arguments.contains("-uitestSeedAvatarShowcase") {
             primeAvatarShowcaseImageCache(userId: userId)
         }
+        // P8b photo-covers capture set: same "prime the memory cache on
+        // EVERY launch, before the idempotence guard below" reasoning as the
+        // avatar showcase above — own flag, additive. Routed through a tiny
+        // wrapper (rather than an inline `if` here, like the avatar one
+        // above) so `seed()`'s own cyclomatic complexity — already close to
+        // this file's configured ceiling from five prior showcase-flag
+        // checks — doesn't grow by another branch for a sixth.
+        primeCoverShowcaseImageCacheIfFlagged()
         // Idempotence guard, checked against the STORE (not callers' @Query
         // state, which can be un-hydrated at launch — the W1-B evidence run
         // caught a double-seed race exactly that way: two "Lisbon" rows from
@@ -283,6 +291,23 @@ enum DemoSeeder {
         if ProcessInfo.processInfo.arguments.contains("-uitestSeedAvatarShowcase") {
             await seedAvatarShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
         }
+        // P8b photo-covers capture set: own flag, same "own flag, additive"
+        // recipe as the four showcases above. NOTE (out of this change's
+        // file scope): unlike those four, this flag is deliberately NOT
+        // added to `HomeView.applyUITestAutopilotIfNeeded`'s own
+        // `showcaseFlags` reset array (`HomeView.swift`) — that file sits
+        // outside this pass's scope (TriptoTests/TriptoUITests + this file,
+        // additively, only). Every capture test that uses this flag must
+        // therefore launch on its own FRESH install (never combined with
+        // `-uitestOpenFirstTrip` or another showcase flag in one SHARED
+        // store) to avoid the exact `trips.first` sort-order landmine that
+        // array exists to prevent for the other four (see
+        // `seedRegisterShowcaseTrips`'s own doc comment above) — flagged in
+        // the Tester report as the one-line fix that would close this gap
+        // for a shared-store run. Routed through a tiny wrapper (see
+        // `primeCoverShowcaseImageCacheIfFlagged`'s own doc comment for why)
+        // rather than an inline `if` here.
+        await seedCoverShowcaseIfFlagged(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
         return tripId
     }
 
@@ -309,20 +334,21 @@ enum DemoSeeder {
     /// derives to, with a synthetic in-memory image — `AvatarPhotoCircle`'s
     /// `LazyImage(url:)` then finds a cache hit and renders it with zero
     /// network involved. Deliberately the MEMORY cache, never the on-disk
-    /// `DataCache` `AvatarImagePipeline` also configures — `DataCache`'s
+    /// `DataCache` `AppImagePipeline` also configures — `DataCache`'s
     /// own writes are staged and flushed asynchronously (confirmed against
     /// its own source, `Caching/DataCache.swift`), so priming it here has
     /// no guarantee of finishing before this process ends; called fresh on
     /// EVERY launch instead (see this function's call site, before `seed`'s
     /// own idempotence guard) sidesteps that entirely — cheap, since it's
-    /// just an in-memory dictionary write. `AvatarImagePipeline.configured`
+    /// just an in-memory dictionary write. `AppImagePipeline.configured`
+    /// (P8b: renamed from `AvatarImagePipeline` — same one shared pipeline)
     /// is force-referenced FIRST so the `DataCache`-backed pipeline swap
     /// (which replaces `ImagePipeline.shared` wholesale) has already
     /// happened before this primes it — priming the stock default pipeline
     /// instead would be silently discarded the moment any
     /// `AvatarPhotoCircle` first renders and triggers the swap.
     private static func primeAvatarShowcaseImageCache(userId: UUID) {
-        _ = AvatarImagePipeline.configured
+        _ = AppImagePipeline.configured
         guard let photo = syntheticAvatarPhoto() else { return }
         for path in [avatarShowcaseOwnPhotoPath(userId: userId), avatarShowcaseAshaPhotoPath] {
             if let url = AvatarStorage.publicURL(for: path) {
@@ -414,6 +440,192 @@ enum DemoSeeder {
         context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 0), end: CGPoint(x: size, y: size), options: [])
         guard let cgImage = context.makeImage() else { return nil }
         return UIImage(cgImage: cgImage)
+    }
+
+    // MARK: - P8b photo-covers capture set (Home card with a photo cover +
+    // a gradient-only control side by side, trip hero with a photo, a
+    // "been" row with a photo thumb, `TripFormView` already showing
+    // Change/Remove photo) — same "own flag, additive" recipe as every
+    // other showcase in this file.
+
+    /// Fixed, deterministic path (never a fresh random `UUID()`) — same
+    /// "both the cache-priming side and the row-creation side must agree on
+    /// the exact same string" reasoning as `avatarShowcaseOwnPhotoPath`/
+    /// `avatarShowcaseAshaPhotoPath` above. One path reused across every
+    /// trip in this showcase that needs a photo (unlike the per-person
+    /// avatar paths, which have to stay visually distinct side by side —
+    /// none of this showcase's photo trips are ever framed together in the
+    /// same screenshot, so there's nothing for one shared image to visually
+    /// collide with).
+    private static let coverShowcasePhotoPath = "uitest-fixed-cover/uitest-cover-photo.jpg"
+
+    /// A simple sky/sea/sun block-shape scene — deliberately real hard-edged
+    /// SHAPES, not a smooth blend like `syntheticAvatarPhoto()` above (see
+    /// `primeCoverShowcaseImageCache`'s own doc comment for why that
+    /// generator specifically doesn't fit here): confirmed empirically to
+    /// read as unambiguously "a photo" next to any of the app's own three
+    /// smooth `CoverGradient` tokens once composited through `CoverImage`.
+    private static func syntheticCoverPhoto() -> UIImage? {
+        let size = 320
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+            space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.setFillColor(CGColor(red: 0.55, green: 0.75, blue: 0.92, alpha: 1)) // sky
+        context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+        context.setFillColor(CGColor(red: 0.09, green: 0.28, blue: 0.45, alpha: 1)) // sea band
+        context.fill(CGRect(x: 0, y: 0, width: size, height: size / 3))
+        context.setFillColor(CGColor(red: 0.98, green: 0.72, blue: 0.28, alpha: 1)) // sun
+        context.fillEllipse(in: CGRect(x: size / 2 - 40, y: size / 2, width: 80, height: 80))
+        guard let cgImage = context.makeImage() else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    /// `seed()`'s own flag-check wrapper for `primeCoverShowcaseImageCache`
+    /// — a plain unconditional call from `seed()`, not an inline `if` there,
+    /// so that function's cyclomatic complexity (already close to this
+    /// file's configured ceiling from five prior showcase-flag checks)
+    /// doesn't grow by a sixth branch for this one. Same reasoning applies
+    /// to `seedCoverShowcaseIfFlagged` below.
+    private static func primeCoverShowcaseImageCacheIfFlagged() {
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedCoverShowcase") {
+            primeCoverShowcaseImageCache()
+        }
+    }
+
+    /// Same "prime Nuke's in-process MEMORY cache instead of a live fetch"
+    /// reasoning as `primeAvatarShowcaseImageCache` above (that function's
+    /// own doc comment covers the full "why memory cache / why every
+    /// launch / why `AppImagePipeline.configured` first" rationale — not
+    /// repeated here; `CoverStorage.publicURL(for:)`, not `AvatarStorage`'s,
+    /// is the one difference). Uses its OWN `syntheticCoverPhoto()` image
+    /// below rather than reusing `syntheticAvatarPhoto()`: that generator is
+    /// a smooth two-color gradient, indistinguishable at a glance from the
+    /// app's own `CoverGradient` tokens — fine for an avatar (the
+    /// alternative there is a FLAT initials color), but it would defeat the
+    /// whole point of this showcase's "photo vs. gradient-only control"
+    /// side-by-side comparison.
+    private static func primeCoverShowcaseImageCache() {
+        _ = AppImagePipeline.configured
+        guard let photo = syntheticCoverPhoto() else { return }
+        if let url = CoverStorage.publicURL(for: coverShowcasePhotoPath) {
+            ImagePipeline.shared.cache[url] = ImageContainer(image: photo)
+        }
+    }
+
+    /// Three small trips: an "ahead" one WITH a photo cover (Home card +
+    /// trip hero + `TripFormView` edit already showing Change/Remove photo
+    /// — `coverImagePath` is seeded straight onto the row, so no
+    /// `PhotosPicker` interaction is ever needed to reach that state), a
+    /// plain "ahead" one with NO photo (the gradient-only control, framed
+    /// side by side with the first on Home — same "put the comparison in
+    /// one shot" recipe `seedAvatarShowcase`'s own "Osaka Weekend"
+    /// photo-vs-initials pairing already uses), and a "been" one WITH a
+    /// photo cover (the 44pt thumb render, `CoverImage`'s `resizeTo`
+    /// branch). Dates chosen so neither ahead trip ever matches
+    /// `TripMergeDetection.isDuplicate` (different destinations AND
+    /// non-identical date ranges) — nothing here should ever surface the P6
+    /// duplicate-trip merge strip.
+    private static func seedCoverShowcase(modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date) async {
+        var deviceCalendar = Calendar(identifier: .gregorian)
+        deviceCalendar.timeZone = .current
+        let today = deviceCalendar.startOfDay(for: now)
+
+        let photoTripId = UUID()
+        let photoTrip = Trip(
+            id: photoTripId, title: "Zanzibar Escape", destination: "Zanzibar, Tanzania", countryCode: "TZ",
+            startDate: deviceCalendar.date(byAdding: .day, value: 18, to: today) ?? today,
+            endDate: deviceCalendar.date(byAdding: .day, value: 24, to: today) ?? today,
+            coverGradient: "dusk", tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil, coverImagePath: coverShowcasePhotoPath
+        )
+        let photoMember = TripMember(id: UUID(), tripId: photoTripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        // Real items — not just this trip's date-range gap-fill — so the
+        // itinerary tab has genuine scrollable content to collapse the hero
+        // against (the "trip hero ... collapsed state" capture). A
+        // multi-night hotel stay is the deliberate choice over more bare
+        // activities: it renders its own "staying — night N of M" strip for
+        // EVERY night it spans (`ItineraryDayBucketing`), which is what
+        // actually pushes total content past one screen's height — a single
+        // short activity plus gap-fill "Free day" rows alone measured out
+        // to fit on one screen with nothing left to scroll.
+        let photoTripActivityDay = deviceCalendar.date(byAdding: .day, value: 19, to: today) ?? today
+        let photoTripActivity = makeItem(
+            tripId: photoTripId, category: .activity, title: "Stone Town walking tour",
+            startsAt: deviceCalendar.date(bySettingHour: 10, minute: 0, second: 0, of: photoTripActivityDay) ?? photoTripActivityDay,
+            endsAt: nil, tz: TimeZone.current.identifier, locationName: "Stone Town, Zanzibar", confirmation: nil,
+            details: .empty, userId: userId, now: now
+        )
+        let photoTripCheckIn = deviceCalendar.date(byAdding: .day, value: 18, to: today) ?? today
+        let photoTripCheckOut = deviceCalendar.date(byAdding: .day, value: 24, to: today) ?? today
+        let photoTripHotel = makeItem(
+            tripId: photoTripId, category: .hotel, title: "Zanzibar Beach Resort",
+            startsAt: deviceCalendar.date(bySettingHour: 15, minute: 0, second: 0, of: photoTripCheckIn) ?? photoTripCheckIn,
+            endsAt: deviceCalendar.date(bySettingHour: 11, minute: 0, second: 0, of: photoTripCheckOut) ?? photoTripCheckOut,
+            tz: TimeZone.current.identifier, locationName: "Nungwi, Zanzibar", confirmation: "ZB-4471",
+            details: .empty, userId: userId, now: now
+        )
+
+        let controlTripId = UUID()
+        let controlTrip = Trip(
+            id: controlTripId, title: "Helsinki Weekend", destination: "Helsinki, Finland", countryCode: "FI",
+            startDate: deviceCalendar.date(byAdding: .day, value: 30, to: today) ?? today,
+            endDate: deviceCalendar.date(byAdding: .day, value: 33, to: today) ?? today,
+            coverGradient: "moss", tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now.addingTimeInterval(1), updatedAt: now, updatedBy: nil
+        )
+        let controlMember = TripMember(id: UUID(), tripId: controlTripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+
+        modelContext.insert(photoTrip)
+        modelContext.insert(photoMember) // local-only; never enqueued (see `seed()`'s own `member` doc comment)
+        modelContext.insert(controlTrip)
+        modelContext.insert(controlMember) // local-only; never enqueued
+        try? modelContext.save()
+
+        await syncEngine.enqueueUpsert(table: .trips, rowId: photoTripId, tripId: photoTripId, payload: photoTrip.toDTO())
+        await syncEngine.enqueueUpsert(table: .trips, rowId: controlTripId, tripId: controlTripId, payload: controlTrip.toDTO())
+        await syncEngine.flushPush()
+
+        modelContext.insert(photoTripActivity)
+        modelContext.insert(photoTripHotel)
+        try? modelContext.save()
+        await syncEngine.enqueueUpsert(
+            table: .itineraryItems, rowId: photoTripActivity.id, tripId: photoTripId, payload: photoTripActivity.toDTO()
+        )
+        await syncEngine.enqueueUpsert(
+            table: .itineraryItems, rowId: photoTripHotel.id, tripId: photoTripId, payload: photoTripHotel.toDTO()
+        )
+        await syncEngine.flushPush()
+
+        // A "been" trip WITH a photo cover — same fixed-calendar-year shape
+        // `seedPastTrip` above uses (a real "been" register needs a fixed
+        // year, not one relative to `now`), built by hand here since that
+        // helper has no `coverImagePath` parameter of its own to pass one
+        // through.
+        let beenTripId = UUID()
+        let beenTrip = Trip(
+            id: beenTripId, title: "Santorini Sunset", destination: "Santorini, Greece", countryCode: "GR",
+            startDate: DayDate(year: 2025, month: 11, day: 10).asDate(calendar: deviceCalendar),
+            endDate: DayDate(year: 2025, month: 11, day: 13).asDate(calendar: deviceCalendar),
+            coverGradient: "plum", tripTypeRaw: TripType.family.rawValue, createdBy: userId,
+            createdAt: now, updatedAt: now, updatedBy: nil, coverImagePath: coverShowcasePhotoPath
+        )
+        let beenMember = TripMember(id: UUID(), tripId: beenTripId, userId: userId, roleRaw: TripRole.organizer.rawValue, createdAt: now)
+        modelContext.insert(beenTrip)
+        modelContext.insert(beenMember) // local-only; never enqueued
+        try? modelContext.save()
+        await syncEngine.enqueueUpsert(table: .trips, rowId: beenTripId, tripId: beenTripId, payload: beenTrip.toDTO())
+        await syncEngine.flushPush()
+    }
+
+    /// `seed()`'s own flag-check wrapper — see `primeCoverShowcaseImage
+    /// CacheIfFlagged`'s doc comment for why this is a plain unconditional
+    /// call from `seed()` rather than an inline `if` there.
+    private static func seedCoverShowcaseIfFlagged(modelContext: ModelContext, syncEngine: SyncEngine, userId: UUID, now: Date) async {
+        if ProcessInfo.processInfo.arguments.contains("-uitestSeedCoverShowcase") {
+            await seedCoverShowcase(modelContext: modelContext, syncEngine: syncEngine, userId: userId, now: now)
+        }
     }
 
     // MARK: - UX P7 "next" register showcase (Home, countdown ring + FIRST UP)

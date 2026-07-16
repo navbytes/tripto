@@ -25,6 +25,12 @@ enum ImageProcessing {
     /// can reuse this exact pipeline with its own bound instead of forking it.
     static let avatarMaxPixelSize: CGFloat = 512
 
+    /// P8b's cover bound (plan D2: "cover ~1600px") — `TripFormView`'s cover
+    /// photo picker passes this explicitly to the same `downsampledJPEG`
+    /// below rather than forking a second pipeline (see `avatarMaxPixelSize`'s
+    /// own doc comment, which anticipated exactly this reuse).
+    static let coverMaxPixelSize: CGFloat = 1600
+
     /// Decode -> downsample -> re-encode as JPEG, via
     /// `CGImageSourceCreateThumbnailAtIndex` (P8a brief's exact option set):
     /// `kCGImageSourceThumbnailMaxPixelSize` bounds the longest side;

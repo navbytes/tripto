@@ -117,11 +117,13 @@ struct AvatarPhotoCircle: View {
                     .foregroundStyle(.white)
             }
             .overlay {
-                // `AvatarImagePipeline.configured` swaps in the
+                // `AppImagePipeline.configured` swaps in the
                 // DataCache-backed pipeline `LazyImage` reads by default,
                 // exactly once, before the first photo load this app ever
-                // attempts.
-                if let avatarPath, AvatarImagePipeline.configured, let url = AvatarStorage.publicURL(for: avatarPath) {
+                // attempts (P8b: renamed from `AvatarImagePipeline` — it
+                // configures the one shared pipeline every `LazyImage`
+                // reads, avatar or cover).
+                if let avatarPath, AppImagePipeline.configured, let url = AvatarStorage.publicURL(for: avatarPath) {
                     LazyImage(url: url) { state in
                         if let image = state.image {
                             image.resizable().scaledToFill()
