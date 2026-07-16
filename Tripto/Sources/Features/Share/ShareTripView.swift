@@ -1066,8 +1066,12 @@ struct ShareTripView: View {
     /// keeps only the local insert + toast, same as every other mutation.
     @discardableResult
     private func createShareLink() async -> TripShareLink? {
+        // F4 (reviewer, LOW): `syncEngine == nil` is a wiring/lifecycle gap
+        // (the view appeared before its engine was assigned), not a
+        // connectivity problem — a neutral retry prompt, not a network
+        // diagnosis this guard has no basis for making.
         guard let syncEngine else {
-            toast = "Couldn\u{2019}t create a share link \u{2014} check your connection."
+            toast = "Couldn\u{2019}t create the link. Try again."
             return nil
         }
         do {
@@ -1119,8 +1123,10 @@ struct ShareTripView: View {
     @discardableResult
     private func createInvite(role: TripRole, presentShareSheet: Bool = true) async -> Invite? {
         guard let userId = authManager.userId else { return nil }
+        // F4 (reviewer, LOW): same wiring-not-connectivity distinction as
+        // `createShareLink`'s identical guard above.
         guard let syncEngine else {
-            toast = "Couldn\u{2019}t create an invite link \u{2014} check your connection."
+            toast = "Couldn\u{2019}t create the invite. Try again."
             return nil
         }
         do {
@@ -1243,35 +1249,29 @@ struct ShareTripView: View {
         toast = "Merged into \(survivor.displayName)"
     }
 
-    /// D5 (reviewer, MED): op shape/order now comes from `MergeOutbox
+    /// D5 (reviewer, MED): op shape/order comes from `MergeOutbox
     /// .mergeDuplicateProfilesOps` (`Models/MergeOutbox.swift`, mirrors this
     /// exact loop and is asserted byte-for-byte in `OutboxCoalescingTests`),
-    /// not a hand-rolled loop re-typed here — decodes each op's payload back
-    /// into its table's DTO and replays the same enqueue call the old
-    /// inline loop made directly. `.itemAssignees` deletes route through
-    /// `enqueueDeleteItemAssignee` (not the generic `enqueueDelete`)
-    /// because the push path needs the real itemId/profileId pair, not
-    /// just the composite `rowId` — same reason the original loop called
-    /// that method instead.
+    /// not a hand-rolled loop re-typed here. F3 (reviewer, LOW-MED):
+    /// `MergeOutboxOp` now carries each op's real DTO directly — no JSON
+    /// encode/decode round trip, no `try?` silently dropping a case.
+    /// `.itemAssignees` deletes route through `enqueueDeleteItemAssignee`
+    /// (not the generic `enqueueDelete`) because the push path needs the
+    /// real itemId/profileId pair, not just the composite `rowId` — same
+    /// reason the original loop called that method instead.
     private func enqueueMergedProfileOp(_ op: MergeOutboxOp) async {
-        let data = Data(op.payloadJSON.utf8)
-        switch (op.table, op.op) {
-        case (.itemAssignees, .delete):
-            if let dto = try? JSONCoding.decoder.decode(ItemAssigneeDTO.self, from: data) {
-                await syncEngine?.enqueueDeleteItemAssignee(itemId: dto.itemId, profileId: dto.profileId, tripId: op.tripId)
-            }
-        case (.itemAssignees, .upsert):
-            if let dto = try? JSONCoding.decoder.decode(ItemAssigneeDTO.self, from: data) {
-                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
-            }
-        case (.packingItems, .upsert):
-            if let dto = try? JSONCoding.decoder.decode(PackingItemDTO.self, from: data) {
-                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
-            }
-        case (.tripProfiles, .delete):
-            await syncEngine?.enqueueDelete(table: op.table, rowId: op.rowId, tripId: op.tripId)
-        default:
-            break
+        switch op {
+        case .unassignItemAssignee(let dto, let tripId):
+            await syncEngine?.enqueueDeleteItemAssignee(itemId: dto.itemId, profileId: dto.profileId, tripId: tripId)
+        case .assignItemAssignee(let dto, let tripId):
+            let rowId = ItemAssignee.compositeId(itemId: dto.itemId, profileId: dto.profileId)
+            await syncEngine?.enqueueUpsert(table: .itemAssignees, rowId: rowId, tripId: tripId, payload: dto)
+        case .upsertPackingItem(let dto):
+            await syncEngine?.enqueueUpsert(table: .packingItems, rowId: dto.id, tripId: dto.tripId, payload: dto)
+        case .deleteTripProfile(let id, let tripId):
+            await syncEngine?.enqueueDelete(table: .tripProfiles, rowId: id, tripId: tripId)
+        case .upsertItineraryItem, .upsertTripProfile, .deleteTrip:
+            break // `HomeView.performMergeOps`-only cases; `mergeDuplicateProfilesOps` never produces these.
         }
     }
 

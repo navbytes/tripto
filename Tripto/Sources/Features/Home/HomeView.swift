@@ -1315,6 +1315,22 @@ struct HomeView: View {
     // MARK: - Mutations
 
     private func delete(_ trip: Trip) {
+        let tripId = deleteLocally(trip)
+        Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
+    }
+
+    /// The local-only half of `delete(_:)` above — the SwiftData delete +
+    /// member/profile cascade, with no outbox enqueue of its own.
+    ///
+    /// F1 (reviewer, MED): `performMerge` below calls this directly (instead
+    /// of `delete(_:)`) so the shell trip's `.trips` delete can be enqueued
+    /// from the SAME sequential loop as its repoint upserts — `delete(_:)`'s
+    /// own `Task { enqueueDelete }` would otherwise race that loop's `Task`,
+    /// and `SyncStore` assigns `seq` in arrival order, so the delete could
+    /// land before a repoint it should follow (a server-side `ON DELETE
+    /// CASCADE` would then orphan whatever hadn't moved yet).
+    @discardableResult
+    private func deleteLocally(_ trip: Trip) -> UUID {
         let tripId = trip.id
         modelContext.delete(trip)
         // Local cascade mirrors the server's FK cascade (SYNC_DESIGN.md
@@ -1327,7 +1343,7 @@ struct HomeView: View {
             modelContext.delete(profile)
         }
         try? modelContext.save()
-        Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
+        return tripId
     }
 
     /// E2 (docs/BACKLOG.md §E2): runs right after `tripToDuplicate`'s create
@@ -1530,53 +1546,51 @@ struct HomeView: View {
         }
 
         let ops = MergeOutbox.performMergeOps(moved, shellId: shellId, survivorId: survivorId)
-        Task {
-            for op in ops {
-                await enqueueMergedRowUpsert(op)
-            }
-        }
 
         // The shell's own items/packing/profiles have all moved away by
-        // this point, so `delete(_:)`'s existing `tripProfiles`/
-        // `tripMembers` cascade loop finds nothing left to double-delete on
-        // the profile side — it still removes the shell's own
-        // `TripMember` row(s) (this merge's permission gate already
-        // requires the acting user to be organizer of both trips, so at
-        // minimum their own membership carries over cleanly) and enqueues
-        // the one `trips`-table delete, unchanged.
+        // this point, so `deleteLocally(_:)`'s `tripProfiles` cascade loop
+        // finds nothing left to double-delete on the profile side — it
+        // still removes the shell's own `TripMember` row(s) (this merge's
+        // permission gate already requires the acting user to be organizer
+        // of both trips, so at minimum their own membership carries over
+        // cleanly).
+        //
+        // F1 (reviewer, MED): `deleteLocally(_:)`, not `delete(_:)` — the
+        // `.trips` delete `ops` already ends with is enqueued below, from
+        // the SAME sequential loop as the repoint upserts, instead of
+        // racing them from `delete(_:)`'s own separate `Task`.
         if let shellTrip = trips.first(where: { $0.id == shellId }) {
-            delete(shellTrip)
+            deleteLocally(shellTrip)
+        }
+        Task {
+            for op in ops {
+                await enqueueMergedOp(op)
+            }
         }
         return true
     }
 
-    /// D5 (reviewer, MED): op shape/order now comes from `MergeOutbox
+    /// D5 (reviewer, MED): op shape/order comes from `MergeOutbox
     /// .performMergeOps` (`Models/MergeOutbox.swift`, mirrors this exact
     /// loop and is asserted byte-for-byte in `OutboxCoalescingTests`), not a
-    /// hand-rolled loop re-typed here — this just decodes each op's payload
-    /// back into its table's DTO and replays the same `syncEngine?
-    /// .enqueueUpsert` call the old inline loop made directly. Only
-    /// `.upsert` ops are replayed: the shell's own trailing `.trips` delete
-    /// is, per that function's own doc comment, `performMerge`'s existing
-    /// call into `delete(_:)` above, not a second enqueue to make here.
-    private func enqueueMergedRowUpsert(_ op: MergeOutboxOp) async {
-        guard op.op == .upsert else { return }
-        let data = Data(op.payloadJSON.utf8)
-        switch op.table {
-        case .itineraryItems:
-            if let dto = try? JSONCoding.decoder.decode(ItineraryItemDTO.self, from: data) {
-                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
-            }
-        case .packingItems:
-            if let dto = try? JSONCoding.decoder.decode(PackingItemDTO.self, from: data) {
-                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
-            }
-        case .tripProfiles:
-            if let dto = try? JSONCoding.decoder.decode(TripProfileDTO.self, from: data) {
-                await syncEngine?.enqueueUpsert(table: op.table, rowId: op.rowId, tripId: op.tripId, payload: dto)
-            }
-        default:
-            break
+    /// hand-rolled loop re-typed here. F3 (reviewer, LOW-MED): `MergeOutboxOp`
+    /// now carries each op's real DTO directly — no JSON encode/decode round
+    /// trip, no `try?` silently dropping a case. F1 (reviewer, MED): this
+    /// also replays the trailing `.deleteTrip` op, folded into the same
+    /// sequential loop `performMerge` drives above instead of a second
+    /// `Task`, so its `seq` always lands after every repoint upsert's.
+    private func enqueueMergedOp(_ op: MergeOutboxOp) async {
+        switch op {
+        case .upsertItineraryItem(let dto):
+            await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: dto.id, tripId: dto.tripId, payload: dto)
+        case .upsertPackingItem(let dto):
+            await syncEngine?.enqueueUpsert(table: .packingItems, rowId: dto.id, tripId: dto.tripId, payload: dto)
+        case .upsertTripProfile(let dto):
+            await syncEngine?.enqueueUpsert(table: .tripProfiles, rowId: dto.id, tripId: dto.tripId, payload: dto)
+        case .deleteTrip(let id):
+            await syncEngine?.enqueueDelete(table: .trips, rowId: id, tripId: id)
+        case .unassignItemAssignee, .assignItemAssignee, .deleteTripProfile:
+            break // `ShareTripView.mergeDuplicateProfilesOps`-only cases; `performMergeOps` never produces these.
         }
     }
 

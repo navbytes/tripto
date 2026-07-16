@@ -30,19 +30,33 @@ final class ShareSummaryTests: XCTestCase {
         return utc.date(from: components)!
     }
 
-    /// A category-tagged sentinel triple so a failure names exactly which
-    /// category's branch leaked which field.
-    private func sentinels(for category: ItemCategory) -> (confirmation: String, note: String, email: String) {
+    /// A category-tagged sentinel so a failure names exactly which
+    /// category's branch leaked which field. F6 (security-auditor, LOW):
+    /// `reservationName` (`ItemDetails`) is a PII-ish person name — planted
+    /// on the food/activity fixtures below (the two categories sharing
+    /// `ShareSummary`'s `case .activity, .food:` branch; food's own add-item
+    /// form is the only surface that actually collects it today) alongside
+    /// the existing three, same "assert it never appears" contract. A named
+    /// struct, not a tuple — a 4th member would trip `large_tuple`.
+    private struct Sentinel {
+        let confirmation: String
+        let note: String
+        let email: String
+        let reservationName: String
+    }
+
+    private func sentinels(for category: ItemCategory) -> Sentinel {
         let tag = category.rawValue.uppercased()
-        return (
+        return Sentinel(
             confirmation: "SENTINEL-CONF-\(tag)-482",
             note: "SENTINEL-NOTE-\(tag)-DO-NOT-SHARE",
-            email: "sentinel-\(category.rawValue)@leak-test.example"
+            email: "sentinel-\(category.rawValue)@leak-test.example",
+            reservationName: "SENTINEL-RESNAME-\(tag)"
         )
     }
 
     private func assertNoLeak(
-        _ output: String, category: ItemCategory, _ sentinel: (confirmation: String, note: String, email: String),
+        _ output: String, category: ItemCategory, _ sentinel: Sentinel,
         file: StaticString = #filePath, line: UInt = #line
     ) {
         XCTAssertFalse(
@@ -56,6 +70,10 @@ final class ShareSummaryTests: XCTestCase {
         XCTAssertFalse(
             output.contains(sentinel.email),
             "\(category) share summary must never include an email address", file: file, line: line
+        )
+        XCTAssertFalse(
+            output.contains(sentinel.reservationName),
+            "\(category) share summary must never include the reservation name", file: file, line: line
         )
     }
 
@@ -108,11 +126,13 @@ final class ShareSummaryTests: XCTestCase {
 
     func testActivitySummaryNeverLeaksConfirmationNotesOrEmail() {
         let sentinel = sentinels(for: .activity)
+        var details = ItemDetails.empty
+        details.reservationName = sentinel.reservationName
         let item = TestFixtures.makeItineraryItem(
             category: .activity, title: "Belém Tower tour",
             startsAt: utcInstant(2026, 5, 15, 10, 0), tz: "Europe/Lisbon",
             locationName: "Belém, Lisbon",
-            confirmation: sentinel.confirmation
+            confirmation: sentinel.confirmation, details: details
         )
         item.notes = "\(sentinel.note) \u{2014} reach us at \(sentinel.email)"
 
@@ -129,11 +149,13 @@ final class ShareSummaryTests: XCTestCase {
 
     func testFoodSummaryNeverLeaksConfirmationNotesOrEmail() {
         let sentinel = sentinels(for: .food)
+        var details = ItemDetails.empty
+        details.reservationName = sentinel.reservationName
         let item = TestFixtures.makeItineraryItem(
             category: .food, title: "Time Out Market",
             startsAt: utcInstant(2026, 5, 15, 19, 30), tz: "Europe/Lisbon",
             locationName: "Cais do Sodré, Lisbon",
-            confirmation: sentinel.confirmation
+            confirmation: sentinel.confirmation, details: details
         )
         item.notes = "\(sentinel.note) \u{2014} reach us at \(sentinel.email)"
 

@@ -123,44 +123,25 @@ final class OutboxCoalescingTests: XCTestCase {
 
         let ops = MergeOutbox.performMergeOps(moved, shellId: shellId, survivorId: survivorId)
 
-        XCTAssertEqual(ops.count, 4, "one upsert per moved row, plus the shell's own trips delete")
-        // Exact shape AND order. Payloads are asserted by decoding back into
-        // the DTO and comparing structs, not by comparing JSON strings
-        // byte-for-byte (`JSONCoding.encoder` has no `.sortedKeys`, so two
-        // independent `encode()` calls of the same value aren't guaranteed
-        // identical key order) — and the *expected* side is round-tripped
-        // through the same encoder/decoder too (`roundTripped` below),
-        // since its ISO8601-with-fractional-seconds date strategy is only
-        // millisecond-precision, coarser than `Date.now`'s own resolution;
-        // comparing an un-round-tripped `Date` against a round-tripped one
-        // would fail on that precision gap alone. `item.toDTO()`/
-        // `packing.toDTO()`/`profile.toDTO()` read each row's state as
-        // `TripMerge.execute` already left it (re-pointed to `survivorId`),
-        // the same instances `moved` carries, so this also confirms the
-        // producer encodes the row's real DTO rather than a stand-in payload.
-        XCTAssertEqual(ops[0].table, .itineraryItems)
-        XCTAssertEqual(ops[0].op, .upsert)
-        XCTAssertEqual(ops[0].rowId, item.id)
-        XCTAssertEqual(ops[0].tripId, survivorId)
-        XCTAssertEqual(try decodedPayload(ops[0], as: ItineraryItemDTO.self), try roundTripped(item.toDTO()))
-
-        XCTAssertEqual(ops[1].table, .packingItems)
-        XCTAssertEqual(ops[1].op, .upsert)
-        XCTAssertEqual(ops[1].rowId, packing.id)
-        XCTAssertEqual(ops[1].tripId, survivorId)
-        XCTAssertEqual(try decodedPayload(ops[1], as: PackingItemDTO.self), try roundTripped(packing.toDTO()))
-
-        XCTAssertEqual(ops[2].table, .tripProfiles)
-        XCTAssertEqual(ops[2].op, .upsert)
-        XCTAssertEqual(ops[2].rowId, profile.id)
-        XCTAssertEqual(ops[2].tripId, survivorId)
-        XCTAssertEqual(try decodedPayload(ops[2], as: TripProfileDTO.self), try roundTripped(profile.toDTO()))
-
+        // F3 (reviewer, LOW-MED): `MergeOutboxOp` now carries each row's real
+        // DTO directly, so comparing against `item.toDTO()`/`packing.toDTO()`/
+        // `profile.toDTO()` needs no JSON round trip — these are the exact
+        // same in-memory values `moved` carries (already re-pointed to
+        // `survivorId` by `TripMerge.execute`), not a re-encoded copy.
         XCTAssertEqual(
-            ops[3],
-            MergeOutboxOp(table: .trips, op: .delete, rowId: shellId, tripId: shellId, payloadJSON: ""),
-            "the shell's own delete must be LAST, after every moved row's re-point"
+            ops,
+            [
+                .upsertItineraryItem(item.toDTO()),
+                .upsertPackingItem(packing.toDTO()),
+                .upsertTripProfile(profile.toDTO()),
+                .deleteTrip(id: shellId)
+            ],
+            "one upsert per moved row, re-pointed to the survivor, then the shell's own trips delete LAST"
         )
+        // F1 (reviewer, MED): named out explicitly, on top of the full-array
+        // check above — a single sequential enqueue loop over this list must
+        // send the shell's own delete after every repoint, never before.
+        XCTAssertEqual(ops.last, .deleteTrip(id: shellId), "the shell's own trips delete must be the trailing op")
     }
 
     /// D5: the exact ordered op list `ShareTripView.mergeDuplicateProfiles`
@@ -200,51 +181,19 @@ final class OutboxCoalescingTests: XCTestCase {
 
         let ops = MergeOutbox.mergeDuplicateProfilesOps(result, survivorId: survivor.id, duplicateId: duplicate.id, tripId: tripId)
 
-        // See the previous test's comment for why payloads are decoded and
-        // compared as structs rather than as raw JSON strings.
-        XCTAssertEqual(ops.count, 4, "one assignee delete, one assignee upsert (repointed), one packing upsert, one profile delete")
-
-        XCTAssertEqual(ops[0].table, .itemAssignees)
-        XCTAssertEqual(ops[0].op, .delete, "unassign from the duplicate first")
-        XCTAssertEqual(ops[0].rowId, ItemAssignee.compositeId(itemId: itemId, profileId: duplicate.id))
-        XCTAssertEqual(ops[0].tripId, tripId)
-        XCTAssertEqual(try decodedPayload(ops[0], as: ItemAssigneeDTO.self), ItemAssigneeDTO(itemId: itemId, profileId: duplicate.id))
-
-        XCTAssertEqual(ops[1].table, .itemAssignees)
-        XCTAssertEqual(ops[1].op, .upsert, "then re-pair to the survivor")
-        XCTAssertEqual(ops[1].rowId, ItemAssignee.compositeId(itemId: itemId, profileId: survivor.id))
-        XCTAssertEqual(ops[1].tripId, tripId)
-        XCTAssertEqual(try decodedPayload(ops[1], as: ItemAssigneeDTO.self), ItemAssigneeDTO(itemId: itemId, profileId: survivor.id))
-
-        XCTAssertEqual(ops[2].table, .packingItems)
-        XCTAssertEqual(ops[2].op, .upsert, "the repointed packing row")
-        XCTAssertEqual(ops[2].rowId, packing.id)
-        XCTAssertEqual(ops[2].tripId, tripId)
-        XCTAssertEqual(try decodedPayload(ops[2], as: PackingItemDTO.self), try roundTripped(packing.toDTO()))
-
+        // See the previous test's comment for why comparing typed ops
+        // against each row's own `toDTO()`/constructed DTO needs no JSON
+        // round trip.
         XCTAssertEqual(
-            ops[3],
-            MergeOutboxOp(table: .tripProfiles, op: .delete, rowId: duplicate.id, tripId: tripId, payloadJSON: ""),
-            "the duplicate profile's own delete is LAST"
+            ops,
+            [
+                .unassignItemAssignee(ItemAssigneeDTO(itemId: itemId, profileId: duplicate.id), tripId: tripId),
+                .assignItemAssignee(ItemAssigneeDTO(itemId: itemId, profileId: survivor.id), tripId: tripId),
+                .upsertPackingItem(packing.toDTO()),
+                .deleteTripProfile(id: duplicate.id, tripId: tripId)
+            ],
+            "unassign from the duplicate, re-pair to the survivor, repoint packing, then the duplicate's own profile delete LAST"
         )
-    }
-
-    /// Shared by both merge-op-shape tests above — `JSONCoding.decoder`
-    /// undoes `MergeOutbox`'s own `JSONCoding.encoder` (snake_case ->
-    /// camelCase), so decoding back into the DTO and comparing structs is
-    /// order-independent, unlike comparing the raw JSON strings.
-    private func decodedPayload<T: Decodable>(_ op: MergeOutboxOp, as type: T.Type) throws -> T {
-        try JSONCoding.decoder.decode(type, from: Data(op.payloadJSON.utf8))
-    }
-
-    /// Same encode-then-decode idiom `DTORoundTripTests` uses for its own
-    /// fidelity checks — needed here because `JSONCoding.encoder`'s
-    /// ISO8601-with-fractional-seconds date strategy is only millisecond-
-    /// precision, coarser than `Date.now`'s actual resolution. Comparing an
-    /// un-round-tripped expected DTO against one that came back through
-    /// `decodedPayload` above would spuriously fail on that precision gap.
-    private func roundTripped<T: Codable>(_ value: T) throws -> T {
-        try JSONCoding.decoder.decode(T.self, from: JSONCoding.encoder.encode(value))
     }
 
     func testDistinctRowsQueueSeparateOps() async throws {
@@ -254,6 +203,47 @@ final class OutboxCoalescingTests: XCTestCase {
 
         let ops = try await store.pendingOps()
         XCTAssertEqual(ops.count, 2)
+    }
+
+    /// F1/F2 (reviewer, MED): the merge path's whole ordering guarantee rests
+    /// on `nextSeq()` handing out a strictly increasing value to each
+    /// sequential enqueue — this is the direct proof, independent of any
+    /// particular caller (merge, plain edits, whatever).
+    func testSequentialEnqueuesYieldStrictlyIncreasingSeq() async throws {
+        let store = makeStore()
+        for _ in 0..<5 {
+            try await store.enqueueUpsert(table: .trips, rowId: UUID(), tripId: nil, payloadJSON: "{}")
+        }
+
+        let ops = try await store.pendingOps()
+        XCTAssertEqual(ops.map(\.seq), [0, 1, 2, 3, 4], "each sequential enqueue must get the next integer seq")
+    }
+
+    /// F2 (reviewer, MED): every `OutboxOp` row written before the `seq`
+    /// column existed lightweight-migrates it to `0` (`OutboxOp.seq`'s own
+    /// doc comment) — simulated directly here (bypassing `enqueueUpsert`,
+    /// which always assigns a fresh nonzero `seq`) via raw rows sharing
+    /// `seq: 0`, inserted newer-first on purpose to prove the recovered
+    /// order comes from `createdAt`, not array/insertion order.
+    func testPendingOpsBreaksSeqTiesByCreatedAtForPreMigrationRows() async throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let store = SyncStore(modelContainer: container)
+        let context = ModelContext(container)
+        let olderId = UUID()
+        let newerId = UUID()
+
+        context.insert(OutboxOp(
+            createdAt: Date(timeIntervalSince1970: 200), tableRaw: SyncTable.trips.rawValue,
+            opRaw: OutboxOpKind.upsert.rawValue, rowId: newerId, tripId: newerId, payloadJSON: "{}", seq: 0
+        ))
+        context.insert(OutboxOp(
+            createdAt: Date(timeIntervalSince1970: 100), tableRaw: SyncTable.trips.rawValue,
+            opRaw: OutboxOpKind.upsert.rawValue, rowId: olderId, tripId: olderId, payloadJSON: "{}", seq: 0
+        ))
+        try context.save()
+
+        let ops = try await store.pendingOps()
+        XCTAssertEqual(ops.map(\.rowId), [olderId, newerId], "tied at seq 0 — createdAt recovers FIFO order")
     }
 
     func testANewEditResetsTheRetryBudget() async throws {

@@ -20,8 +20,12 @@ final class OutboxOp {
     /// ops are enqueued back to back with no I/O between them (`Date`'s
     /// resolution isn't the issue; two calls can just land in the same
     /// instant) — `pendingOps()` sorts by this instead. Defaulted so
-    /// existing on-disk rows lightweight-migrate cleanly; every real
-    /// enqueue/coalesce path assigns a fresh value.
+    /// existing on-disk rows lightweight-migrate cleanly to `0`; every real
+    /// enqueue/coalesce path assigns a fresh, unique value. F2 (reviewer,
+    /// MED): that migration default means pre-migration rows can tie on
+    /// `seq` with each other (never with a freshly-enqueued row, which
+    /// always gets a strictly greater value) — `pendingOps()` breaks that
+    /// specific tie with `createdAt` as a secondary sort.
     var seq: Int = 0
     var tableRaw: String
     var opRaw: String

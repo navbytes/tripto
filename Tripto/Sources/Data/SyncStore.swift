@@ -35,6 +35,10 @@ struct OutboxOpSnapshot: Sendable, Equatable {
     var tripId: UUID?
     var payloadJSON: String
     var attempts: Int
+    /// See `OutboxOp.seq`'s doc comment — exposed so a test (or, if it ever
+    /// proves useful, the push loop) can assert FIFO order was actually
+    /// derived from `seq`, not incidentally from fetch order.
+    var seq: Int
 }
 
 extension SyncStore {
@@ -115,8 +119,19 @@ extension SyncStore {
 
     /// FIFO-by-`seq` snapshot of every queued op, oldest first (push sends
     /// ops in this order).
+    ///
+    /// F2 (reviewer, MED): `createdAt` is a secondary key, not the primary
+    /// one — every `OutboxOp` row written before the `seq` column existed
+    /// lightweight-migrated to `seq == 0` (`OutboxOp.seq`'s own doc
+    /// comment), so sorting by `seq` alone leaves any such rows' relative
+    /// order undefined against each other. `createdAt` breaks that tie the
+    /// same way FIFO order worked before `seq` existed; it never overrides
+    /// a real (non-tied) `seq` ordering, since every fresh enqueue/coalesce
+    /// assigns a `seq` strictly greater than every prior one.
     func pendingOps() throws -> [OutboxOpSnapshot] {
-        let descriptor = FetchDescriptor<OutboxOp>(sortBy: [SortDescriptor(\.seq, order: .forward)])
+        let descriptor = FetchDescriptor<OutboxOp>(
+            sortBy: [SortDescriptor(\.seq, order: .forward), SortDescriptor(\.createdAt, order: .forward)]
+        )
         return try modelContext.fetch(descriptor).compactMap { op in
             guard let table = op.table else { return nil }
             return OutboxOpSnapshot(
@@ -126,7 +141,8 @@ extension SyncStore {
                 rowId: op.rowId,
                 tripId: op.tripId,
                 payloadJSON: op.payloadJSON,
-                attempts: op.attempts
+                attempts: op.attempts,
+                seq: op.seq
             )
         }
     }
