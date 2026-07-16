@@ -107,11 +107,27 @@ final class TripSnapshotTests: XCTestCase {
 
     // MARK: - SyncStore.buildSnapshot()
 
+    /// Fixed reference instant (noon UTC — clear of any calendar-day
+    /// boundary in any real device time zone) + a UTC calendar for the
+    /// day-offset math below, mirroring `DateBucketingTests`' own "never
+    /// `Calendar.current`" discipline so a midnight/zone-boundary CI run
+    /// can't flake the tightest (same-day) case below.
+    /// `buildSnapshot`/`Trip.bucket` still default to `Calendar.current` for
+    /// the actual bucket comparison (no test seam to override that), but
+    /// pinning `now` removes the one real variable: which live moment the
+    /// suite happens to run at.
+    private let referenceNow = Date(timeIntervalSince1970: 1_800_014_400)
+    private let utc: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+
     func testBuildSnapshotExcludesPastTripsAndCapsAtSix() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let store = SyncStore(modelContainer: container)
-        let now = Date()
-        let calendar = Calendar.current
+        let now = referenceNow
+        let calendar = utc
 
         var dtos: [TripDTO] = []
         let pastId = UUID()
@@ -144,8 +160,8 @@ final class TripSnapshotTests: XCTestCase {
     func testBuildSnapshotFocusItemsBelongOnlyToTheInProgressTrip() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let store = SyncStore(modelContainer: container)
-        let now = Date()
-        let calendar = Calendar.current
+        let now = referenceNow
+        let calendar = utc
 
         let inProgressId = UUID()
         let upcomingId = UUID()
@@ -186,8 +202,8 @@ final class TripSnapshotTests: XCTestCase {
     func testBuildSnapshotExcludesSuggestedItems() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let store = SyncStore(modelContainer: container)
-        let now = Date()
-        let calendar = Calendar.current
+        let now = referenceNow
+        let calendar = utc
 
         let tripId = UUID()
         try await store.applyTrips([
@@ -212,8 +228,8 @@ final class TripSnapshotTests: XCTestCase {
     func testBuildSnapshotFocusesSoonestUpcomingWhenNoneInProgress() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let store = SyncStore(modelContainer: container)
-        let now = Date()
-        let calendar = Calendar.current
+        let now = referenceNow
+        let calendar = utc
 
         let soonerId = UUID()
         let laterId = UUID()
@@ -239,8 +255,8 @@ final class TripSnapshotTests: XCTestCase {
     func testBuildSnapshotCapsFocusItemsAtOneHundredAndMapsFlightFields() async throws {
         let container = AppSchema.makeContainer(inMemory: true)
         let store = SyncStore(modelContainer: container)
-        let now = Date()
-        let calendar = Calendar.current
+        let now = referenceNow
+        let calendar = utc
 
         let tripId = UUID()
         try await store.applyTrips([TestFixtures.makeTripDTO(
