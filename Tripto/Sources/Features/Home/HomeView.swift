@@ -432,7 +432,7 @@ struct HomeView: View {
         // exactly as hermetic/no-network as the rest of the suite.
         let showcaseFlags = [
             "-uitestSeedRegisterShowcase", "-uitestSeedNextRegisterShowcase", "-uitestSeedP6TrustShowcase",
-            "-uitestSeedAvatarShowcase"
+            "-uitestSeedAvatarShowcase", "-uitestSeedCoverShowcase"
         ]
         let needsShowcaseReset = !trips.isEmpty && showcaseFlags.contains { arguments.contains($0) }
         if arguments.contains("-uitestSeedIfEmpty") {
