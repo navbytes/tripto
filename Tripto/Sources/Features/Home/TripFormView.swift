@@ -639,12 +639,22 @@ struct TripFormView: View {
                     .font(Typo.body(Typo.Size.caption, weight: .bold))
                     .foregroundStyle(Palette.onAmber)
                     .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.md)
+                    // Fix-round (client-reported bug): the visual pill
+                    // rendered bare-text small (~20pt) despite a correct
+                    // 44pt hit band — `.background` used to sit BEFORE
+                    // `.frame(minHeight:)`, so the painted capsule sized
+                    // itself to the unpadded text, floating small inside the
+                    // invisible 44pt frame around it. `.frame(minHeight:)`
+                    // before `.contentShape` (still) is what makes the whole
+                    // frame tappable; `.background` LAST is what makes the
+                    // capsule actually fill it — same order as every other
+                    // 44pt pill CTA already shipped in this codebase
+                    // (`HomeView`, `BookingsTabView`, `PackingListView`,
+                    // `ItineraryTabView`, `TripView`, `BookingDetailView`).
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                    .contentShape(Capsule())
                     .background(Palette.amber, in: Capsule())
-                    // P8a fix-round D2 lesson: `.contentShape` must come
-                    // AFTER `.frame(minHeight:)`, never before — reversed,
-                    // the frame's own padding becomes a dead zone.
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
             }
             .disabled(isUploadingCoverPhoto)
 
@@ -680,9 +690,12 @@ struct TripFormView: View {
                 .font(Typo.body(Typo.Size.caption, weight: .bold))
                 .foregroundStyle(Palette.ink)
                 .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.md)
+                // Fix-round: see `coverPhotoPickerRow`'s identical comment —
+                // same missing-vertical-padding + background-before-frame bug.
+                .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                .contentShape(Capsule())
                 .background(Palette.mist, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
         }
         .disabled(isUploadingCoverPhoto)
     }
