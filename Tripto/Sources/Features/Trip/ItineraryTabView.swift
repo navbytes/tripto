@@ -746,26 +746,16 @@ struct ItineraryTabView: View {
                     // accessibilityHidden internally; the headline right
                     // below already carries the message. daySkeleton above
                     // is untouched.
-                    EmptyStateArt(scene: .itinerary)
-
-                    VStack(spacing: Spacing.xs) {
-                        Text(canEdit ? "Add your first flight, stay, or plan" : "Nothing planned yet")
-                            .font(Typo.display(Typo.Size.title))
-                            .foregroundStyle(Palette.ink)
-                            .multilineTextAlignment(.center)
-                        Text(
-                            canEdit
-                                ? "Tap the + button to start building the itinerary."
-                                : "The organizer hasn\u{2019}t added anything yet."
-                        )
-                        .font(Typo.body())
-                        .foregroundStyle(Palette.slate)
-                        .multilineTextAlignment(.center)
-                    }
-                    .padding(.horizontal, Spacing.xl)
-
-                    if canEdit {
-                        importTeaser
+                    EmptyState(
+                        scene: .itinerary,
+                        title: canEdit ? "Add your first flight, stay, or plan" : "Nothing planned yet",
+                        subtitle: canEdit
+                            ? "Tap the + button to start building the itinerary."
+                            : "The organizer hasn\u{2019}t added anything yet."
+                    ) {
+                        if canEdit {
+                            importTeaser
+                        }
                     }
                 }
             }
@@ -816,18 +806,10 @@ struct ItineraryTabView: View {
             // nothing new. A failed-while-online pull is different: it's
             // stuck until something asks again.
             if !isOffline {
-                Button(action: { onRetryLoad?() }) {
-                    // UX audit finding 7: "Try again" everywhere — matches
-                    // Home and Welcome, was the terser "Retry" here.
-                    Text("Try again")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Palette.onAmber)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.vertical, Spacing.md)
-                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                        .contentShape(Capsule())
-                        .background(Palette.amber, in: Capsule())
-                }
+                // UX audit finding 7: "Try again" everywhere — matches
+                // Home and Welcome, was the terser "Retry" here.
+                Button("Try again") { onRetryLoad?() }
+                    .buttonStyle(.primaryCapsule)
             }
         }
     }

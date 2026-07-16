@@ -946,17 +946,9 @@ struct TripView: View {
             .foregroundStyle(Palette.slate)
             .multilineTextAlignment(.center)
             .padding(.horizontal, Spacing.xxl)
-            Button(action: { dismiss() }) {
-                Text("Back to trips")
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(Palette.onAmber)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.md)
-                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                    .contentShape(Capsule())
-                    .background(Palette.amber, in: Capsule())
-            }
-            .padding(.top, Spacing.xs)
+            Button("Back to trips") { dismiss() }
+                .buttonStyle(.primaryCapsule)
+                .padding(.top, Spacing.xs)
         }
     }
 }

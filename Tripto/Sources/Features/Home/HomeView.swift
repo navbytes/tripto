@@ -996,24 +996,22 @@ struct HomeView: View {
                 // W1-D: EmptyStateArt replaces the old bare glyph here —
                 // decorative, fixed size, accessibilityHidden internally;
                 // the headline right below already carries the message.
-                EmptyStateArt(scene: .home)
-                VStack(spacing: Spacing.xs) {
-                    Text("Plan your first trip")
-                        .font(Typo.display(Typo.Size.title))
-                        .foregroundStyle(Palette.ink)
-                    Text("Everyone\u{2019}s bookings in one shared, at-a-glance itinerary.")
-                        .font(Typo.body())
-                        .foregroundStyle(Palette.slate)
-                        .multilineTextAlignment(.center)
-                }
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    valueRow("clock", "Every flight and plan in its own local time")
-                    valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
-                    valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
-                }
-                .padding(.top, Spacing.xs)
-                planNewTripCTA
+                EmptyState(
+                    scene: .home,
+                    title: "Plan your first trip",
+                    horizontalPadding: 0,
+                    titleAlignment: .leading,
+                    subtitle: "Everyone\u{2019}s bookings in one shared, at-a-glance itinerary."
+                ) {
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        valueRow("clock", "Every flight and plan in its own local time")
+                        valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
+                        valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
+                    }
                     .padding(.top, Spacing.xs)
+                    planNewTripCTA
+                        .padding(.top, Spacing.xs)
+                }
                 Spacer()
                 Spacer()
             }
@@ -1164,14 +1162,8 @@ struct HomeView: View {
                         }
                         Text(isRetryingPull ? "Trying again\u{2026}" : "Try again")
                     }
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(Palette.onAmber)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.md)
-                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
-                    .contentShape(Capsule())
-                    .background(Palette.amber, in: Capsule())
                 }
+                .buttonStyle(.primaryCapsule)
                 .disabled(isRetryingPull)
                 .padding(.top, Spacing.xs)
                 if retryFailedAgain {
@@ -1249,18 +1241,10 @@ struct HomeView: View {
     }
 
     private var planNewTripCTA: some View {
-        Button {
+        Button("Plan a new trip") {
             isPresentingCreate = true
-        } label: {
-            Text("Plan a new trip")
-                .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.onAmber)
-                .padding(.horizontal, Spacing.xl)
-                .padding(.vertical, Spacing.md)
-                .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
-                .contentShape(Capsule())
-                .background(Palette.amber, in: Capsule())
         }
+        .buttonStyle(.primaryCapsule)
     }
 
     // MARK: - Derived data (docs/UX_REDESIGN_ROADMAP.md Phase 5)

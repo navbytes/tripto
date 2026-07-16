@@ -197,28 +197,18 @@ struct BookingsTabView: View {
                 // W1-D: EmptyStateArt replaces the old bare glyph here —
                 // decorative, fixed size, accessibilityHidden internally;
                 // the sentence right below already carries the message.
-                EmptyStateArt(scene: .bookings)
-                Text(
-                    onAdd != nil
+                EmptyState(
+                    scene: .bookings,
+                    horizontalPadding: Spacing.xxl,
+                    subtitle: onAdd != nil
                         ? "Add a flight or stay with its confirmation code \u{2014} bookings collect here automatically."
                         : "Bookings the organizers add will collect here."
-                )
-                .font(Typo.body())
-                .foregroundStyle(Palette.slate)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Spacing.xxl)
-                if let onAdd {
-                    Button(action: onAdd) {
-                        Text("Add your first booking")
-                            .font(Typo.body(weight: .semibold))
-                            .foregroundStyle(Palette.onAmber)
-                            .padding(.horizontal, Spacing.xl)
-                            .padding(.vertical, Spacing.md)
-                            .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                            .contentShape(Capsule())
-                            .background(Palette.amber, in: Capsule())
+                ) {
+                    if let onAdd {
+                        Button("Add your first booking", action: onAdd)
+                            .buttonStyle(.primaryCapsule)
+                            .padding(.top, Spacing.xs)
                     }
-                    .padding(.top, Spacing.xs)
                 }
             }
             Spacer()
@@ -259,19 +249,11 @@ struct BookingsTabView: View {
             // connectivity returns, so a CTA here would just be a button
             // that does nothing new.
             if !isOffline {
-                Button(action: { onRetryLoad?() }) {
-                    // UX audit finding 7: "Try again" everywhere — matches
-                    // Home and Welcome, was the terser "Retry" here.
-                    Text("Try again")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Palette.onAmber)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.vertical, Spacing.md)
-                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                        .contentShape(Capsule())
-                        .background(Palette.amber, in: Capsule())
-                }
-                .padding(.top, Spacing.xs)
+                // UX audit finding 7: "Try again" everywhere — matches
+                // Home and Welcome, was the terser "Retry" here.
+                Button("Try again") { onRetryLoad?() }
+                    .buttonStyle(.primaryCapsule)
+                    .padding(.top, Spacing.xs)
             }
         }
     }
