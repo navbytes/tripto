@@ -6,36 +6,26 @@ import SwiftUI
 /// vertical rail. Color is never the only signal — the icon always rides
 /// along (§7.3).
 extension ItemCategory {
-    var colorPair: CategoryColor.Pair {
+    /// The `Platform/Shared` join key for this category (DRY M1 #3): same
+    /// 5 cases, same raw values (`SnapshotItem.Category`'s own doc
+    /// comment) — the icon/label/color mapping below lives once, on the
+    /// shared type (`Platform/Shared/CategoryPresentation.swift`), keyed
+    /// through this bridge rather than duplicated here.
+    private var snapshotCategory: SnapshotItem.Category {
         switch self {
-        case .flight: CategoryColor.flight
-        case .hotel: CategoryColor.hotel
-        case .activity: CategoryColor.activity
-        case .food: CategoryColor.food
-        case .transport: CategoryColor.transport
+        case .flight: .flight
+        case .hotel: .hotel
+        case .activity: .activity
+        case .food: .food
+        case .transport: .transport
         }
     }
 
-    var symbolName: String {
-        switch self {
-        case .flight: "airplane"
-        case .hotel: "bed.double.fill"
-        case .activity: "camera.fill"
-        case .food: "fork.knife"
-        case .transport: "car.fill"
-        }
-    }
+    var colorPair: CategoryColor.Pair { snapshotCategory.colorPair }
+    var symbolName: String { snapshotCategory.symbolName }
 
     /// Form/selector label ("Stay", not the raw "hotel").
-    var displayName: String {
-        switch self {
-        case .flight: "Flight"
-        case .hotel: "Stay"
-        case .activity: "Activity"
-        case .food: "Food"
-        case .transport: "Transport"
-        }
-    }
+    var displayName: String { snapshotCategory.displayName }
 }
 
 /// The 38pt icon tile on timeline cards and booking rows.

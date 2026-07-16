@@ -389,15 +389,11 @@ enum TimelineBuilder {
     /// midnight of the `DayDate` so the weekday never shifts with the
     /// viewer's zone (the day sections themselves are already zone-resolved).
     /// Internal (not `private`): `BookingsTabView` reuses this for its own
-    /// per-row date text rather than re-deriving the same format.
+    /// per-row date text rather than re-deriving the same format. The day
+    /// label recipe itself is `ItineraryTimeZone.dayLabel` (DRY M3), shared
+    /// with `ShareSummary`'s own day text.
     static func dayTitleText(_ day: DayDate) -> String {
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(identifier: "UTC")!
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE MMM d"
-        formatter.timeZone = utc.timeZone
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: day.asDate(calendar: utc))
+        ItineraryTimeZone.dayLabel(day.asDate(calendar: ItineraryTimeZone.utcCalendar), in: ItineraryTimeZone.utc)
     }
 }
 

@@ -120,26 +120,21 @@ struct NextTripWidgetView: View {
     }
 }
 
-// MARK: - Shared trip day-math (mirrors `Models/Trip+Bucketing.swift`)
+// MARK: - Shared trip day-math (`Platform/Shared/TripDateMath.swift`)
 
 extension SnapshotTrip {
-    /// Reimplemented, not imported — `Models/` (where `TripDateBucketing`
-    /// lives) never compiles into `TriptoWidgets` (D6: no SwiftData/model
-    /// types in the widget extension). Kept behaviorally identical to
-    /// `TripCard`'s own pill: same day-granular `Calendar.current
-    /// .startOfDay` comparison, so a trip's "in N days"/"in progress"
-    /// reads identically on the widget and in the app.
+    /// `Platform/Shared/TripDateMath` (DRY M1 #2) — not `Models/
+    /// Trip+Bucketing.swift`'s `TripDateBucketing`, which never compiles
+    /// into `TriptoWidgets` (D6: no SwiftData/model types in the widget
+    /// extension). Same pure check the app's own `TripDateBucketing.bucket`
+    /// calls, so a trip's "in N days"/"in progress" reads identically on
+    /// the widget and in the app.
     func isInProgress(asOf date: Date, calendar: Calendar = .current) -> Bool {
-        let start = calendar.startOfDay(for: startDate)
-        let end = calendar.startOfDay(for: endDate)
-        let today = calendar.startOfDay(for: date)
-        return start <= today && today <= end
+        TripDateMath.isInProgress(startDate: startDate, endDate: endDate, asOf: date, calendar: calendar)
     }
 
     func daysUntilStart(asOf date: Date, calendar: Calendar = .current) -> Int {
-        let start = calendar.startOfDay(for: startDate)
-        let today = calendar.startOfDay(for: date)
-        return calendar.dateComponents([.day], from: today, to: start).day ?? 0
+        TripDateMath.daysUntilStart(startDate: startDate, today: date, calendar: calendar)
     }
 }
 
