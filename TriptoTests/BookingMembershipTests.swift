@@ -83,9 +83,9 @@ final class BookingMembershipTests: XCTestCase {
     /// it before either tab's `items` array is built (see that init's doc
     /// comment: "filtered at the query itself ... every consumer ... inherits
     /// the exclusion for free"). If `isBooking` also filtered status, that
-    /// exclusion would happen twice. Mirrors `DemoSeeder.seedSuggestedItem`'s
-    /// exact fixture (suggested flight, confirmation "SKY204X") so this test
-    /// pins the real shape a regression would reintroduce.
+    /// exclusion would happen twice. Uses a realistic fixture (suggested
+    /// flight, confirmation "SKY204X") so this test pins the real shape a
+    /// regression would reintroduce.
     func testIsBookingDoesNotFilterByStatusThatIsTripViewsJob() {
         let suggestedFlight = TestFixtures.makeItineraryItem(
             category: .flight, startsAt: .now, confirmation: "SKY204X", status: .suggested

@@ -255,57 +255,7 @@ final class CoverSearchSheetTests: XCTestCase {
         XCTAssertEqual(provider.callCount, 0, "empty/1-char/whitespace-only queries must never reach the search provider")
     }
 
-    // MARK: - Task-cancellation contract (JOB A hardening): "rapid query
-    // changes ... assert stale-query results never surface (task
-    // cancellation actually cancels, not just ignores)." The real defense
-    // lives in `CoverSearchSheet.body`'s `.task(id: query)` + `runSearch()`'s
-    // own `guard !Task.isCancelled else { return }` right after `await
-    // requestPage(1)` — both private/`@State`-bound, unreachable from
-    // XCTest without a SwiftUI-hosting harness this codebase has never
-    // needed (see the Tester report for the precise gap + the minimal
-    // extraction that would close it). The end-to-end race — a real,
-    // artificially slow query superseded by a real, fast one — IS covered,
-    // at the UI-test level: `TriptoUITests
-    // .testRapidQueryChangeNeverLetsAStaleSlowResultSurface`. This test
-    // instead pins the one-level-down MECHANICAL contract that guard
-    // depends on, directly against `CoverSearchProviding` with injected
-    // latency: a `Task` cancelled before a slow provider call resolves must
-    // still read `Task.isCancelled == true`, from INSIDE its own body, once
-    // that call finally resumes — the exact position `runSearch`'s guard
-    // checks from.
-
-    private struct DelayedStubCoverSearchProvider: CoverSearchProviding, @unchecked Sendable {
-        let response: CoverSearchResponse
-        let delayMilliseconds: UInt64
-
-        func search(query: String, page: Int) async throws -> CoverSearchResponse {
-            try await Task.sleep(for: .milliseconds(delayMilliseconds))
-            return response
-        }
-    }
-
-    func testTaskCancelledBeforeASlowProviderCallResolvesStillReadsCancelledOnceItResumes() async throws {
-        let stalePhoto = makePhoto(id: 1, photographerName: "Stale Query Result")
-        let stub = DelayedStubCoverSearchProvider(
-            response: CoverSearchResponse(photos: [stalePhoto], page: 1, totalResults: 1, nextPage: false),
-            delayMilliseconds: 500
-        )
-        // Mirrors `runSearch`'s exact shape: `switch await requestPage(1) {
-        // case .success: guard !Task.isCancelled else { return } ... }` —
-        // "a newer query already superseded this one" (that guard's own
-        // comment), reproduced with a REAL `Task` + REAL cancellation.
-        let staleTask = Task<Bool, Never> {
-            _ = try? await stub.search(query: "stale", page: 1)
-            return Task.isCancelled
-        }
-        staleTask.cancel()
-        let stillReadsCancelledAfterResuming = await staleTask.value
-        XCTAssertTrue(
-            stillReadsCancelledAfterResuming,
-            "a task cancelled before a slow provider call resolves must still read cancelled once that call " +
-                "resumes — the exact guard `runSearch`'s own `guard !Task.isCancelled else { return }` depends on"
-        )
-    }
+    // `runSearch`'s stale-result guard has no unit seam (private/`@State`-bound); covered end-to-end by `TriptoUITests.testRapidQueryChangeNeverLetsAStaleSlowResultSurface`.
 
     // MARK: - processAndUpload: the download -> process -> upload pipeline
 

@@ -15,6 +15,18 @@ import SwiftData
 final class OutboxOp {
     @Attribute(.unique) var id: UUID
     var createdAt: Date
+    /// Monotonic FIFO order key, assigned by `SyncStore` from the current
+    /// on-disk max on every enqueue/coalesce. `createdAt` alone ties when two
+    /// ops are enqueued back to back with no I/O between them (`Date`'s
+    /// resolution isn't the issue; two calls can just land in the same
+    /// instant) — `pendingOps()` sorts by this instead. Defaulted so
+    /// existing on-disk rows lightweight-migrate cleanly to `0`; every real
+    /// enqueue/coalesce path assigns a fresh, unique value. F2 (reviewer,
+    /// MED): that migration default means pre-migration rows can tie on
+    /// `seq` with each other (never with a freshly-enqueued row, which
+    /// always gets a strictly greater value) — `pendingOps()` breaks that
+    /// specific tie with `createdAt` as a secondary sort.
+    var seq: Int = 0
     var tableRaw: String
     var opRaw: String
     var rowId: UUID
@@ -34,7 +46,8 @@ final class OutboxOp {
         tripId: UUID?,
         payloadJSON: String,
         attempts: Int = 0,
-        lastError: String? = nil
+        lastError: String? = nil,
+        seq: Int = 0
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -45,6 +58,7 @@ final class OutboxOp {
         self.payloadJSON = payloadJSON
         self.attempts = attempts
         self.lastError = lastError
+        self.seq = seq
     }
 
     var table: SyncTable? { SyncTable(rawValue: tableRaw) }

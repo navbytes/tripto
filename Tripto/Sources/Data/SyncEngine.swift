@@ -29,6 +29,13 @@ actor SyncEngine {
     /// simulator's network otherwise just follows the host machine's, so
     /// there's no other way to drive the offline UI in-simulator.
     private let forcedOffline: Bool
+    /// Test-only mirror of `forcedOffline`: `SyncEnginePushLoopTests`' core
+    /// push-loop tests used to `XCTSkipIf(isEffectivelyOffline)` because
+    /// `isPathOffline` follows the real `NWPathMonitor`, whose first async
+    /// callback may not have fired yet — a sandboxed/network-restricted test
+    /// host raced that skip instead of running deterministically. No
+    /// production caller sets this; defaults to `false`.
+    private let forcedOnline: Bool
 
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "io.navbytes.tripto.sync.path-monitor")
@@ -64,14 +71,19 @@ actor SyncEngine {
     /// since a dead channel degrades to pull-on-foreground rather than
     /// losing user data, so there's less to gain from a long tail of retries.
     static let maxRealtimeSubscribeAttempts = 5
+    /// Bounded retry budget for the organizer-race retry on a brand-new
+    /// share-link/invite create (`SyncEngine+ShareLinks.swift`) — same count
+    /// the view-local retry this replaced used.
+    static let maxOrganizerRaceAttempts = 5
     static let pushDebounceMilliseconds: UInt64 = 300
     static let pullDebounceMilliseconds: UInt64 = 500
 
-    init(modelContainer: ModelContainer, status: SyncStatus) {
+    init(modelContainer: ModelContainer, status: SyncStatus, forcedOnline: Bool = false) {
         store = SyncStore(modelContainer: modelContainer)
         self.status = status
         snapshotWriter = SnapshotWriter(store: store)
         forcedOffline = ProcessInfo.processInfo.arguments.contains("-simulateOffline")
+        self.forcedOnline = forcedOnline
 
         pathMonitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
@@ -82,7 +94,8 @@ actor SyncEngine {
 
     /// True when either the real network is down or `-simulateOffline`
     /// forced it — every network-touching entry point gates on this.
-    var isEffectivelyOffline: Bool { forcedOffline || isPathOffline }
+    /// `forcedOnline` overrides both (test-only, see its own doc comment).
+    var isEffectivelyOffline: Bool { !forcedOnline && (forcedOffline || isPathOffline) }
 
     // MARK: - Lifecycle
 

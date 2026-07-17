@@ -35,18 +35,24 @@ struct OutboxOpSnapshot: Sendable, Equatable {
     var tripId: UUID?
     var payloadJSON: String
     var attempts: Int
+    /// See `OutboxOp.seq`'s doc comment — exposed so a test (or, if it ever
+    /// proves useful, the push loop) can assert FIFO order was actually
+    /// derived from `seq`, not incidentally from fetch order.
+    var seq: Int
 }
 
 extension SyncStore {
     /// Coalescing rule: one pending upsert per `rowId`; a newer local edit
     /// replaces the previous op's payload rather than queuing a second one.
     func enqueueUpsert(table: SyncTable, rowId: UUID, tripId: UUID?, payloadJSON: String) throws {
+        let seq = try nextSeq()
         if let existing = try fetchOp(rowId: rowId) {
             existing.tableRaw = table.rawValue
             existing.op = .upsert
             existing.tripId = tripId
             existing.payloadJSON = payloadJSON
             existing.createdAt = .now
+            existing.seq = seq
             // A fresh edit deserves a fresh retry budget rather than
             // inheriting a near-exhausted one from an unrelated earlier op.
             existing.attempts = 0
@@ -58,7 +64,8 @@ extension SyncStore {
                     opRaw: OutboxOpKind.upsert.rawValue,
                     rowId: rowId,
                     tripId: tripId,
-                    payloadJSON: payloadJSON
+                    payloadJSON: payloadJSON,
+                    seq: seq
                 )
             )
         }
@@ -75,12 +82,14 @@ extension SyncStore {
     /// here so the push path can build the right `.eq(...).eq(...)` filter —
     /// see `ItemAssignee`'s doc comment.
     func enqueueDelete(table: SyncTable, rowId: UUID, tripId: UUID?, payloadJSON: String = "") throws {
+        let seq = try nextSeq()
         if let existing = try fetchOp(rowId: rowId) {
             existing.tableRaw = table.rawValue
             existing.op = .delete
             existing.tripId = tripId
             existing.payloadJSON = payloadJSON
             existing.createdAt = .now
+            existing.seq = seq
             existing.attempts = 0
             existing.lastError = nil
         } else {
@@ -90,17 +99,39 @@ extension SyncStore {
                     opRaw: OutboxOpKind.delete.rawValue,
                     rowId: rowId,
                     tripId: tripId,
-                    payloadJSON: payloadJSON
+                    payloadJSON: payloadJSON,
+                    seq: seq
                 )
             )
         }
         try modelContext.save()
     }
 
-    /// FIFO-by-creation snapshot of every queued op, oldest first (push
-    /// sends ops in this order).
+    /// Next monotonic `seq` value, derived from the current on-disk max
+    /// rather than an in-process counter — an actor-local counter would
+    /// reset to 0 on relaunch and could collide with ops still queued from a
+    /// previous run; re-deriving from disk survives that.
+    private func nextSeq() throws -> Int {
+        var descriptor = FetchDescriptor<OutboxOp>(sortBy: [SortDescriptor(\.seq, order: .reverse)])
+        descriptor.fetchLimit = 1
+        return ((try modelContext.fetch(descriptor).first?.seq) ?? -1) + 1
+    }
+
+    /// FIFO-by-`seq` snapshot of every queued op, oldest first (push sends
+    /// ops in this order).
+    ///
+    /// F2 (reviewer, MED): `createdAt` is a secondary key, not the primary
+    /// one — every `OutboxOp` row written before the `seq` column existed
+    /// lightweight-migrated to `seq == 0` (`OutboxOp.seq`'s own doc
+    /// comment), so sorting by `seq` alone leaves any such rows' relative
+    /// order undefined against each other. `createdAt` breaks that tie the
+    /// same way FIFO order worked before `seq` existed; it never overrides
+    /// a real (non-tied) `seq` ordering, since every fresh enqueue/coalesce
+    /// assigns a `seq` strictly greater than every prior one.
     func pendingOps() throws -> [OutboxOpSnapshot] {
-        let descriptor = FetchDescriptor<OutboxOp>(sortBy: [SortDescriptor(\.createdAt, order: .forward)])
+        let descriptor = FetchDescriptor<OutboxOp>(
+            sortBy: [SortDescriptor(\.seq, order: .forward), SortDescriptor(\.createdAt, order: .forward)]
+        )
         return try modelContext.fetch(descriptor).compactMap { op in
             guard let table = op.table else { return nil }
             return OutboxOpSnapshot(
@@ -110,7 +141,8 @@ extension SyncStore {
                 rowId: op.rowId,
                 tripId: op.tripId,
                 payloadJSON: op.payloadJSON,
-                attempts: op.attempts
+                attempts: op.attempts,
+                seq: op.seq
             )
         }
     }

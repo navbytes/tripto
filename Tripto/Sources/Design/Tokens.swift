@@ -190,6 +190,18 @@ public enum Radii {
     public static let cover: CGFloat = 22
 }
 
+// MARK: - Tap target
+
+/// BUILD_PLAN.md §6.5's minimum tap-target floor — one named value
+/// instead of a bare `44` literal repeated at every interactive
+/// control's `.frame(minHeight:)`. Named `TapTarget`, not `Layout`:
+/// SwiftUI already exports a top-level `Layout` protocol, and a same-
+/// named type in this module would shadow it at every unqualified
+/// `Layout` reference (e.g. `WrapLayout: Layout`).
+public enum TapTarget {
+    public static let minHeight: CGFloat = 44
+}
+
 // MARK: - Typography
 
 /// Type scale (BUILD_PLAN.md §6.2): Fraunces for display/titles, Sofia

@@ -174,13 +174,15 @@ extension TripSnapshot {
     /// off-limits to the widget extension for the same reason as
     /// `DayDate`/`ItemCategory` above. This file is only ever read by code
     /// that also wrote it, so (unlike `JSONCoding`, which tolerates
-    /// PostgREST's varying fractional-seconds formatting) a single ISO8601
-    /// formatter is enough.
+    /// PostgREST's varying fractional-seconds formatting) only the
+    /// fractional-seconds formatter is ever needed — the shared `ISO8601`
+    /// enum (`Platform/Shared/ISO8601.swift`), not a formatter of its own
+    /// (DRY L4).
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             var container = encoder.singleValueContainer()
-            try container.encode(iso8601.string(from: date))
+            try container.encode(ISO8601.withFractionalSeconds.string(from: date))
         }
         return encoder
     }()
@@ -190,17 +192,11 @@ extension TripSnapshot {
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
             let raw = try container.decode(String.self)
-            guard let date = iso8601.date(from: raw) else {
+            guard let date = ISO8601.withFractionalSeconds.date(from: raw) else {
                 throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date: \(raw)")
             }
             return date
         }
         return decoder
-    }()
-
-    private static let iso8601: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
     }()
 }

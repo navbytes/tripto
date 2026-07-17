@@ -22,12 +22,11 @@ enum ItineraryTimeZone {
 
     /// Wall-clock "HH:mm" for `date` in `tz` (24-hour, locale-independent —
     /// the gutter's time column, matching the mockup's "08:20" style).
+    /// Forwards to `Platform/Shared/SnapshotTimeFormatting` (DRY M1 #1) —
+    /// the widget extension needs the identical formatting and can't
+    /// compile `Models/`, so the one implementation lives there instead.
     static func timeString(_ date: Date, in tz: TimeZone) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        formatter.timeZone = tz
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: date)
+        SnapshotTimeFormatting.timeString(date, in: tz)
     }
 
     /// A short zone label for the gutter/boarding-pass ("EDT", "WEST"): the
@@ -35,14 +34,13 @@ enum ItineraryTimeZone {
     /// city segment of the IANA identifier — the brief's explicit fallback,
     /// so an unusual zone never renders as nothing.
     static func zoneLabel(for tz: TimeZone, at date: Date = .now) -> String {
-        tz.abbreviation(for: date) ?? citySegment(of: tz.identifier)
+        SnapshotTimeFormatting.zoneLabel(for: tz, at: date)
     }
 
     /// "Europe/Lisbon" -> "Lisbon", "America/New_York" -> "New York". Falls
     /// back to the raw identifier for the rare zone with no `/` (e.g. "UTC").
     static func citySegment(of identifier: String) -> String {
-        guard let last = identifier.split(separator: "/").last else { return identifier }
-        return last.replacingOccurrences(of: "_", with: " ")
+        SnapshotTimeFormatting.citySegment(of: identifier)
     }
 
     /// Whether `current`'s primary zone differs from `previous`'s
@@ -54,6 +52,51 @@ enum ItineraryTimeZone {
         guard let previous else { return false }
         return previous.effectiveTz.identifier != current.primaryTz.identifier
     }
+
+    /// "Wed May 14" — a fixed POSIX-locale day label (DRY M3): the
+    /// booking-detail share summary's day half (`Models/ShareSummary.swift`,
+    /// the item's own zone) and the timeline's day-section header
+    /// (`Features/Trip/TimelineModels.swift`, UTC — it formats a `DayDate`
+    /// at UTC-midnight) both built this exact recipe; this is the one place
+    /// it's built now.
+    static func dayLabel(_ date: Date, in tz: TimeZone) -> String {
+        posixFormatter("EEE MMM d", timeZone: tz).string(from: date)
+    }
+
+    /// One POSIX-locale `DateFormatter` construction recipe (DRY L1): fixed
+    /// `format` + `timeZone`, `en_US_POSIX` locale — every fixed-format,
+    /// locale-independent formatter keyed on a bare time zone is built this
+    /// way.
+    static func posixFormatter(_ format: String, timeZone: TimeZone) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = format
+        formatter.timeZone = timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }
+
+    /// Same POSIX-locale recipe as `posixFormatter(_:timeZone:)`, for the
+    /// one call site (`TripArchiveExporter.writeTempFile`) that needs its
+    /// own `Calendar`'s identifier honored, not just a bare time zone.
+    static func posixFormatter(_ format: String, calendar: Calendar) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    /// The UTC time zone, shared so `TimeZone(identifier: "UTC")!` isn't
+    /// force-unwrapped again at every call site that needs one (DRY L2).
+    static let utc = TimeZone(identifier: "UTC")!
+
+    /// A Gregorian calendar fixed to `utc` — the canonical calendar
+    /// `DayDate`'s own UTC-midnight anchor is read/written against (DRY L2).
+    static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        return calendar
+    }()
 }
 
 extension ItineraryItem {

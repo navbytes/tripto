@@ -458,46 +458,29 @@ struct PackingListView: View {
                 // W1-D: EmptyStateArt replaces the old bare glyph here —
                 // decorative, fixed size, accessibilityHidden internally;
                 // the headline right below already carries the message.
-                EmptyStateArt(scene: .packing)
-                VStack(spacing: Spacing.xs) {
-                    Text("Start the family packing list")
-                        .font(Typo.display(Typo.Size.title))
-                        .foregroundStyle(Palette.ink)
-                        .multilineTextAlignment(.center)
-                    Text(
-                        canManage
-                            ? "Passports, the car seat, chargers everyone forgets \u{2014} add what this trip needs."
-                            // Finding 6: neutral, non-misattributing —
-                            // §6.6's "empty screens are invitations, not
-                            // blame" (the organizer isn't necessarily the
-                            // one who'd add packing items).
-                            : "No one\u{2019}s added anything to the packing list yet."
-                    )
-                    .font(Typo.body())
-                    .foregroundStyle(Palette.slate)
-                    .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, Spacing.xl)
-                if canManage {
-                    Button {
-                        isPresentingAdd = true
-                    } label: {
-                        Text("Add an item")
-                            .font(Typo.body(weight: .semibold))
-                            .foregroundStyle(Palette.onAmber)
-                            .padding(.horizontal, Spacing.xl)
-                            .padding(.vertical, Spacing.md)
-                            .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                            .contentShape(Capsule())
-                            .background(Palette.amber, in: Capsule())
+                EmptyState(
+                    scene: .packing,
+                    title: "Start the family packing list",
+                    subtitle: canManage
+                        ? "Passports, the car seat, chargers everyone forgets \u{2014} add what this trip needs."
+                        // Finding 6: neutral, non-misattributing —
+                        // §6.6's "empty screens are invitations, not
+                        // blame" (the organizer isn't necessarily the
+                        // one who'd add packing items).
+                        : "No one\u{2019}s added anything to the packing list yet."
+                ) {
+                    if canManage {
+                        Button("Add an item") {
+                            isPresentingAdd = true
+                        }
+                        .buttonStyle(.primaryCapsule)
+                        // TI-3: no separate "Or paste a list instead" fallback
+                        // needed here anymore — `TripView.pasteImportPill` is
+                        // always visible above the tab content regardless of
+                        // item count, which is what this fallback used to exist
+                        // to work around (the FAB itself only rendered once the
+                        // list was non-empty).
                     }
-                    .buttonStyle(.plain)
-                    // TI-3: no separate "Or paste a list instead" fallback
-                    // needed here anymore — `TripView.pasteImportPill` is
-                    // always visible above the tab content regardless of
-                    // item count, which is what this fallback used to exist
-                    // to work around (the FAB itself only rendered once the
-                    // list was non-empty).
                 }
             }
             Spacer()
@@ -533,17 +516,9 @@ struct PackingListView: View {
             // connectivity returns, so a CTA here would just be a button
             // that does nothing new.
             if !isOffline {
-                Button(action: { onRetryLoad?() }) {
-                    Text("Try again")
-                        .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(Palette.onAmber)
-                        .padding(.horizontal, Spacing.xl)
-                        .padding(.vertical, Spacing.md)
-                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                        .contentShape(Capsule())
-                        .background(Palette.amber, in: Capsule())
-                }
-                .padding(.top, Spacing.xs)
+                Button("Try again") { onRetryLoad?() }
+                    .buttonStyle(.primaryCapsule)
+                    .padding(.top, Spacing.xs)
             }
         }
     }

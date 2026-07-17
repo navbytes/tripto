@@ -177,15 +177,12 @@ struct HomeFirstUp: Equatable {
         time = ItineraryTimeZone.timeString(item.startsAt, in: tz)
     }
 
-    /// "Wed" — kept local rather than added to `ItineraryTimeZone.swift`
-    /// (outside this phase's file list): one-line `DateFormatter`, same
-    /// recipe as that file's own `timeString`.
+    /// "Wed" — the format string is local to this call site, but the
+    /// `DateFormatter` construction recipe is the shared `ItineraryTimeZone
+    /// .posixFormatter` factory (DRY L1), same as every other fixed-format
+    /// formatter in the app.
     static func weekdayText(for date: Date, in tz: TimeZone) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE"
-        formatter.timeZone = tz
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: date)
+        ItineraryTimeZone.posixFormatter("EEE", timeZone: tz).string(from: date)
     }
 }
 
@@ -254,10 +251,7 @@ struct HomeTodayPanel: Equatable {
         )
         let dayNumber = min(max(rawDayNumber, 1), totalDays)
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "EEE d MMM"
-        dateFormatter.timeZone = liveTimeZone
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        let dateFormatter = ItineraryTimeZone.posixFormatter("EEE d MMM", timeZone: liveTimeZone)
 
         let rows = todayRows.prefix(2).map(displayRow)
         return HomeTodayPanel(

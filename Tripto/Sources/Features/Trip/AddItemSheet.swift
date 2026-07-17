@@ -185,11 +185,10 @@ struct AddItemSheet: View {
     /// Phase 4 (P4.2, docs/UX_REDESIGN_ROADMAP.md): the email-import address
     /// card, relocated here from `ShareTripView` — "getting data in" (paste
     /// OR forward-by-email) is one cluster now, next to `pasteFirstBanner`,
-    /// not split across screens. Same `LoadState`/consent shape every other
-    /// call site (`ItineraryTabView.importTeaser`, which stays put) already
+    /// not split across screens. Same shared `ImportAddressLoader` every
+    /// other call site (`ItineraryTabView.importTeaser`, `ShareTripView`)
     /// uses — see `importAddressCard`'s doc comment.
-    @State private var importLoadState: ImportAddressCard.LoadState = EmailImportConsent.isGranted() ? .loading : .needsConsent
-    @State private var hasFetchedImportAddress = false
+    @State private var importLoader = ImportAddressLoader()
     /// P7c (award audit #7): collapsed by default — see `importAddressCard`'s
     /// own doc comment for why.
     @State private var isImportCardExpanded = false
@@ -574,7 +573,7 @@ struct AddItemSheet: View {
         // on first render (mirrors `ShareTripView`'s identical `.task(id:
         // myRole)` — see that view's matching doc comment for why a plain
         // one-shot `.task` isn't enough here).
-        .task(id: myRole) { await fetchImportAddressIfNeeded() }
+        .task(id: myRole) { await importLoader.fetchIfNeeded(tripId: tripId, canFetch: ItemPermissions.canAdd(role: myRole)) }
         .onAppear {
             #if DEBUG
             // Verify-drill autopilot: preselect the Transport category so the
@@ -841,49 +840,16 @@ struct AddItemSheet: View {
                 .accessibilityIdentifier("importAddressCardTeaser")
 
                 if isImportCardExpanded {
-                    ImportAddressCard(state: importLoadState) { address in
+                    ImportAddressCard(state: importLoader.state) { address in
                         onToast(ClipboardFeedback.copy(address, label: "Import address"))
                     } onRetry: {
-                        retryImportAddressFetch()
+                        importLoader.retry(tripId: tripId)
                     } onConsentGranted: {
-                        grantEmailImportConsentAndFetch()
+                        importLoader.grantConsentAndFetch(tripId: tripId)
                     }
                 }
             }
         }
-    }
-
-    /// Same one-shot-per-visit shape as `ShareTripView.fetchImportAddressIfNeeded()`
-    /// (identical reasoning: `myRole` is `@Query`-derived and can still be
-    /// empty on first render, so `.task(id: myRole)` above re-invokes this on
-    /// every change rather than firing once; `hasFetchedImportAddress` is
-    /// only ever set `true` once a fetch has actually been attempted).
-    private func fetchImportAddressIfNeeded() async {
-        guard ItemPermissions.canAdd(role: myRole), !hasFetchedImportAddress else { return }
-        guard EmailImportConsent.fetchDecision() == .fetchImmediately else { return }
-        hasFetchedImportAddress = true
-        await fetchImportAddress()
-    }
-
-    /// The actual RPC call, split out so `retryImportAddressFetch()` can
-    /// re-run it without re-triggering `hasFetchedImportAddress`'s guard.
-    private func fetchImportAddress() async {
-        do {
-            importLoadState = .loaded(try await TripImportAddress.fetch(tripId: tripId))
-        } catch {
-            importLoadState = .failed
-        }
-    }
-
-    private func retryImportAddressFetch() {
-        importLoadState = .loading
-        Task { await fetchImportAddress() }
-    }
-
-    private func grantEmailImportConsentAndFetch() {
-        EmailImportConsent.grant()
-        hasFetchedImportAddress = true
-        retryImportAddressFetch()
     }
 
     /// Findings 2 & 7: the CTA-adjacent guidance line, mirroring

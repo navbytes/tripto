@@ -288,9 +288,12 @@ final class TriptoUITests: XCTestCase {
     func testCaptureItineraryScreen() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 30), "trip never opened")
-        // Let the hero's one-shot layout measurement + the conflict/today
-        // auto-scroll `.task` settle before capturing.
-        Thread.sleep(forTimeInterval: 1.5)
+        // Waits for the hero's one-shot layout measurement to actually
+        // resolve (Lisbon's fixed May-2026 dates are behind "today," so the
+        // conflict/today auto-scroll `.task` never fires for this trip — see
+        // `testCaptureItineraryConflictBanner`'s own doc comment below)
+        // rather than guessing a fixed settle duration.
+        XCTAssertTrue(waitHittable(app.staticTexts["Lisbon"]), "hero title never became hittable — layout never settled")
         attachScreenshot(named: "itinerary", of: app)
     }
 
@@ -380,7 +383,10 @@ final class TriptoUITests: XCTestCase {
         // must render route-only (no duration/day badge), not a fabricated
         // arrival. Captured BEFORE the "Arrival date"/"Arrives" pickers
         // below are touched, which is what would flip `hasSetArrival` true.
-        Thread.sleep(forTimeInterval: 0.3)
+        // Waits for the Departs popover's own wheel to actually leave the
+        // hierarchy (dismissed) rather than guessing its close-animation
+        // duration.
+        XCTAssertTrue(waitGone(hourWheel), "Departs time popover never dismissed")
         attachScreenshot(named: "add-item-flight-preview-route-only", of: app)
 
         // P7c: the old boolean "+1 day" chip is gone — arrival is now an
@@ -421,7 +427,7 @@ final class TriptoUITests: XCTestCase {
         // Same dismiss target as Departs' popover above.
         app.staticTexts["Add to Lisbon"].tap()
 
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitGone(arrivesHourWheel), "Arrives time popover never dismissed")
         attachScreenshot(named: "add-item-flight-preview", of: app)
 
         // P3.3: the label row is the `DisclosureGroup`'s own native tap
@@ -452,7 +458,7 @@ final class TriptoUITests: XCTestCase {
         // `TextField` with no `.onSubmit` override) — otherwise it covers
         // the lower half of the screenshot.
         app.keyboards.buttons["return"].tap()
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitGone(app.keyboards.buttons["return"]), "keyboard never dismissed")
         attachScreenshot(named: "add-item-flight-disclosure", of: app)
     }
 
@@ -520,13 +526,11 @@ final class TriptoUITests: XCTestCase {
         // simultaneously in the accessibility tree (ambiguous to query).
         let pasteBanner = app.buttons["pasteFirstBanner"]
         XCTAssertTrue(pasteBanner.waitForExistence(timeout: 10), "chained AddItemSheet never appeared")
-        app.terminate()
-        // Lets the simulator finish tearing down the old process before
-        // asking for a new one — this machine's `xcodebuild test` runs have
-        // shown general launch/relaunch slowness independent of this test
-        // (matches the P4 handoff's own noted pre-existing flakiness).
-        Thread.sleep(forTimeInterval: 1.0)
-        app.launch()
+        // This machine's `xcodebuild test` runs have shown general
+        // launch/relaunch slowness independent of this test (matches the P4
+        // handoff's own noted pre-existing flakiness) — see `relaunch(_:)`'s
+        // own doc comment for why its settle sleep is kept.
+        relaunch(app)
         // Same fixed-chrome reasoning as the first wait above (not
         // `Plan a new trip`/`Lisbon`) — a generous 60s timeout for the same
         // reason as the settle sleep above.
@@ -582,7 +586,10 @@ final class TriptoUITests: XCTestCase {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
         start.press(forDuration: 0.05, thenDragTo: end)
-        Thread.sleep(forTimeInterval: 0.3)
+        // Waits for the drag's own target ("Forward booking emails," this
+        // scroll's whole purpose per the doc comment above) to actually be
+        // on screen, rather than guessing the drag's settle time.
+        XCTAssertTrue(waitHittable(app.staticTexts["Forward booking emails"]), "drag never scrolled the invite/link section into view")
         attachScreenshot(named: "share", of: app)
     }
 
@@ -594,7 +601,11 @@ final class TriptoUITests: XCTestCase {
         app.launchArguments = ["-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestOpenSettings"]
         app.launch()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30), "Settings screen never appeared")
-        Thread.sleep(forTimeInterval: 0.3)
+        // "Avatar color" is a plain, always-present Profile-section label
+        // (unlike "Change photo"/"Add photo", whose text varies with seed
+        // state) — waiting for it to be hittable confirms the Form has
+        // actually laid out before capturing.
+        XCTAssertTrue(waitHittable(app.staticTexts["Avatar color"]), "Settings' Profile section never settled")
         attachScreenshot(named: "settings", of: app)
     }
 
@@ -617,7 +628,7 @@ final class TriptoUITests: XCTestCase {
             app.keyboards.buttons["Done"].tap()
         }
         app.swipeUp()
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(app.buttons["Shuffle cover"]), "cover/shuffle section never scrolled into view")
         attachScreenshot(named: "newtrip", of: app)
     }
 
@@ -650,7 +661,7 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 30), "Home never loaded")
         let liveCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tokyo Sprint")).firstMatch
         XCTAssertTrue(liveCard.waitForExistence(timeout: 30), "live register showcase trip (Tokyo Sprint) never appeared")
-        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(waitHittable(liveCard), "live register card never settled")
         attachScreenshot(named: "home", of: app)
 
         // P7 refresh (P6.6): `planNewTripRow` now renders directly above the
@@ -672,7 +683,7 @@ final class TriptoUITests: XCTestCase {
         )
         let beenHeader = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Been there")).firstMatch
         XCTAssertTrue(beenHeader.exists, "'Been there' header should already be reachable once 'Plan a new trip' is on screen — it's the very next row (P6.6)")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(beenHeader), "'Been there' header never actually settled on screen")
         attachScreenshot(named: "home-plan-new-trip-been", of: app)
 
         // Pre-P6.6 waypoint, unchanged: one page further than "Been there"
@@ -684,6 +695,11 @@ final class TriptoUITests: XCTestCase {
         }
         XCTAssertTrue(beenHeader.waitForExistence(timeout: 10), "'Been there' section never scrolled into view")
         app.swipeUp()
+        // Kept (test-quality review 2026-07-16): deliberately a proportional
+        // "one screen further" position, not tied to any specific row/header
+        // becoming hittable (the whole point is a header mid-stick, not
+        // just-arrived) — no element changes queryable state at this exact
+        // scroll depth to wait on instead.
         Thread.sleep(forTimeInterval: 0.3)
         attachScreenshot(named: "home-been", of: app)
 
@@ -705,7 +721,11 @@ final class TriptoUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(edinburghRow.waitForExistence(timeout: 10), "'Edinburgh Fringe' been row (2025's last) never scrolled into view")
-        Thread.sleep(forTimeInterval: 0.3)
+        // The scroll loop above only confirms `.exists` (SwiftUI can
+        // instantiate a row before it's actually on screen — same gap
+        // `testCaptureItineraryStayStripAndFreeDay`'s own doc comment
+        // flags); `isHittable` is what actually confirms the scroll landed.
+        XCTAssertTrue(waitHittable(edinburghRow), "'Edinburgh Fringe' row exists but never actually scrolled into view")
         attachScreenshot(named: "home-year-pinned", of: app)
     }
 
@@ -740,9 +760,7 @@ final class TriptoUITests: XCTestCase {
         for _ in 0..<50 where !bottomRow.isHittable { app.swipeUp() }
         XCTAssertTrue(bottomRow.isHittable, "'Dublin St. Patrick's' (last been row) never scrolled into view")
 
-        app.terminate()
-        Thread.sleep(forTimeInterval: 1.0)
-        app.launch()
+        relaunch(app)
         XCTAssertTrue(app.staticTexts["Your trips"].waitForExistence(timeout: 60), "Home never reappeared after relaunch")
         let liveCardAfterRelaunch = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tokyo Sprint")).firstMatch
         XCTAssertTrue(liveCardAfterRelaunch.waitForExistence(timeout: 15), "top card not present right after relaunch")
@@ -774,7 +792,7 @@ final class TriptoUITests: XCTestCase {
         beenRow.swipeLeft()
         let copyAction = app.buttons["Copy to a new trip"]
         XCTAssertTrue(copyAction.waitForExistence(timeout: 5), "swipe action never revealed")
-        Thread.sleep(forTimeInterval: 0.2)
+        XCTAssertTrue(waitHittable(copyAction), "swipe action revealed but never settled on screen")
         attachScreenshot(named: "home-swipe-copy", of: app)
     }
 
@@ -783,6 +801,47 @@ final class TriptoUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    // MARK: - Condition-based settle waits (replaces fixed `Thread.sleep`
+    // "let it settle" waits throughout this file — test-quality review
+    // 2026-07-16). `app.screenshot()` (unlike `.tap()`/`waitForExistence`)
+    // has none of XCUITest's own action/query quiescence wait built in, so
+    // capturing right after a transition genuinely can catch it mid-animation
+    // — but the fix is polling the real post-condition, not guessing a fixed
+    // duration that's simultaneously too slow on a fast run and too short
+    // under CI load. Both route through `XCTNSPredicateExpectation`, XCTest's
+    // own periodic-evaluation mechanism, not a hand-rolled sleep loop.
+
+    /// The real post-condition almost every "let the layout/animation settle
+    /// before this screenshot" sleep was standing in for: `isHittable`
+    /// reflects XCUITest's own resolved on-screen frame, which only reports
+    /// true once layout has actually finished moving.
+    @discardableResult
+    private func waitHittable(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    /// The inverse — waits for a dismissed popover/keyboard element to
+    /// actually leave the hierarchy, instead of guessing how long its
+    /// dismiss animation takes.
+    @discardableResult
+    private func waitGone(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    /// Terminates and relaunches `app` — shared by the two tests that prove
+    /// something survives a real process restart. The settle sleep here is
+    /// kept deliberately (test-quality review 2026-07-16): `terminate()`
+    /// already blocks until the app reports `.notRunning`, so this is purely
+    /// simulator/OS-level teardown margin, not app state — there's nothing
+    /// left in the accessibility tree to poll once the process is gone.
+    private func relaunch(_ app: XCUIApplication) {
+        app.terminate()
+        Thread.sleep(forTimeInterval: 1.0)
+        app.launch()
     }
 
     // MARK: - P6 milestone screenshots (docs/UX_REDESIGN_ROADMAP.md Phase 6:
@@ -817,7 +876,7 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Bali Getaway"].waitForExistence(timeout: 10), "the second duplicate trip never appeared")
         let mergeButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Merge into")).firstMatch
         XCTAssertTrue(mergeButton.waitForExistence(timeout: 10), "DuplicateTripStrip's Merge button never appeared")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(mergeButton), "Merge button never settled on screen")
         attachScreenshot(named: "home-merge-strip", of: app)
 
         mergeButton.tap()
@@ -827,7 +886,7 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(confirmButton.waitForExistence(timeout: 5), "merge confirmation dialog never appeared")
         // P7 award-audit capture set: the dialog itself, not just tapped
         // through on the way to the countdown toast below.
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(confirmButton), "merge confirmation dialog never settled on screen")
         attachScreenshot(named: "merge-confirm-dialog", of: app)
         confirmButton.tap()
 
@@ -857,12 +916,12 @@ final class TriptoUITests: XCTestCase {
 
         let reviewButton = app.buttons["Review"]
         XCTAssertTrue(reviewButton.waitForExistence(timeout: 10), "dedupe banner's Review button never appeared")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(reviewButton), "dedupe banner never settled on screen")
         attachScreenshot(named: "share-dedupe-banner", of: app)
 
         reviewButton.tap()
         XCTAssertTrue(app.navigationBars["Possible duplicates"].waitForExistence(timeout: 5), "dedupe review sheet never presented")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(app.navigationBars["Possible duplicates"]), "dedupe review sheet never settled on screen")
         attachScreenshot(named: "dedupe-review-sheet", of: app)
     }
 
@@ -882,7 +941,7 @@ final class TriptoUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["Import complete"].waitForExistence(timeout: 30), "ImportResultSheet never appeared")
         XCTAssertTrue(app.staticTexts["Trips"].waitForExistence(timeout: 5), "stat tiles never appeared")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(app.staticTexts["Trips"]), "stat tiles never settled on screen")
         attachScreenshot(named: "import-result-sheet", of: app)
     }
 
@@ -910,7 +969,7 @@ final class TriptoUITests: XCTestCase {
         app.launch()
         let nextCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Marrakech Long Weekend")).firstMatch
         XCTAssertTrue(nextCard.waitForExistence(timeout: 30), "'next' register showcase trip never appeared")
-        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(waitHittable(nextCard), "'next' register card never settled on screen")
         attachScreenshot(named: "home-next-register", of: app)
     }
 
@@ -940,7 +999,8 @@ final class TriptoUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(hiddenRow.isHittable, "'N past trips hidden \u{2014} Show' row never scrolled into view")
-        Thread.sleep(forTimeInterval: 0.3)
+        // No settle sleep needed: the loop above already polls `isHittable`
+        // on this exact row, so it's already confirmed on screen right here.
         attachScreenshot(named: "home-past-trips-hidden", of: app)
     }
 
@@ -961,7 +1021,9 @@ final class TriptoUITests: XCTestCase {
     func testCaptureItineraryConflictBanner() {
         let app = launch()
         XCTAssertTrue(app.staticTexts["Lisbon"].waitForExistence(timeout: 30), "trip never opened")
-        Thread.sleep(forTimeInterval: 1.5)
+        // Same hero-layout-settle reasoning as `testCaptureItineraryScreen`
+        // above.
+        XCTAssertTrue(waitHittable(app.staticTexts["Lisbon"]), "hero title never became hittable — layout never settled")
         attachScreenshot(named: "itinerary-conflict", of: app)
     }
 
@@ -994,7 +1056,8 @@ final class TriptoUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(freeDayText.isHittable, "the new free day never scrolled into view")
-        Thread.sleep(forTimeInterval: 0.3)
+        // No settle sleep needed: the loop above already polls `isHittable`
+        // on this exact element, so it's already confirmed on screen here.
         attachScreenshot(named: "itinerary-stay-strip-free-day", of: app)
     }
 
@@ -1007,7 +1070,7 @@ final class TriptoUITests: XCTestCase {
         let app = launch(["-uitestOpenAdd"])
         let pasteButton = app.buttons["pasteFirstBanner"]
         XCTAssertTrue(pasteButton.waitForExistence(timeout: 30), "Add-item sheet's paste banner never appeared")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(pasteButton), "paste banner never settled on screen")
         attachScreenshot(named: "add-item-paste-email-cluster", of: app)
     }
 
@@ -1050,7 +1113,9 @@ final class TriptoUITests: XCTestCase {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
         start.press(forDuration: 0.05, thenDragTo: end)
-        Thread.sleep(forTimeInterval: 0.3)
+        // Same reasoning as `testCaptureShareScreen` above — waits for the
+        // drag's own target rather than guessing its settle time.
+        XCTAssertTrue(waitHittable(app.staticTexts["Forward booking emails"]), "drag never scrolled the invite/link section into view")
         attachScreenshot(named: "share-full", of: app)
     }
 
@@ -1069,7 +1134,7 @@ final class TriptoUITests: XCTestCase {
         app.launchArguments = ["-simulateOffline"]
         app.launch()
         XCTAssertTrue(app.staticTexts["Tripto"].waitForExistence(timeout: 30), "Welcome screen never appeared")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(app.staticTexts["Tripto"]), "Welcome screen never settled")
         attachScreenshot(named: "welcome", of: app)
     }
 
@@ -1083,7 +1148,7 @@ final class TriptoUITests: XCTestCase {
     func testCaptureBookingDetailOriginalPass() {
         let app = launch(["-uitestOpenBookingDetail"])
         XCTAssertTrue(app.navigationBars["Booking details"].waitForExistence(timeout: 30), "Booking detail never appeared")
-        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertTrue(waitHittable(app.navigationBars["Booking details"]), "Booking detail screen never settled")
         attachScreenshot(named: "booking-detail-original-pass", of: app)
     }
 
@@ -1118,6 +1183,10 @@ final class TriptoUITests: XCTestCase {
         XCTAssertTrue(shuffleButton.waitForExistence(timeout: 5), "Shuffle cover button never appeared")
         for attempt in 0..<8 {
             shuffleButton.tap()
+            // Kept (test-quality review 2026-07-16): each tap redraws the
+            // SAME gradient view with new random colors — no accessibility
+            // signal distinguishes "still the old gradient" from "the new
+            // one," so there's no element/state to wait on here.
             Thread.sleep(forTimeInterval: 0.2)
             attachScreenshot(named: "newtrip-cover-shuffle-\(attempt)", of: app)
         }
@@ -1168,7 +1237,7 @@ final class TriptoUITests: XCTestCase {
             app.buttons["Change photo"].waitForExistence(timeout: 10),
             "seeded avatarPath never rendered the Change/Remove photo pair"
         )
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(app.buttons["Change photo"]), "Change photo row never settled on screen")
         attachScreenshot(named: "settings-profile", of: app)
     }
 
@@ -1193,7 +1262,12 @@ final class TriptoUITests: XCTestCase {
         app.launch()
         let tripCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Osaka Weekend")).firstMatch
         XCTAssertTrue(tripCard.waitForExistence(timeout: 30), "Osaka Weekend showcase trip never appeared on Home")
-        // Lets the card's own photo `LazyImage` settle before capturing.
+        // Kept (test-quality review 2026-07-16): lets the card's own photo
+        // `LazyImage` settle before capturing — the photo swap has no
+        // accessibility signal distinguishing it from the initials
+        // placeholder underneath (`AvatarPhotoCircle.accessibilityElement
+        // (children: .ignore)` collapses both to one name-only label), so
+        // there's no element/state to wait on instead.
         Thread.sleep(forTimeInterval: 1.5)
         attachScreenshot(named: "avatarstack-people", of: app)
     }
@@ -1227,7 +1301,7 @@ final class TriptoUITests: XCTestCase {
             app.buttons["Remove photo"].waitForExistence(timeout: 10),
             "TripProfileFormSheet never opened with the seeded photo"
         )
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(app.buttons["Remove photo"]), "TripProfileFormSheet never settled on screen")
         attachScreenshot(named: "tripprofile-photo-light", of: app)
     }
 
@@ -1270,9 +1344,12 @@ final class TriptoUITests: XCTestCase {
             app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Helsinki Weekend")).firstMatch.exists,
             "'Helsinki Weekend' gradient-only control trip never appeared alongside it"
         )
-        // Lets the card's own cover-photo LazyImage settle before capturing
-        // (same wait `testCaptureAvatarStackPhotoAndInitialsSideBySide` uses
-        // for its own seeded-photo LazyImage).
+        // Kept (test-quality review 2026-07-16, same reasoning as
+        // `testCaptureAvatarStackPhotoAndInitialsSideBySide` above): lets the
+        // card's own cover-photo `LazyImage` settle — no accessibility
+        // signal distinguishes the loaded photo from the gradient
+        // placeholder underneath (`CoverImage`'s own doc comment: "the
+        // gradient always renders first... a LazyImage layered on top").
         Thread.sleep(forTimeInterval: 1.5)
         attachScreenshot(named: "home-cover-photo", of: app)
     }
@@ -1298,9 +1375,14 @@ final class TriptoUITests: XCTestCase {
         photoCard.tap()
         XCTAssertTrue(app.staticTexts["Zanzibar Escape"].waitForExistence(timeout: 15), "trip screen never opened")
 
-        // Expanded — the hero's one-shot layout measurement + cover-photo
-        // LazyImage settle (same 1.5s wait `testCaptureItineraryScreen` uses
-        // for its own hero).
+        // Kept (test-quality review 2026-07-16): the hero's one-shot layout
+        // measurement AND its cover-photo LazyImage both need to settle here
+        // — the layout half alone would be a `waitHittable` (as
+        // `testCaptureItineraryScreen` now uses for its own hero), but the
+        // LazyImage half has no accessibility signal to wait on instead (see
+        // `testCaptureHomeCoverPhotoCardAndGradientControl`'s own note), and
+        // that's the binding constraint, so this stays a plain sleep rather
+        // than a wait that would only cover half the settle this needs.
         Thread.sleep(forTimeInterval: 1.5)
         attachScreenshot(named: "trip-hero-cover-photo", of: app)
 
@@ -1309,7 +1391,11 @@ final class TriptoUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(lastDayText.isHittable, "itinerary never scrolled — nothing to collapse the hero against")
-        Thread.sleep(forTimeInterval: 0.6)
+        // No settle sleep needed: `HeroCollapse`'s collapse fraction is a
+        // pure function of the live scroll offset (no `withAnimation`/spring
+        // involved — confirmed in `HeroCollapse.swift`), and the loop above
+        // already polls `isHittable` on this exact element, so the hero is
+        // already in its final collapsed state here.
         attachScreenshot(named: "trip-hero-cover-photo-collapsed", of: app)
     }
 
@@ -1327,7 +1413,9 @@ final class TriptoUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(beenRow.waitForExistence(timeout: 10), "'Santorini Sunset' cover-photo been row never scrolled into view")
-        Thread.sleep(forTimeInterval: 0.5)
+        // `.exists` alone (the loop's own gate above) doesn't confirm actual
+        // on-screen position — `isHittable` does.
+        XCTAssertTrue(waitHittable(beenRow), "'Santorini Sunset' row exists but never actually scrolled into view")
         attachScreenshot(named: "home-been-cover-photo", of: app)
     }
 
@@ -1356,7 +1444,7 @@ final class TriptoUITests: XCTestCase {
             "TripFormView never opened with the seeded cover photo"
         )
         XCTAssertTrue(app.buttons["Change photo"].exists, "the picker row must read \"Change photo\", not \"Choose a photo\"")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(app.buttons["Remove photo"]), "TripFormView's cover section never settled on screen")
         attachScreenshot(named: "tripform-cover-photo", of: app)
     }
 
@@ -1411,7 +1499,7 @@ final class TriptoUITests: XCTestCase {
         // space to cut a result's own caption off entirely, defeating the
         // "both credit layers visible" ask this scene exists for.
         searchField.typeText("\n")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitGone(app.keyboards.firstMatch), "keyboard never dismissed")
         attachScreenshot(named: "cover-search-results", of: app)
     }
 
@@ -1424,7 +1512,7 @@ final class TriptoUITests: XCTestCase {
         app.textFields["mountains, beaches, cities\u{2026}"].typeText("zzzznoresults")
         let emptyMessage = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "No photos found")).firstMatch
         XCTAssertTrue(emptyMessage.waitForExistence(timeout: 10), "the empty state never rendered")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(emptyMessage), "empty state never settled on screen")
         attachScreenshot(named: "cover-search-empty", of: app)
     }
 
@@ -1437,7 +1525,7 @@ final class TriptoUITests: XCTestCase {
         app.textFields["mountains, beaches, cities\u{2026}"].typeText("beaches")
         let retryButton = app.buttons["Try again"]
         XCTAssertTrue(retryButton.waitForExistence(timeout: 10), "the error state's retry button never appeared")
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertTrue(waitHittable(retryButton), "error state never settled on screen")
         attachScreenshot(named: "cover-search-error", of: app)
     }
 
@@ -1482,7 +1570,8 @@ final class TriptoUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(creditLine.isHittable, "the credit line never scrolled into frame")
-        Thread.sleep(forTimeInterval: 0.3)
+        // No settle sleep needed: the loop above already polls `isHittable`
+        // on this exact element, so it's already confirmed on screen here.
         attachScreenshot(named: "tripform-searched-cover-credit-light", of: app)
     }
 
@@ -1509,9 +1598,17 @@ final class TriptoUITests: XCTestCase {
         searchField.tap()
         let slowQuery = "slowquery"
         searchField.typeText(slowQuery)
-        // Past the 400ms debounce — the slow request has actually started
-        // (and is now in flight, ~1.2s from resolving) before it gets
-        // superseded below.
+        // Kept (test-quality review 2026-07-16): the real post-condition the
+        // 400ms debounce gates is `runSearch()` setting `state = .loading`
+        // (`CoverSearchSheet.swift`), which renders a bare `ProgressView`
+        // with no accessibility identifier/label of its own (app sources are
+        // off limits from this worktree, so one can't be added here) —
+        // tried waiting on `app.activityIndicators.firstMatch` first, but
+        // empirically (a real run against the built app) it never matched
+        // this view within the loading window, so reverted rather than ship
+        // an unverified wait. Past the 400ms debounce — the slow request
+        // has actually started (and is now in flight, ~1.2s from resolving)
+        // before it gets superseded below.
         Thread.sleep(forTimeInterval: 0.6)
 
         // A plain `typeText` APPENDS after the cursor, and a query merely
@@ -1528,9 +1625,12 @@ final class TriptoUITests: XCTestCase {
             "the stale slow query's result must never surface once superseded"
         )
 
-        // Waits past when the stale slow request WOULD have resolved
-        // (~1.2s artificial delay, well covered from here), then re-checks:
-        // a late-arriving stale result must never retroactively appear.
+        // Kept (test-quality review 2026-07-16): waits past when the stale
+        // slow request WOULD have resolved (~1.2s artificial delay, well
+        // covered from here), then re-checks that a late-arriving stale
+        // result never retroactively appears. This is a negative/absence
+        // assertion — there's no event to wait FOR, only a risk window that
+        // has to fully elapse before "it never showed" means anything.
         Thread.sleep(forTimeInterval: 2.0)
         XCTAssertEqual(
             app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Stale Slow Result")).count, 0,

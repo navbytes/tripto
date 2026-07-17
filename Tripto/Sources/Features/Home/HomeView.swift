@@ -996,24 +996,22 @@ struct HomeView: View {
                 // W1-D: EmptyStateArt replaces the old bare glyph here —
                 // decorative, fixed size, accessibilityHidden internally;
                 // the headline right below already carries the message.
-                EmptyStateArt(scene: .home)
-                VStack(spacing: Spacing.xs) {
-                    Text("Plan your first trip")
-                        .font(Typo.display(Typo.Size.title))
-                        .foregroundStyle(Palette.ink)
-                    Text("Everyone\u{2019}s bookings in one shared, at-a-glance itinerary.")
-                        .font(Typo.body())
-                        .foregroundStyle(Palette.slate)
-                        .multilineTextAlignment(.center)
-                }
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    valueRow("clock", "Every flight and plan in its own local time")
-                    valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
-                    valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
-                }
-                .padding(.top, Spacing.xs)
-                planNewTripCTA
+                EmptyState(
+                    scene: .home,
+                    title: "Plan your first trip",
+                    horizontalPadding: 0,
+                    titleAlignment: .leading,
+                    subtitle: "Everyone\u{2019}s bookings in one shared, at-a-glance itinerary."
+                ) {
+                    VStack(alignment: .leading, spacing: Spacing.sm) {
+                        valueRow("clock", "Every flight and plan in its own local time")
+                        valueRow("person.2", "Invite family \u{2014} or share a link, no app needed")
+                        valueRow("suitcase", "A shared packing list, and \u{201C}just mine\u{201D} per person")
+                    }
                     .padding(.top, Spacing.xs)
+                    planNewTripCTA
+                        .padding(.top, Spacing.xs)
+                }
                 Spacer()
                 Spacer()
             }
@@ -1164,14 +1162,8 @@ struct HomeView: View {
                         }
                         Text(isRetryingPull ? "Trying again\u{2026}" : "Try again")
                     }
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(Palette.onAmber)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.md)
-                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
-                    .contentShape(Capsule())
-                    .background(Palette.amber, in: Capsule())
                 }
+                .buttonStyle(.primaryCapsule)
                 .disabled(isRetryingPull)
                 .padding(.top, Spacing.xs)
                 if retryFailedAgain {
@@ -1249,18 +1241,10 @@ struct HomeView: View {
     }
 
     private var planNewTripCTA: some View {
-        Button {
+        Button("Plan a new trip") {
             isPresentingCreate = true
-        } label: {
-            Text("Plan a new trip")
-                .font(Typo.body(weight: .semibold))
-                .foregroundStyle(Palette.onAmber)
-                .padding(.horizontal, Spacing.xl)
-                .padding(.vertical, Spacing.md)
-                .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor (finding 2)
-                .contentShape(Capsule())
-                .background(Palette.amber, in: Capsule())
         }
+        .buttonStyle(.primaryCapsule)
     }
 
     // MARK: - Derived data (docs/UX_REDESIGN_ROADMAP.md Phase 5)
@@ -1331,6 +1315,22 @@ struct HomeView: View {
     // MARK: - Mutations
 
     private func delete(_ trip: Trip) {
+        let tripId = deleteLocally(trip)
+        Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
+    }
+
+    /// The local-only half of `delete(_:)` above — the SwiftData delete +
+    /// member/profile cascade, with no outbox enqueue of its own.
+    ///
+    /// F1 (reviewer, MED): `performMerge` below calls this directly (instead
+    /// of `delete(_:)`) so the shell trip's `.trips` delete can be enqueued
+    /// from the SAME sequential loop as its repoint upserts — `delete(_:)`'s
+    /// own `Task { enqueueDelete }` would otherwise race that loop's `Task`,
+    /// and `SyncStore` assigns `seq` in arrival order, so the delete could
+    /// land before a repoint it should follow (a server-side `ON DELETE
+    /// CASCADE` would then orphan whatever hadn't moved yet).
+    @discardableResult
+    private func deleteLocally(_ trip: Trip) -> UUID {
         let tripId = trip.id
         modelContext.delete(trip)
         // Local cascade mirrors the server's FK cascade (SYNC_DESIGN.md
@@ -1343,7 +1343,7 @@ struct HomeView: View {
             modelContext.delete(profile)
         }
         try? modelContext.save()
-        Task { await syncEngine?.enqueueDelete(table: .trips, rowId: tripId, tripId: tripId) }
+        return tripId
     }
 
     /// E2 (docs/BACKLOG.md §E2): runs right after `tripToDuplicate`'s create
@@ -1545,33 +1545,53 @@ struct HomeView: View {
             return false
         }
 
-        let movedItems = moved.items
-        let movedPacking = moved.packing
-        let movedProfiles = moved.profiles
-        Task {
-            for item in movedItems {
-                await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: survivorId, payload: item.toDTO())
-            }
-            for packingItem in movedPacking {
-                await syncEngine?.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: survivorId, payload: packingItem.toDTO())
-            }
-            for profile in movedProfiles {
-                await syncEngine?.enqueueUpsert(table: .tripProfiles, rowId: profile.id, tripId: survivorId, payload: profile.toDTO())
-            }
-        }
+        let ops = MergeOutbox.performMergeOps(moved, shellId: shellId, survivorId: survivorId)
 
         // The shell's own items/packing/profiles have all moved away by
-        // this point, so `delete(_:)`'s existing `tripProfiles`/
-        // `tripMembers` cascade loop finds nothing left to double-delete on
-        // the profile side — it still removes the shell's own
-        // `TripMember` row(s) (this merge's permission gate already
-        // requires the acting user to be organizer of both trips, so at
-        // minimum their own membership carries over cleanly) and enqueues
-        // the one `trips`-table delete, unchanged.
+        // this point, so `deleteLocally(_:)`'s `tripProfiles` cascade loop
+        // finds nothing left to double-delete on the profile side — it
+        // still removes the shell's own `TripMember` row(s) (this merge's
+        // permission gate already requires the acting user to be organizer
+        // of both trips, so at minimum their own membership carries over
+        // cleanly).
+        //
+        // F1 (reviewer, MED): `deleteLocally(_:)`, not `delete(_:)` — the
+        // `.trips` delete `ops` already ends with is enqueued below, from
+        // the SAME sequential loop as the repoint upserts, instead of
+        // racing them from `delete(_:)`'s own separate `Task`.
         if let shellTrip = trips.first(where: { $0.id == shellId }) {
-            delete(shellTrip)
+            deleteLocally(shellTrip)
+        }
+        Task {
+            for op in ops {
+                await enqueueMergedOp(op)
+            }
         }
         return true
+    }
+
+    /// D5 (reviewer, MED): op shape/order comes from `MergeOutbox
+    /// .performMergeOps` (`Models/MergeOutbox.swift`, mirrors this exact
+    /// loop and is asserted byte-for-byte in `OutboxCoalescingTests`), not a
+    /// hand-rolled loop re-typed here. F3 (reviewer, LOW-MED): `MergeOutboxOp`
+    /// now carries each op's real DTO directly — no JSON encode/decode round
+    /// trip, no `try?` silently dropping a case. F1 (reviewer, MED): this
+    /// also replays the trailing `.deleteTrip` op, folded into the same
+    /// sequential loop `performMerge` drives above instead of a second
+    /// `Task`, so its `seq` always lands after every repoint upsert's.
+    private func enqueueMergedOp(_ op: MergeOutboxOp) async {
+        switch op {
+        case .upsertItineraryItem(let dto):
+            await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: dto.id, tripId: dto.tripId, payload: dto)
+        case .upsertPackingItem(let dto):
+            await syncEngine?.enqueueUpsert(table: .packingItems, rowId: dto.id, tripId: dto.tripId, payload: dto)
+        case .upsertTripProfile(let dto):
+            await syncEngine?.enqueueUpsert(table: .tripProfiles, rowId: dto.id, tripId: dto.tripId, payload: dto)
+        case .deleteTrip(let id):
+            await syncEngine?.enqueueDelete(table: .trips, rowId: id, tripId: id)
+        case .unassignItemAssignee, .assignItemAssignee, .deleteTripProfile:
+            break // `ShareTripView.mergeDuplicateProfilesOps`-only cases; `performMergeOps` never produces these.
+        }
     }
 
     /// The countdown's own UI — same visual language as `ToastOverlay`'s

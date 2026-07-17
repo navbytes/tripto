@@ -901,8 +901,7 @@ enum TripArchiveMapper {
     /// `DayDate.parse`, which has a much larger blast radius across the app.
     private static func validCalendarDay(_ raw: String?) -> DayDate? {
         guard let raw, let day = DayDate.parse(raw) else { return nil }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let calendar = ItineraryTimeZone.utcCalendar
         var components = DateComponents()
         components.year = day.year
         components.month = day.month

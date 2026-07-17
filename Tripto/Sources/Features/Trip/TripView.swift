@@ -391,17 +391,6 @@ struct TripView: View {
     private func applyUITestAutopilotIfNeeded() async {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        // EI-2: seeds one `status: .suggested` item on this trip so the
-        // review banner/inbox/confirm/dismiss flow is reachable without a
-        // live `ingest-email` pipeline (`docs/EMAIL_IMPORT_PLAN.md` EI-1,
-        // not shipped yet) — see `DemoSeeder.seedSuggestedItem`'s doc
-        // comment.
-        if arguments.contains("-uitestSeedSuggestedItem") {
-            let id = tripId
-            await DemoSeeder.seedSuggestedItem(
-                tripId: id, modelContext: modelContext, syncEngine: syncEngine, authManager: authManager
-            )
-        }
         if arguments.contains("-uitestOpenBookings") {
             selectedTab = .bookings
         }
@@ -957,17 +946,9 @@ struct TripView: View {
             .foregroundStyle(Palette.slate)
             .multilineTextAlignment(.center)
             .padding(.horizontal, Spacing.xxl)
-            Button(action: { dismiss() }) {
-                Text("Back to trips")
-                    .font(Typo.body(weight: .semibold))
-                    .foregroundStyle(Palette.onAmber)
-                    .padding(.horizontal, Spacing.xl)
-                    .padding(.vertical, Spacing.md)
-                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                    .contentShape(Capsule())
-                    .background(Palette.amber, in: Capsule())
-            }
-            .padding(.top, Spacing.xs)
+            Button("Back to trips") { dismiss() }
+                .buttonStyle(.primaryCapsule)
+                .padding(.top, Spacing.xs)
         }
     }
 }

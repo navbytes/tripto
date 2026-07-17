@@ -85,28 +85,36 @@ enum StayConflicts {
 
     // MARK: - Pure overlap math
 
-    /// Reviewer D2: the conflict DECISION is made on real instants
-    /// (`instantRange`), not on bare calendar-day labels — two different
-    /// `.hotel` items can carry different `tz` values, and comparing their
-    /// `nightRange` labels directly is only valid when both stays share a
-    /// zone (see `instantRange`'s doc comment for the date-line case where
-    /// bare labels desync from actual physical overlap in both
-    /// directions). The "N nights" COPY, once a conflict is confirmed,
-    /// still comes from `nightRange`'s calendar-day labels exactly as
-    /// before — unaffected by this fix for the overwhelming common case
-    /// (both stays in the same zone, where the two methods always agree),
-    /// and `max(1, ...)`-clamped for the rare confirmed-but-label-disjoint
-    /// cross-zone case so the copy never reads a nonsensical "0 nights".
+    /// Reviewer D2 (fixed): the conflict DECISION is made on each stay's
+    /// REAL booked window (`decisionRange`), not on calendar-night labels —
+    /// two different `.hotel` items can carry different `tz` values, and an
+    /// eastward same-day handoff (checkout in a zone behind, check-in the
+    /// same calendar day in a zone ahead — Lisbon->Madrid, London->Paris)
+    /// puts the two zones' local midnights on opposite sides of the real
+    /// gap between checkout and check-in, manufacturing a phantom sliver
+    /// overlap that never happened in real time. Comparing the actual
+    /// booked instants (`startsAt`/`endsAt`) asks the only question that
+    /// matters — did these two bookings ever hold the same physical moment
+    /// — and needs no zone conversion at all, since `Date` comparison is
+    /// already zone-agnostic. The "N nights" COPY, once a conflict is
+    /// confirmed, still comes from `nightRange`'s calendar-day labels
+    /// exactly as before — unaffected by this fix for the overwhelming
+    /// common case (both stays in the same zone, where the two methods
+    /// always agree), and `max(1, ...)`-clamped for the rare
+    /// confirmed-but-label-disjoint cross-zone case so the copy never reads
+    /// a nonsensical "0 nights".
     private static func overlap(_ a: ItineraryItem, _ b: ItineraryItem) -> Conflict? {
-        let (aInstantStart, aInstantEnd) = instantRange(a)
-        let (bInstantStart, bInstantEnd) = instantRange(b)
-        guard aInstantStart < bInstantEnd, bInstantStart < aInstantEnd else { return nil }
+        let (aDecisionStart, aDecisionEnd) = decisionRange(a)
+        let (bDecisionStart, bDecisionEnd) = decisionRange(b)
+        guard aDecisionStart < bDecisionEnd, bDecisionStart < aDecisionEnd else { return nil }
 
         let (aStart, aEnd) = nightRange(a)
         let (bStart, bEnd) = nightRange(b)
         let sharedStart = max(aStart, bStart)
         let sharedEnd = min(aEnd, bEnd)
-        let sharedNights = max(1, ItineraryDayBucketing.dayCount(from: sharedStart, to: sharedEnd, calendar: utcCalendar))
+        let sharedNights = max(
+            1, ItineraryDayBucketing.dayCount(from: sharedStart, to: sharedEnd, calendar: ItineraryTimeZone.utcCalendar)
+        )
         let isFull = sharedStart == aStart && sharedEnd == aEnd && sharedStart == bStart && sharedEnd == bEnd
 
         return Conflict(
@@ -118,8 +126,8 @@ enum StayConflicts {
     /// Half-open `[start, end)` of calendar nights `item` occupies, read in
     /// its own zone (`ItineraryItem.startLocalDay`/`endLocalDay` —
     /// `ItineraryTimeZone.swift`). A missing `endsAt` is a single-night
-    /// stay: `[start, start + 1)`. Feeds both `instantRange` (the actual
-    /// overlap decision) and the "N nights" copy math above.
+    /// stay: `[start, start + 1)`. Feeds the "N nights" copy math above,
+    /// and — via `instantRange` — `decisionRange`'s fallback path.
     private static func nightRange(_ item: ItineraryItem) -> (DayDate, DayDate) {
         let start = item.startLocalDay
         guard let end = item.endLocalDay, end > start else {
@@ -128,21 +136,20 @@ enum StayConflicts {
         return (start, end)
     }
 
-    /// The physical `[start, end)` instant interval `item`'s stay actually
-    /// occupies — `nightRange`'s calendar-night labels resolved to local
-    /// midnight in the item's OWN zone (`item.primaryTz`; hotels never
+    /// The midnight-expanded `[start, end)` instant interval for a stay with
+    /// no usable `endsAt` — `nightRange`'s calendar-night labels resolved to
+    /// local midnight in the item's OWN zone (`item.primaryTz`; hotels never
     /// have a separate arrival zone the way a flight does, so this is the
     /// one zone `startLocalDay`/`endLocalDay` were already computed
-    /// against). Comparing bare `DayDate` labels (as `nightRange` alone
-    /// would) is only correct between stays that share a zone: two real
-    /// IANA zones straddling the international date line (Kiritimati
-    /// UTC+14, Pago Pago UTC-11 — a genuine 25h offset) can desync a
-    /// same-looking label from actual simultaneity in BOTH directions — a
-    /// real overlap whose labels don't match, and matching labels with no
-    /// real overlap. Converting to genuine instants first (this function)
-    /// makes "do these two stays double-book the same physical time" the
-    /// literal question being asked, regardless of which zone each side is
-    /// in.
+    /// against). This label-based expansion used to decide every conflict;
+    /// comparing bare `DayDate` labels this way is only correct between
+    /// stays that share a zone (two real IANA zones straddling the
+    /// international date line — Kiritimati UTC+14, Pago Pago UTC-11 — can
+    /// desync a same-looking label from actual simultaneity in BOTH
+    /// directions, and even a same-day cross-zone handoff into a zone with
+    /// a different midnight offset manufactures a phantom sliver), so it
+    /// now survives only as `decisionRange`'s fallback for a single-night/
+    /// walk-in stay with no real `endsAt` to compare instead.
     private static func instantRange(_ item: ItineraryItem) -> (Date, Date) {
         let (startDay, endDay) = nightRange(item)
         var calendar = Calendar(identifier: .gregorian)
@@ -150,18 +157,40 @@ enum StayConflicts {
         return (startDay.asDate(calendar: calendar), endDay.asDate(calendar: calendar))
     }
 
-    private static var utcCalendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        return calendar
+    /// The interval `overlap(_:_:)` actually compares to decide yes/no.
+    /// Prefers the stay's REAL booked window — `[startsAt, endsAt)` —
+    /// whenever there's a genuine `endsAt` after `startsAt`: a checkout
+    /// instant is real evidence of when the room actually frees up, so
+    /// comparing it directly is immune to the cross-zone midnight-label
+    /// mismatch `instantRange` is prone to (see its doc comment). Falls back
+    /// to `[startsAt, end of its check-in night)` — the real check-in
+    /// instant, paired with only `instantRange`'s midnight-expanded END —
+    /// when `endsAt` is missing or not after `startsAt` (a single-night/
+    /// walk-in stay with no real end instant to compare against). The START
+    /// is deliberately the real `startsAt`, never `instantRange`'s
+    /// midnight-of-check-in-day: starting at midnight let a same-day
+    /// walk-in's fallback window reach back BEFORE its own check-in, far
+    /// enough to overlap another stay's same-day real checkout that
+    /// happened hours earlier — a phantom overlap neither stay could
+    /// physically have had (reviewer-caught regression). A mixed pair —
+    /// one side a real window, the other this fallback — still compares
+    /// fine: the fallback claims only `[check-in, end of its night)`, so it
+    /// can never fabricate an overlap before its own check-in.
+    private static func decisionRange(_ item: ItineraryItem) -> (Date, Date) {
+        if let endsAt = item.endsAt, endsAt > item.startsAt {
+            return (item.startsAt, endsAt)
+        }
+        let (_, endOfNight) = instantRange(item)
+        return (item.startsAt, endOfNight)
     }
 
     /// Same "step a `DayDate` by one calendar day via a UTC calendar" recipe
     /// `ItineraryDayBucketing.sections` already uses for its own day-by-day
     /// walk — kept local here rather than added to `DayDate` itself, which
-    /// is outside this work package's file scope.
+    /// is outside this work package's file scope. The UTC calendar itself
+    /// is `ItineraryTimeZone.utcCalendar` (DRY L2), not rebuilt here.
     private static func addingOneDay(to day: DayDate) -> DayDate {
-        let calendar = utcCalendar
+        let calendar = ItineraryTimeZone.utcCalendar
         guard let next = calendar.date(byAdding: .day, value: 1, to: day.asDate(calendar: calendar)) else {
             return day
         }

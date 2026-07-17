@@ -31,10 +31,10 @@ private struct TripImportAddressParams: Encodable {
 /// in-app send moment (`docs/BACKLOG.md`'s A5) — a forwarded email is
 /// processed the instant it lands, regardless of what the app is showing.
 /// So this instead gates the ADDRESS FETCH: `TripImportAddress.fetch` is the
-/// thing that reveals the address a user would actually forward to, and both
-/// call sites (`ItineraryTabView.fetchImportAddressIfNeeded()`,
-/// `ShareTripView.fetchImportAddressIfNeeded()`) check `fetchDecision()`
-/// before calling it — not-granted renders `ImportAddressCard`'s
+/// thing that reveals the address a user would actually forward to, and
+/// `ImportAddressLoader.fetchIfNeeded` (shared by every call site — see that
+/// type's own doc comment) checks `fetchDecision()` before calling it —
+/// not-granted renders `ImportAddressCard`'s
 /// `.needsConsent` state (explainer + "Show email address" button) instead.
 /// That state's own confirmation dialog lives inside `ImportAddressCard`
 /// itself (its `onConsentGranted` closure), not duplicated per call site,
@@ -50,8 +50,8 @@ enum EmailImportConsent {
         defaults.set(true, forKey: key)
     }
 
-    /// The address-fetch decision — `fetchImportAddressIfNeeded()` on both
-    /// surfaces switches on this instead of fetching unconditionally.
+    /// The address-fetch decision — `ImportAddressLoader.fetchIfNeeded`
+    /// switches on this instead of fetching unconditionally.
     enum FetchDecision: Equatable {
         case fetchImmediately
         case needsConsent

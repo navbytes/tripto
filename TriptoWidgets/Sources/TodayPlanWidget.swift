@@ -241,46 +241,11 @@ private struct TodayPlanRow: View {
     }
 }
 
-// MARK: - Category presentation (mirrors `Design/Components/CategoryIcon.swift`)
+// MARK: - Category presentation
 
-/// Reimplemented against `SnapshotItem.Category`, not imported, for the
-/// same reason as `SnapshotTrip`'s day-math in `NextTripWidget.swift`:
-/// `Design/Components/` isn't in the widget target's `sources` (only
-/// `Tokens.swift`/`PaletteExtras.swift` are, per `project.yml`), and the
-/// real `CategoryIcon.swift` extends `ItemCategory` (`Models/`)
-/// specifically, which the widget extension never compiles at all (D6).
-extension SnapshotItem.Category {
-    var colorPair: CategoryColor.Pair {
-        switch self {
-        case .flight: CategoryColor.flight
-        case .hotel: CategoryColor.hotel
-        case .activity: CategoryColor.activity
-        case .food: CategoryColor.food
-        case .transport: CategoryColor.transport
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .flight: "airplane"
-        case .hotel: "bed.double.fill"
-        case .activity: "camera.fill"
-        case .food: "fork.knife"
-        case .transport: "car.fill"
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .flight: "Flight"
-        case .hotel: "Stay"
-        case .activity: "Activity"
-        case .food: "Food"
-        case .transport: "Transport"
-        }
-    }
-}
-
+/// Icon/label/color mapping itself now lives in `Platform/Shared
+/// /CategoryPresentation.swift` (DRY M1 #3), shared with the app's
+/// `ItemCategory` — this tile just consumes it.
 private struct SnapshotCategoryTile: View {
     let category: SnapshotItem.Category
     var side: CGFloat = 30
@@ -294,31 +259,5 @@ private struct SnapshotCategoryTile: View {
                     .font(.system(size: side * 0.47, weight: .medium))
                     .foregroundStyle(category.colorPair.fg)
             }
-    }
-}
-
-// MARK: - Time formatting (mirrors `Models/ItineraryTimeZone.swift`)
-
-/// Reimplemented, not imported, for the same `Models/`-is-off-limits
-/// reason as everything else in this section — kept byte-for-byte
-/// identical to `ItineraryTimeZone`'s own `timeString`/`zoneLabel` so a
-/// flight's departure reads identically in the app and on the widget/Live
-/// Activity. Shared with `TravelDayActivityViews.swift` (same target).
-enum SnapshotTimeFormatting {
-    static func timeString(_ date: Date, in tz: TimeZone) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        formatter.timeZone = tz
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: date)
-    }
-
-    static func zoneLabel(for tz: TimeZone, at date: Date) -> String {
-        tz.abbreviation(for: date) ?? citySegment(of: tz.identifier)
-    }
-
-    private static func citySegment(of identifier: String) -> String {
-        guard let last = identifier.split(separator: "/").last else { return identifier }
-        return last.replacingOccurrences(of: "_", with: " ")
     }
 }

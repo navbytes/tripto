@@ -27,19 +27,24 @@ enum TripBucket: Equatable {
 enum TripDateBucketing {
     /// Past = end date strictly before today (BUILD_PLAN.md §4.1). A trip
     /// ending *today* is still "in progress", not past — the boundary case
-    /// this exists to get right.
+    /// this exists to get right. The in-progress check itself is
+    /// `Platform/Shared/TripDateMath.isInProgress` (DRY M1 #2) — the same
+    /// pure check the widget's `SnapshotTrip.isInProgress` calls, so the
+    /// app and the widget/Live Activity can never disagree about whether
+    /// "today" falls inside a trip.
     static func bucket(
         startDate: Date,
         endDate: Date,
         today: Date = .now,
         calendar: Calendar = .current
     ) -> TripBucket {
-        let start = calendar.startOfDay(for: startDate)
         let end = calendar.startOfDay(for: endDate)
         let now = calendar.startOfDay(for: today)
 
         if end < now { return .past }
-        if start <= now { return .inProgress }
+        if TripDateMath.isInProgress(startDate: startDate, endDate: endDate, asOf: today, calendar: calendar) {
+            return .inProgress
+        }
         return .upcoming
     }
 
@@ -50,9 +55,7 @@ enum TripDateBucketing {
         today: Date = .now,
         calendar: Calendar = .current
     ) -> Int {
-        let start = calendar.startOfDay(for: startDate)
-        let now = calendar.startOfDay(for: today)
-        return calendar.dateComponents([.day], from: now, to: start).day ?? 0
+        TripDateMath.daysUntilStart(startDate: startDate, today: today, calendar: calendar)
     }
 
     /// Inclusive day count, e.g. May 14 -> May 17 is 4 days.

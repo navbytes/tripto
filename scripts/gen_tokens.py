@@ -274,6 +274,25 @@ def gen_radii(tokens: dict) -> list[str]:
     return lines
 
 
+def gen_tap_target(tokens: dict) -> list[str]:
+    tap_target = tokens["tapTarget"]
+    lines = [
+        "// MARK: - Tap target",
+        "",
+        "/// BUILD_PLAN.md §6.5's minimum tap-target floor — one named value",
+        "/// instead of a bare `44` literal repeated at every interactive",
+        "/// control's `.frame(minHeight:)`. Named `TapTarget`, not `Layout`:",
+        "/// SwiftUI already exports a top-level `Layout` protocol, and a same-",
+        "/// named type in this module would shadow it at every unqualified",
+        "/// `Layout` reference (e.g. `WrapLayout: Layout`).",
+        "public enum TapTarget {",
+    ]
+    for key, value in tap_target.items():
+        lines.append(f"    public static let {swift_identifier(key)}: CGFloat = {fmt_number(value)}")
+    lines += ["}", ""]
+    return lines
+
+
 def gen_typo(tokens: dict) -> list[str]:
     families = tokens["type"]["families"]
     sizes = tokens["type"]["sizes"]
@@ -425,6 +444,7 @@ def main() -> None:
     sections += gen_gradients(tokens)
     sections += gen_spacing(tokens)
     sections += gen_radii(tokens)
+    sections += gen_tap_target(tokens)
     sections += gen_typo(tokens)
     sections += gen_variable_font_helper()
 

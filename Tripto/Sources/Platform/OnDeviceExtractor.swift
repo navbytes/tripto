@@ -216,7 +216,11 @@ enum OnDeviceExtractor {
             let packing = try await packingTask
             return .success(items: items, packing: packing)
         } catch {
-            logDebug("OnDeviceExtractor: falling back to remote after \(Self.classify(error)): \(error)")
+            // KISS/YAGNI: every `GenerationError` case fell back to remote
+            // identically — a named classifier switch existed only to name
+            // *why* in the log, which `error`'s own description already
+            // does, so it was collapsed to a bare catch (finding #2).
+            logDebug("OnDeviceExtractor: falling back to remote after \(error)")
             return .fallback
         }
     }
@@ -299,30 +303,6 @@ enum OnDeviceExtractor {
         device, if the text is or contains one. Use ONLY items present in the text; never invent \
         items. If the text is not a packing list, set isPackingList to false and return no items.
         """
-
-    // MARK: - Error classification (diagnostic only — every case below
-    // currently falls back to remote; see `extractAll`. Kept as a named
-    // switch, not a bare `catch`, so a future retry-once for the
-    // transient cases (R4 §3) is a one-branch change, and so fallback
-    // logs say *why* rather than just *that*.)
-
-    private static func classify(_ error: Error) -> String {
-        guard let generationError = error as? LanguageModelSession.GenerationError else {
-            return "non-generation error"
-        }
-        switch generationError {
-        case .exceededContextWindowSize:
-            return "exceededContextWindowSize"
-        case .guardrailViolation, .unsupportedLanguageOrLocale, .unsupportedGuide, .refusal:
-            return "cannotExtractOnDevice"
-        case .assetsUnavailable, .rateLimited, .concurrentRequests:
-            return "transient"
-        case .decodingFailure:
-            return "decodingFailure"
-        @unknown default:
-            return "unknownGenerationError"
-        }
-    }
 }
 
 #endif

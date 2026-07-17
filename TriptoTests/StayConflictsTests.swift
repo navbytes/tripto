@@ -57,6 +57,20 @@ final class StayConflictsTests: XCTestCase {
         XCTAssertTrue(StayConflicts.conflicts(in: [a, b]).isEmpty)
     }
 
+    /// Walk-in twin of the adjacency test above: same same-day
+    /// checkout-then-check-in shape, but B has no `endsAt` at all. Reviewer
+    /// D3 (fixed): the nil-endsAt fallback used to start its window at
+    /// LOCAL MIDNIGHT of the check-in day — hours before A's real 11:00
+    /// checkout — manufacturing a phantom "overlap" between a stay that had
+    /// already checked out and a walk-in that hadn't checked in yet.
+    func testWalkInCheckInAfterAnotherStaysSameDayCheckoutIsNotAConflict() {
+        // First hotel (nights 20-22), checks out the morning of the 23rd.
+        let a = hotel("First hotel", checkIn: instant(2026, 7, 20, 14, 0), checkOut: instant(2026, 7, 23, 11, 0))
+        // Walk-in booking, checks in the afternoon of the 23rd — after checkout.
+        let b = hotel("Walk-in booking", checkIn: instant(2026, 7, 23, 15, 0), checkOut: nil)
+        XCTAssertTrue(StayConflicts.conflicts(in: [a, b]).isEmpty)
+    }
+
     func testDisjointStaysAreNotAConflict() {
         let a = hotel("First hotel", checkIn: instant(2026, 7, 20, 14, 0), checkOut: instant(2026, 7, 23, 11, 0))
         let b = hotel("Second hotel", checkIn: instant(2026, 7, 25, 14, 0), checkOut: instant(2026, 7, 28, 11, 0))
@@ -83,6 +97,23 @@ final class StayConflictsTests: XCTestCase {
         // Later stay (nights 21-23).
         let b = hotel("Later stay", checkIn: instant(2026, 7, 21, 14, 0), checkOut: instant(2026, 7, 24, 11, 0))
         XCTAssertTrue(StayConflicts.conflicts(in: [a, b]).isEmpty)
+    }
+
+    /// Mirror ordering: a walk-in checking in EARLY in the day still claims
+    /// its whole check-in night — `[startsAt, following midnight)` — so a
+    /// real stay checking in LATER that same day genuinely lands inside the
+    /// walk-in's still-open night and must still be flagged. This is the
+    /// fix's other half: moving the fallback's START to the real check-in
+    /// (instead of midnight) kills the phantom pre-check-in overlap above
+    /// without also hiding a same-day collision that's actually real.
+    func testWalkInCheckInEarlyInTheDayStillConflictsWithARealStayCheckingInLaterThatDay() {
+        // Walk-in booking, checks in first thing in the morning, no known checkout.
+        let a = hotel("Walk-in booking", checkIn: instant(2026, 7, 20, 9, 0), checkOut: nil)
+        // Second booking, checks in that afternoon — genuinely collides with
+        // the walk-in's claimed night ([09:00, midnight the 21st)).
+        let b = hotel("Afternoon booking", checkIn: instant(2026, 7, 20, 15, 0), checkOut: instant(2026, 7, 22, 11, 0))
+        let conflicts = StayConflicts.conflicts(in: [a, b])
+        XCTAssertEqual(conflicts.count, 1, "walk-in's claimed night [09:00, midnight) genuinely overlaps the 15:00 check-in")
     }
 
     func testNonHotelItemsNeverProduceAConflictEvenWhenTheirDatesOverlap() {
@@ -220,15 +251,17 @@ final class StayConflictsTests: XCTestCase {
 
     // MARK: - Cross-timezone pairs (the Pacific date-line trap)
     //
-    // Reviewer D2 (fixed): the overlap DECISION now compares real instants
-    // (`StayConflicts.instantRange`), not bare `DayDate` labels — two
-    // different IANA zones straddling the international date line
-    // (Kiritimati UTC+14, Pago Pago UTC-11 — a real 25h offset) can desync
-    // a same-looking label from actual simultaneity in BOTH directions, a
-    // real overlap whose labels don't match, and matching labels with no
-    // real overlap. Both scenarios below are verified independently
-    // against real `Date` instants (not just against `StayConflicts`' own
-    // math) before asserting what `conflicts(in:)` does with them.
+    // Reviewer D2 (fixed): the overlap DECISION now compares each stay's
+    // real booked window directly (`StayConflicts.decisionRange`, which
+    // uses raw `startsAt`/`endsAt` whenever both are present), not bare
+    // `DayDate` labels — two different IANA zones straddling the
+    // international date line (Kiritimati UTC+14, Pago Pago UTC-11 — a
+    // real 25h offset) can desync a same-looking label from actual
+    // simultaneity in BOTH directions, a real overlap whose labels don't
+    // match, and matching labels with no real overlap. Both scenarios
+    // below are verified independently against real `Date` instants (not
+    // just against `StayConflicts`' own math) before asserting what
+    // `conflicts(in:)` does with them.
 
     /// B's real check-in/check-out window is entirely nested inside A's
     /// (proved below via raw instants) — an unambiguous, genuine overlap —
@@ -266,6 +299,69 @@ final class StayConflictsTests: XCTestCase {
         XCTAssertFalse(cEnd > d.startsAt, "sanity: C ends before D starts — a real 10-hour gap, no overlap")
 
         XCTAssertTrue(StayConflicts.conflicts(in: [c, d]).isEmpty, "these stays never really overlap and must not be flagged")
+    }
+
+    // MARK: - Cross-timezone same-day handoffs (eastward zone jump)
+    //
+    // The false positive this fix kills: the demo trip's own Lisbon ->
+    // Madrid handoff (checkout 2026-05-21 11:00 Europe/Lisbon, check-in
+    // 2026-05-21 15:00 Europe/Madrid, same calendar day) used to get
+    // flagged, because the OLD decision compared each zone's LOCAL
+    // MIDNIGHT for the 21st: Madrid (UTC+2 in May) hits its midnight an
+    // hour before Lisbon (UTC+1) hits its own, manufacturing a phantom
+    // 1-hour "overlap" between two midnights that never corresponded to
+    // any moment either stay was actually booked. Comparing the real
+    // `startsAt`/`endsAt` instants (`decisionRange`) fixes it: Lisbon's
+    // real checkout (10:00 UTC) is hours before Madrid's real check-in
+    // (13:00 UTC), so there is nothing to flag.
+
+    /// The exact shape of `Support/DemoSeeder.swift`'s `hotels()` pair
+    /// ("LX Boutique Hotel" / "Gran Meli\u{e1} Palacio de los Duques") — must
+    /// render the demo trip clean, with no rose overlap flag on either card.
+    func testEastwardCrossZoneSameDayHandoffIsNotFlagged() {
+        let lisbon = hotel(
+            "LX Boutique Hotel", checkIn: instant(2026, 5, 17, 15, 0, tz: "Europe/Lisbon"),
+            checkOut: instant(2026, 5, 21, 11, 0, tz: "Europe/Lisbon"), tz: "Europe/Lisbon"
+        )
+        let madrid = hotel(
+            "Gran Meli\u{e1} Palacio de los Duques", checkIn: instant(2026, 5, 21, 15, 0, tz: "Europe/Madrid"),
+            checkOut: instant(2026, 5, 23, 11, 0, tz: "Europe/Madrid"), tz: "Europe/Madrid"
+        )
+        guard let lisbonEnd = lisbon.endsAt else { return XCTFail("fixture requires endsAt") }
+        XCTAssertTrue(
+            lisbonEnd <= madrid.startsAt,
+            "sanity: Lisbon's real checkout (10:00 UTC) is before Madrid's real check-in (13:00 UTC) — a real 3h gap"
+        )
+
+        XCTAssertTrue(
+            StayConflicts.conflicts(in: [lisbon, madrid]).isEmpty,
+            "checkout precedes the next check-in by real hours — must not be flagged despite the shared calendar day"
+        )
+    }
+
+    /// The mirror case: real windows that actually DO intersect on the same
+    /// handoff day must still be flagged — this fix must not turn off
+    /// overlap detection for cross-zone stays altogether, only the phantom
+    /// midnight-label sliver.
+    func testGenuineCrossZoneSameDayDoubleBookingIsStillFlagged() {
+        let lisbon = hotel(
+            "LX Boutique Hotel", checkIn: instant(2026, 5, 17, 15, 0, tz: "Europe/Lisbon"),
+            checkOut: instant(2026, 5, 21, 18, 0, tz: "Europe/Lisbon"), tz: "Europe/Lisbon"
+        )
+        let madrid = hotel(
+            "Gran Meli\u{e1} Palacio de los Duques", checkIn: instant(2026, 5, 21, 15, 0, tz: "Europe/Madrid"),
+            checkOut: instant(2026, 5, 23, 11, 0, tz: "Europe/Madrid"), tz: "Europe/Madrid"
+        )
+        guard let lisbonEnd = lisbon.endsAt else { return XCTFail("fixture requires endsAt") }
+        XCTAssertTrue(
+            madrid.startsAt < lisbonEnd,
+            "sanity: Madrid's real check-in (13:00 UTC) is before Lisbon's real checkout (17:00 UTC) — a real 4h overlap"
+        )
+
+        guard let conflict = StayConflicts.conflicts(in: [lisbon, madrid]).first else {
+            return XCTFail("real windows genuinely overlap and must be flagged")
+        }
+        XCTAssertEqual(conflict.sharedNights, 1, "same-day cross-zone overlap still clamps to 1 shared night for copy")
     }
 
     // MARK: - DST transitions

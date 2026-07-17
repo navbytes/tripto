@@ -497,25 +497,17 @@ struct CoverSearchSheet: View {
     /// friendly message each \u{2014} same "never surface a raw status code"
     /// contract as `PasteImportSheet.friendlyMessage(for:)`, whose exact
     /// shape this mirrors (`static` for the same direct-testability reason).
+    /// The shared generic-fallback skeleton lives in
+    /// `FriendlyFunctionsMessage` (DRY finding L5); only these per-code
+    /// strings are genuinely this endpoint's own.
     static func friendlyMessage(for error: Error) -> String {
-        guard let functionsError = error as? FunctionsError else {
-            return "Something went wrong. Check your connection and try again."
-        }
-        switch functionsError {
-        case .relayError:
-            return "Something went wrong. Check your connection and try again."
-        case .httpError(let code, _):
-            switch code {
-            case 401:
-                return "You\u{2019}re signed out, so photos can\u{2019}t be searched right now. Sign back in and try again."
-            case 429:
-                return "You\u{2019}ve searched a lot recently \u{2014} try again in an hour."
-            case 502, 503:
-                return "Couldn\u{2019}t reach Pexels right now. Try again."
-            default:
-                return "Something went wrong. Try again."
-            }
-        }
+        let pexelsUnreachable = "Couldn\u{2019}t reach Pexels right now. Try again."
+        return FriendlyFunctionsMessage.map(error, perCode: [
+            401: "You\u{2019}re signed out, so photos can\u{2019}t be searched right now. Sign back in and try again.",
+            429: "You\u{2019}ve searched a lot recently \u{2014} try again in an hour.",
+            502: pexelsUnreachable,
+            503: pexelsUnreachable
+        ])
     }
 }
 

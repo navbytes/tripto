@@ -122,10 +122,7 @@ enum TripArchiveExporter {
     /// Writes the encoded archive to a fresh temp file named per §7's
     /// convention, ready for `SettingsView`'s share sheet.
     static func writeTempFile(_ data: Data, today: Date = .now, calendar: Calendar = .current) throws -> URL {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = ItineraryTimeZone.posixFormatter("yyyy-MM-dd", calendar: calendar)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("tripto-archive-\(formatter.string(from: today))")
             .appendingPathExtension("json")
