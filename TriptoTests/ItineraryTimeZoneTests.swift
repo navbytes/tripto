@@ -92,4 +92,15 @@ final class ItineraryTimeZoneTests: XCTestCase {
         let first = TestFixtures.makeItineraryItem(startsAt: .now, tz: "Europe/Lisbon")
         XCTAssertFalse(ItineraryTimeZone.zoneChanged(from: nil, to: first))
     }
+
+    /// Xcode Cloud regression (build 40): the calendar-overload formatter
+    /// must render day labels in the CALENDAR's zone, not the machine's —
+    /// a UTC calendar's "2026-07-13" shifted to "-12" on a west-of-UTC CI
+    /// host. Both assertions are machine-tz-independent with the fix.
+    func testPosixFormatterCalendarOverloadHonorsTheCalendarsOwnZone() {
+        let formatter = ItineraryTimeZone.posixFormatter("yyyy-MM-dd", calendar: ItineraryTimeZone.utcCalendar)
+        XCTAssertEqual(formatter.timeZone, ItineraryTimeZone.utc)
+        // 2026-07-13T00:00:00Z — the exact boundary instant CI tripped on.
+        XCTAssertEqual(formatter.string(from: Date(timeIntervalSince1970: 1_783_900_800)), "2026-07-13")
+    }
 }

@@ -81,6 +81,11 @@ enum ItineraryTimeZone {
     static func posixFormatter(_ format: String, calendar: Calendar) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = calendar
+        // The calendar's own zone must ride along — DateFormatter otherwise
+        // renders in the process's default zone, so a UTC calendar's day
+        // label shifts on machines west of UTC (bit Xcode Cloud's test run;
+        // prod call sites pass .current and are unaffected either way).
+        formatter.timeZone = calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = format
         return formatter
