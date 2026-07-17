@@ -222,9 +222,9 @@ enum DemoSeeder {
         // before the non-app profiles (whose INSERT RLS requires organizer),
         // then the flush below guarantees ordering. `member` is deliberately
         // NOT pushed — the trigger owns the real organizer row.
-        await syncEngine.enqueueUpsert(table: .trips, rowId: trip.id, tripId: trip.id, payload: trip.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: meeraProfile.id, tripId: tripId, payload: meeraProfile.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: grandmaProfile.id, tripId: tripId, payload: grandmaProfile.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: trip.id, tripId: trip.id, payload: trip.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .tripProfiles, rowId: meeraProfile.id, tripId: tripId, payload: meeraProfile.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .tripProfiles, rowId: grandmaProfile.id, tripId: tripId, payload: grandmaProfile.toDTO())
         // `item_assignees`/`packing_items` below FK-reference both
         // `trip_profiles.id` and (for assignees) `itinerary_items.id` — an
         // explicit synchronous flush per phase, rather than trusting the
@@ -238,7 +238,7 @@ enum DemoSeeder {
         for item in items { modelContext.insert(item) }
         try? modelContext.save()
         for item in items {
-            await syncEngine.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: tripId, payload: item.toDTO())
+            await enqueueUpsertForSeed(syncEngine: syncEngine, table: .itineraryItems, rowId: item.id, tripId: tripId, payload: item.toDTO())
         }
         await syncEngine.flushPush()
 
@@ -246,10 +246,10 @@ enum DemoSeeder {
         for packingItem in packing { modelContext.insert(packingItem) }
         try? modelContext.save()
         for assignee in assignees {
-            await syncEngine.enqueueUpsert(table: .itemAssignees, rowId: assignee.id, tripId: tripId, payload: assignee.toDTO())
+            await enqueueUpsertForSeed(syncEngine: syncEngine, table: .itemAssignees, rowId: assignee.id, tripId: tripId, payload: assignee.toDTO())
         }
         for packingItem in packing {
-            await syncEngine.enqueueUpsert(table: .packingItems, rowId: packingItem.id, tripId: tripId, payload: packingItem.toDTO())
+            await enqueueUpsertForSeed(syncEngine: syncEngine, table: .packingItems, rowId: packingItem.id, tripId: tripId, payload: packingItem.toDTO())
         }
         await syncEngine.flushPush()
 
@@ -419,11 +419,11 @@ enum DemoSeeder {
         modelContext.insert(activity)
         try? modelContext.save()
 
-        await syncEngine.enqueueUpsert(table: .trips, rowId: tripId, tripId: tripId, payload: trip.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: asha.id, tripId: tripId, payload: asha.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: kiran.id, tripId: tripId, payload: kiran.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: tripId, tripId: tripId, payload: trip.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .tripProfiles, rowId: asha.id, tripId: tripId, payload: asha.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .tripProfiles, rowId: kiran.id, tripId: tripId, payload: kiran.toDTO())
         await syncEngine.flushPush()
-        await syncEngine.enqueueUpsert(table: .itineraryItems, rowId: activity.id, tripId: tripId, payload: activity.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .itineraryItems, rowId: activity.id, tripId: tripId, payload: activity.toDTO())
         await syncEngine.flushPush()
     }
 
@@ -603,17 +603,17 @@ enum DemoSeeder {
         modelContext.insert(controlMember) // local-only; never enqueued
         try? modelContext.save()
 
-        await syncEngine.enqueueUpsert(table: .trips, rowId: photoTripId, tripId: photoTripId, payload: photoTrip.toDTO())
-        await syncEngine.enqueueUpsert(table: .trips, rowId: controlTripId, tripId: controlTripId, payload: controlTrip.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: photoTripId, tripId: photoTripId, payload: photoTrip.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: controlTripId, tripId: controlTripId, payload: controlTrip.toDTO())
         await syncEngine.flushPush()
 
         modelContext.insert(photoTripActivity)
         modelContext.insert(photoTripHotel)
         try? modelContext.save()
-        await syncEngine.enqueueUpsert(
+        await enqueueUpsertForSeed(syncEngine: syncEngine,
             table: .itineraryItems, rowId: photoTripActivity.id, tripId: photoTripId, payload: photoTripActivity.toDTO()
         )
-        await syncEngine.enqueueUpsert(
+        await enqueueUpsertForSeed(syncEngine: syncEngine,
             table: .itineraryItems, rowId: photoTripHotel.id, tripId: photoTripId, payload: photoTripHotel.toDTO()
         )
         await syncEngine.flushPush()
@@ -635,7 +635,7 @@ enum DemoSeeder {
         modelContext.insert(beenTrip)
         modelContext.insert(beenMember) // local-only; never enqueued
         try? modelContext.save()
-        await syncEngine.enqueueUpsert(table: .trips, rowId: beenTripId, tripId: beenTripId, payload: beenTrip.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: beenTripId, tripId: beenTripId, payload: beenTrip.toDTO())
         await syncEngine.flushPush()
     }
 
@@ -790,10 +790,10 @@ enum DemoSeeder {
         modelContext.insert(secondMember) // local-only; never enqueued
         try? modelContext.save()
 
-        await syncEngine.enqueueUpsert(table: .trips, rowId: firstId, tripId: firstId, payload: first.toDTO())
-        await syncEngine.enqueueUpsert(table: .trips, rowId: secondId, tripId: secondId, payload: second.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: priya.id, tripId: firstId, payload: priya.toDTO())
-        await syncEngine.enqueueUpsert(table: .tripProfiles, rowId: priyaAgain.id, tripId: firstId, payload: priyaAgain.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: firstId, tripId: firstId, payload: first.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: secondId, tripId: secondId, payload: second.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .tripProfiles, rowId: priya.id, tripId: firstId, payload: priya.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .tripProfiles, rowId: priyaAgain.id, tripId: firstId, payload: priyaAgain.toDTO())
         await syncEngine.flushPush()
     }
 
@@ -1042,6 +1042,18 @@ enum DemoSeeder {
         await pushShowcaseTrip(trip, member: member, items: items, modelContext: modelContext, syncEngine: syncEngine)
     }
 
+    /// `-screenshotMode` capture builds want every seeded row to present as
+    /// already synced (no "Waiting to sync" chip/pill/dashed-border chrome)
+    /// — skips the outbox enqueue entirely so `pendingRowIds`/pending
+    /// queries come back empty for these rows naturally, rather than gating
+    /// that chrome in each view (real users must keep seeing it).
+    private static func enqueueUpsertForSeed(
+        syncEngine: SyncEngine, table: SyncTable, rowId: UUID, tripId: UUID?, payload: some Encodable
+    ) async {
+        guard !ProcessInfo.processInfo.arguments.contains("-screenshotMode") else { return }
+        await syncEngine.enqueueUpsert(table: table, rowId: rowId, tripId: tripId, payload: payload)
+    }
+
     /// One trip + its organizer membership (local-only, never enqueued —
     /// same reasoning as `seed()`'s own `member` above) + its items, pushed
     /// through the exact same insert-then-enqueue path every other mutation
@@ -1054,10 +1066,10 @@ enum DemoSeeder {
         for item in items { modelContext.insert(item) }
         try? modelContext.save()
 
-        await syncEngine.enqueueUpsert(table: .trips, rowId: trip.id, tripId: trip.id, payload: trip.toDTO())
+        await enqueueUpsertForSeed(syncEngine: syncEngine, table: .trips, rowId: trip.id, tripId: trip.id, payload: trip.toDTO())
         await syncEngine.flushPush()
         for item in items {
-            await syncEngine.enqueueUpsert(table: .itineraryItems, rowId: item.id, tripId: trip.id, payload: item.toDTO())
+            await enqueueUpsertForSeed(syncEngine: syncEngine, table: .itineraryItems, rowId: item.id, tripId: trip.id, payload: item.toDTO())
         }
         await syncEngine.flushPush()
     }
