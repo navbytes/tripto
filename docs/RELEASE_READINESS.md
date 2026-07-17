@@ -1,15 +1,15 @@
 # Tripto — Release checklist
 
-**Status: SUBMITTED to App Review 2026-07-12 — Build 6 (1.0 (6)), Waiting for
-Review.** Build 6 (commit `5ff10d2`, tag `v1.0-build6`) REPLACED the original
-Build 4: build 4 shipped the calendar-permission crash (missing iOS 17 usage
-keys, fixed in PR #21) and carried none of the on-device-AI / provider-switch /
-export / duplicate-trip work. Build 4 was developer-rejected and build 6
-submitted in its place. The **§2 backend cutover is COMPLETE** (2026-07-12:
-share-worker `/privacy` deployed, anonymous sign-ins disabled + verified, anon
-test data purged). What remains is the **manual release** once review passes,
-plus the §3 real-device checks. Paste-ready metadata and privacy answers are at
-the end.
+**Status: PUBLISHED to App Store 2026-07-17 — v1.0 (1.0-build6).** Build 6
+(commit `5ff10d2`, tag `v1.0-build6`, submitted 2026-07-12) was approved and
+released. Build 4 (the original submission) was developer-rejected before App
+Review due to the calendar-permission crash (missing iOS 17 usage keys, fixed in
+PR #21). Build 6 carried the on-device-AI / provider-switch / export /
+duplicate-trip fixes and was submitted in its place 2026-07-12, approved, and
+manually released 2026-07-17. The **§2 backend cutover was COMPLETE** 2026-07-12
+(share-worker `/privacy` deployed, anonymous sign-ins disabled + verified, anon
+test data purged). The §3 real-device checks remain as standard pre-launch
+verification; the app is now live.
 
 Build-number note: Xcode Cloud auto-manages CFBundleVersion from its run
 counter, overriding project.yml's `CURRENT_PROJECT_VERSION` — so a plain
@@ -17,7 +17,7 @@ counter, overriding project.yml's `CURRENT_PROJECT_VERSION` — so a plain
 release tag also triggers a redundant CI build under a tag group; harmless,
 same commit.
 
-Last updated: 2026-07-12.
+Last updated: 2026-07-17 (v1.0 published); 2026-07-12 (initial release).
 
 ---
 
@@ -99,7 +99,8 @@ for Review.** Submission ID `5f53b010-8cb0-4d8c-b7ce-2fe48fb64c9b`.
 - [x] **Build attached + submitted:** Build 4 delivered via Xcode Cloud → App
   Store Connect (no local archive — see §1). Superseded Build 1, which was
   rejected **ITMS-90111** (seed SDK). _(2026-07-12)_
-- [ ] **Manually release** once review passes — gated on the §2 backend cutover.
+- [x] **Manually release** once review passes — gated on the §2 backend cutover.
+  _(released 2026-07-17)_
 
 ## 5. App Privacy answers (App Store Connect form)
 
