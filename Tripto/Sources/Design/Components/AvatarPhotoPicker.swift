@@ -13,7 +13,7 @@ import SwiftUI
 /// .upload`. `avatarPath` only ever changes on a *successful* upload — a
 /// failure leaves it untouched and reuses the host screen's own toast (P8a
 /// brief: "no path write on failed upload — atomicity").
-struct AvatarPhotoPicker: View {
+struct AvatarPhotoPicker<BesideAvatar: View>: View {
     let initial: String
     let colorName: String
     @Binding var avatarPath: String?
@@ -35,10 +35,52 @@ struct AvatarPhotoPicker: View {
     /// default beside-the-circle `VStack` (`TripProfileFormSheet`'s
     /// unchanged layout, one button stacked above the other).
     var actionsBelowAvatar: Bool = false
+    /// Fix round 2: content rendered BESIDE the avatar circle (Settings' V1
+    /// labeled "Display name" block). Composing that field in an OUTER
+    /// HStack next to this view made the whole column as wide as the
+    /// actions row under the avatar, so the name block floated mid-card —
+    /// hosting the slot here keeps the actions row a full-width sibling
+    /// while the name hugs the circle. `EmptyView` (every existing call
+    /// site, via the convenience init below) collapses the internal HStack
+    /// to the bare avatar — both original layouts render unchanged.
+    let besideAvatar: BesideAvatar
 
+    init(
+        initial: String,
+        colorName: String,
+        avatarPath: Binding<String?>,
+        uploaderUserId: UUID?,
+        toast: Binding<String?>,
+        diameter: CGFloat = 72,
+        removeLabel: String = "Remove photo",
+        actionsBelowAvatar: Bool = false,
+        @ViewBuilder besideAvatar: () -> BesideAvatar
+    ) {
+        self.initial = initial
+        self.colorName = colorName
+        self._avatarPath = avatarPath
+        self.uploaderUserId = uploaderUserId
+        self._toast = toast
+        self.diameter = diameter
+        self.removeLabel = removeLabel
+        self.actionsBelowAvatar = actionsBelowAvatar
+        self.besideAvatar = besideAvatar()
+    }
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var pickerItem: PhotosPickerItem?
     @State private var isPresentingPicker = false
     @State private var isUploading = false
+
+    /// The avatar+`besideAvatar` pair stacks at accessibility sizes — the
+    /// same `isAccessibilitySize` -> `AnyLayout` swap `TripCard` established
+    /// (a 56pt circle plus a full-width field can't share a row once type
+    /// scales up). Lives here since the pair now composes inside this view.
+    private var topRowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.sm))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.md))
+    }
 
     /// P7e (round-2 re-audit item 2a): both call sites (`SettingsView
     /// .initials(from:)`, `TripProfileFormSheet.initials`) hand this a
@@ -57,7 +99,10 @@ struct AvatarPhotoPicker: View {
         Group {
             if actionsBelowAvatar {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    preview
+                    topRowLayout {
+                        preview
+                        besideAvatar
+                    }
                     actionsContent
                 }
             } else {
@@ -260,4 +305,31 @@ struct AvatarPhotoPicker: View {
     .padding(Spacing.xl)
     .background(Palette.paper)
     .toastOverlay($toast)
+}
+
+/// Every pre-slot call site (`TripProfileFormSheet`, previews) — same
+/// signature the struct's old memberwise init had, so they compile
+/// unchanged and render the bare avatar exactly as before.
+extension AvatarPhotoPicker where BesideAvatar == EmptyView {
+    init(
+        initial: String,
+        colorName: String,
+        avatarPath: Binding<String?>,
+        uploaderUserId: UUID?,
+        toast: Binding<String?>,
+        diameter: CGFloat = 72,
+        removeLabel: String = "Remove photo",
+        actionsBelowAvatar: Bool = false
+    ) {
+        self.init(
+            initial: initial,
+            colorName: colorName,
+            avatarPath: avatarPath,
+            uploaderUserId: uploaderUserId,
+            toast: toast,
+            diameter: diameter,
+            removeLabel: removeLabel,
+            actionsBelowAvatar: actionsBelowAvatar
+        ) { EmptyView() }
+    }
 }

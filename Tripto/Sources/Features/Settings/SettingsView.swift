@@ -456,28 +456,23 @@ struct SettingsView: View {
     /// circle plus a full-width text field has no room for both to stay
     /// legible once type scales up.
     private var profileAvatarRow: some View {
-        let rowLayout: AnyLayout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.sm))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.md))
-        return rowLayout {
-            AvatarPhotoPicker(
-                initial: initials(from: displayName),
-                colorName: avatarColor.isEmpty ? "slate" : avatarColor,
-                avatarPath: $avatarPath,
-                uploaderUserId: authManager.userId,
-                toast: $toast,
-                diameter: 56,
-                removeLabel: "Remove",
-                actionsBelowAvatar: true
-            )
-
-            // Fix round: without an explicit `maxWidth: .infinity` this
-            // block sized itself to its own narrow content (the "Naveen"/
-            // "Display name" text) rather than the row's remaining width,
-            // leaving the rest of the row unclaimed — which (avatar block
-            // pinned leading, this block narrow within the space right of
-            // it) reads as "centered" rather than the intended
-            // fills-the-row, leading-aligned block.
+        // Fix round 2: the name block rides `AvatarPhotoPicker`'s
+        // `besideAvatar` slot instead of an outer HStack — composed outside,
+        // the picker's column (avatar over the "Change photo"/"Remove" row)
+        // was as wide as that actions row, so the field started mid-card and
+        // read as centered. Inside the slot, the field hugs the 56pt circle
+        // and the actions row spans full width below, matching the approved
+        // V1 mockup. AX-size stacking lives in the component now.
+        AvatarPhotoPicker(
+            initial: initials(from: displayName),
+            colorName: avatarColor.isEmpty ? "slate" : avatarColor,
+            avatarPath: $avatarPath,
+            uploaderUserId: authManager.userId,
+            toast: $toast,
+            diameter: 56,
+            removeLabel: "Remove",
+            actionsBelowAvatar: true
+        ) {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Display name")
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
