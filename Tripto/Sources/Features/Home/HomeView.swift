@@ -541,25 +541,43 @@ struct HomeView: View {
     // HomeView (avatar tap → Settings)").
     private var settingsAvatar: some View {
         NavigationLink(value: SettingsRoute()) {
-            Circle()
-                .fill(Palette.indigo)
-                .frame(width: 42, height: 42)
-                .overlay {
-                    if let myDisplayName {
-                        Text(initials(from: myDisplayName))
-                            .font(Typo.display(16))
-                            .foregroundStyle(.white)
-                    } else {
-                        // Finding 4: no bogus "T" initial before the
-                        // profile hydrates.
-                        Image(systemName: "person.fill")
-                            .foregroundStyle(.white)
-                    }
+            Group {
+                if let myDisplayName {
+                    // Bug fix: this used to always draw a plain indigo fill
+                    // + initials, predating photo support and ignoring the
+                    // signed-in user's own chosen `avatarColor` — the same
+                    // Settings-proven `AvatarPhotoCircle` (`AvatarStack
+                    // .swift`) every other avatar in the app already renders
+                    // through, fed by `myProfile`'s own live fields (P8a).
+                    // Decorative: the `NavigationLink`'s own
+                    // `.accessibilityLabel("Settings")` below is the one
+                    // spoken description for this whole tappable region,
+                    // same "hide the circle, the surrounding context already
+                    // names it" treatment `AvatarPhotoPicker`'s own preview
+                    // uses.
+                    AvatarPhotoCircle(
+                        initial: initials(from: myDisplayName),
+                        colorName: myProfile?.avatarColor ?? "slate",
+                        avatarPath: myProfile?.avatarPath,
+                        diameter: 42
+                    )
+                    .accessibilityHidden(true)
+                } else {
+                    // Finding 4: no bogus "T" initial before the
+                    // profile hydrates.
+                    Circle()
+                        .fill(Palette.indigo)
+                        .frame(width: 42, height: 42)
+                        .overlay {
+                            Image(systemName: "person.fill")
+                                .foregroundStyle(.white)
+                        }
                 }
-                // 44pt hit target (§6.5) around the 42pt visual circle —
-                // finding 8.
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            }
+            // 44pt hit target (§6.5) around the 42pt visual circle —
+            // finding 8.
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel("Settings")
     }
