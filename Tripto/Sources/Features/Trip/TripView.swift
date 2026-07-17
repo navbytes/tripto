@@ -82,6 +82,10 @@ struct TripView: View {
     @Environment(SyncStatus.self) private var syncStatus
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// UX "hero-immersive-profile": swaps the immersive tab row's
+    /// translucent `CoverGradient.tabScrim` for a solid backing — see
+    /// `immersiveHeroSection`'s doc comment.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     /// Finding 4: `tabBar()`'s AX-size horizontal-scroll branch, same
     /// `isAccessibilitySize` convention as `TripCard.swift`.
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -435,27 +439,7 @@ struct TripView: View {
 
     private func content(for trip: Trip) -> some View {
         VStack(spacing: 0) {
-            TripHeroView(
-                trip: trip,
-                tripProfileCount: tripProfiles.count,
-                selectedTab: selectedTab,
-                reduceMotion: reduceMotion,
-                dynamicTypeSize: dynamicTypeSize,
-                canEditTrip: canEditTrip,
-                isEditingTrip: $isEditingTrip,
-                onAddToCalendar: addTripToCalendar,
-                model: heroScrollModel
-            )
-
-            if syncStatus.isOffline {
-                SyncBanner()
-            }
-            if !syncStatus.syncIssues.isEmpty {
-                SyncIssueBanner()
-            }
-
-            tabBar()
-                .revealStagger(0.06, revealed: contentRevealed, reduceMotion: reduceMotion)
+            heroSection(for: trip)
 
             // TI-3: same trigger, same spot, on every tab — see
             // `pasteImportPill`'s doc comment for what this replaced. Option A
@@ -649,6 +633,120 @@ struct TripView: View {
         }
     }
 
+    // MARK: - Hero + banners + tab row (UX "hero-immersive-profile", Option B)
+
+    /// Branches ONCE, here, on `trip.coverImagePath != nil` — every other
+    /// call site (`tabBar`, `tabButtons`, `pasteImportPill`) just takes the
+    /// `onPhoto` bool this decides, instead of re-deriving the same check.
+    @ViewBuilder
+    private func heroSection(for trip: Trip) -> some View {
+        if trip.coverImagePath != nil {
+            immersiveHeroSection(for: trip)
+        } else {
+            standardHeroSection(for: trip)
+        }
+    }
+
+    /// Gradient-only trips: bit-identical to this screen's pre-"immersive"
+    /// layout — hero, banners, and tab row are independent siblings, the
+    /// tab row in its existing ink/slate-on-paper style. Untouched by this
+    /// feature but for the extraction itself.
+    private func standardHeroSection(for trip: Trip) -> some View {
+        Group {
+            TripHeroView(
+                trip: trip,
+                tripProfileCount: tripProfiles.count,
+                selectedTab: selectedTab,
+                reduceMotion: reduceMotion,
+                dynamicTypeSize: dynamicTypeSize,
+                canEditTrip: canEditTrip,
+                isEditingTrip: $isEditingTrip,
+                onAddToCalendar: addTripToCalendar,
+                model: heroScrollModel
+            )
+
+            if syncStatus.isOffline {
+                SyncBanner()
+            }
+            if !syncStatus.syncIssues.isEmpty {
+                SyncIssueBanner()
+            }
+
+            tabBar()
+                .revealStagger(0.06, revealed: contentRevealed, reduceMotion: reduceMotion)
+        }
+    }
+
+    /// Photo-cover trips: hero + banners + tab row share ONE clipped
+    /// background instead of each painting/using its own — the deliberate
+    /// "photo deliberately extends through the tab row" look this feature
+    /// brief calls for, and the fix for a pre-existing bug where the
+    /// photo (unlike the flat gradient) painted past the hero's own bounds
+    /// with nothing clipping it (see `TripHeroView.body`'s own doc
+    /// comment). `.clipped()` is applied BEFORE `.ignoresSafeArea(edges:
+    /// .top)` deliberately: clipping first bounds the photo to this
+    /// container's natural (hero-top to tab-row-bottom) frame, then
+    /// `ignoresSafeArea`, as the outermost modifier, extends that
+    /// already-bounded rectangle up past the notch as one unit — reversing
+    /// the order would clip away the very bleed this is meant to produce.
+    /// Nothing paints below the tab row's own bottom edge either way.
+    ///
+    /// Sync banners get an explicit opaque `Palette.paper` backing here:
+    /// `SyncBanner`/`SyncIssueBanner`'s own fills (`amberSoft`/`roseSoft`,
+    /// `Tokens.swift`) are fully opaque only in LIGHT mode — both carry a
+    /// ~22%-alpha dark-mode variant, invisible today only because they sit
+    /// over the flat `Palette.paper` this screen renders behind
+    /// `content(for:)`. Over THIS container's photo, dark mode would let
+    /// the photo show through unless re-asserted, breaking "banners stay
+    /// fully opaque" (this feature's own brief, item 3) — so both get the
+    /// same solid backing back, restoring exactly today's composite.
+    private func immersiveHeroSection(for trip: Trip) -> some View {
+        VStack(spacing: 0) {
+            TripHeroView(
+                trip: trip,
+                tripProfileCount: tripProfiles.count,
+                selectedTab: selectedTab,
+                reduceMotion: reduceMotion,
+                dynamicTypeSize: dynamicTypeSize,
+                canEditTrip: canEditTrip,
+                isEditingTrip: $isEditingTrip,
+                onAddToCalendar: addTripToCalendar,
+                model: heroScrollModel
+            )
+
+            if syncStatus.isOffline {
+                SyncBanner().background(Palette.paper)
+            }
+            if !syncStatus.syncIssues.isEmpty {
+                SyncIssueBanner().background(Palette.paper)
+            }
+
+            tabBar(onPhoto: true)
+                .background(alignment: .bottom) {
+                    // Accessibility: Reduce Transparency swaps the gradient
+                    // for a solid backing (this feature's brief, item 5) —
+                    // safe regardless of the photo underneath, unlike the
+                    // gradient (see `CoverGradient.tabScrim`'s own doc
+                    // comment for that one's photo-content-dependent math).
+                    // Sized to this `.background`'s own frame — the tab
+                    // row's actual, current frame, whatever it grows to at
+                    // any Dynamic Type size, AX included — never a fixed
+                    // height, so it always covers the row's full height.
+                    if reduceTransparency {
+                        Palette.indigo
+                    } else {
+                        CoverGradient.tabScrim
+                    }
+                }
+                .revealStagger(0.06, revealed: contentRevealed, reduceMotion: reduceMotion)
+        }
+        .background {
+            CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
+        }
+        .clipped()
+        .ignoresSafeArea(edges: .top)
+    }
+
     /// Finding 5: keeps all three tab views mounted underneath the visible
     /// one instead of the old `switch`-driven teardown, which was
     /// destroying and recreating `ItineraryTabView` (and its `@State
@@ -688,7 +786,16 @@ struct TripView: View {
     /// (Bookings had none at all). One pill, always visible (not
     /// empty-state-gated — that was itself part of the inconsistency),
     /// same place on every tab.
-    private func pasteImportPill(compact: Bool = false) -> some View {
+    ///
+    /// `onPhoto` (UX "hero-immersive-profile"): only the COMPACT variant
+    /// riding the immersive tab row is ever called with `onPhoto: true`
+    /// (`tabBar(onPhoto:)`) — the standalone, full-label row this pill
+    /// also renders in at accessibility sizes sits BELOW the tab row,
+    /// outside the immersive container entirely (over plain
+    /// `Palette.paper`, same as the rest of the tab content), so it always
+    /// keeps its existing mist-stroke/ink-text look regardless of cover
+    /// type; its call site doesn't pass `onPhoto` at all.
+    private func pasteImportPill(compact: Bool = false, onPhoto: Bool = false) -> some View {
         Button { isPresentingPasteImport = true } label: {
             HStack(spacing: 4) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -702,13 +809,25 @@ struct TripView: View {
                 Text(compact ? "Paste" : "Paste to import")
                     .font(Typo.body(11, weight: .semibold))
             }
-            .foregroundStyle(Palette.ink)
+            .foregroundStyle(onPhoto ? .white : Palette.ink)
             .padding(.horizontal, Spacing.sm + 1)
             .padding(.vertical, 5)
             .frame(minHeight: 32)
+            .background {
+                // The existing `coverPillFill` glass recipe (this feature's
+                // brief, item 2) — same fill `TripHeroView.travelerPill`
+                // already uses over a cover, just shaped to this pill's own
+                // silhouette instead of a true `Capsule`.
+                if onPhoto {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Palette.coverPillFill)
+                }
+            }
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Palette.mist, lineWidth: 1)
+                if !onPhoto {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Palette.mist, lineWidth: 1)
+                }
             }
             // Finding 5 (§6.5 44pt floor): applied after the pill's own
             // 32pt frame so the compact visual stays exactly as-is — this
@@ -731,7 +850,16 @@ struct TripView: View {
     /// `selectedTab` in place. Packing was originally a separate pushed screen
     /// reached from a "button" in this row; it's now a peer tab so all three
     /// behave consistently (they read as tabs, so they should act as tabs).
-    private func tabBar() -> some View {
+    ///
+    /// `onPhoto` (UX "hero-immersive-profile"): set by `immersiveHeroSection`
+    /// for photo-cover trips — swaps the label colors to the light-on-photo
+    /// variant (`tabButtons`/`tabLabelColor`) and the paste pill to its glass
+    /// recipe, and drops the 1pt mist divider below (the scrim's own soft
+    /// edge, painted by the caller, reads as the row's boundary instead — a
+    /// hairline mist line would barely register against a photo anyway).
+    /// `standardHeroSection` (gradient-only trips) never passes it, so this
+    /// whole branch is unreachable there — bit-identical to before.
+    private func tabBar(onPhoto: Bool = false) -> some View {
         Group {
             // Finding 4: a fixed `HStack` truncates the labels unreadably at
             // accessibility sizes (`TripCard.swift`'s established
@@ -740,7 +868,7 @@ struct TripView: View {
             // `PersonFilterBar`'s row. Non-AX rendering below is untouched.
             if dynamicTypeSize.isAccessibilitySize {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Spacing.xl) { tabButtons }
+                    HStack(spacing: Spacing.xl) { tabButtons(onPhoto: onPhoto) }
                         .lineLimit(1)
                 }
                 // Finding 9a: `.isTabBar` (iOS 17+, matches this app's
@@ -751,7 +879,7 @@ struct TripView: View {
                 .accessibilityAddTraits(.isTabBar)
             } else {
                 HStack(spacing: Spacing.xl) {
-                    HStack(spacing: Spacing.xl) { tabButtons }
+                    HStack(spacing: Spacing.xl) { tabButtons(onPhoto: onPhoto) }
                         .accessibilityElement(children: .contain)
                         .accessibilityAddTraits(.isTabBar)
                     Spacer()
@@ -762,18 +890,20 @@ struct TripView: View {
                     // action, not a tab. At accessibility sizes the tab row
                     // is a horizontal scroller with no room, so the pill keeps
                     // its own labeled row (in the body, gated the same way).
-                    if canAddItems { pasteImportPill(compact: true) }
+                    if canAddItems { pasteImportPill(compact: true, onPhoto: onPhoto) }
                 }
             }
         }
         .padding(.horizontal, Spacing.xl)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.mist).frame(height: 1)
+            if !onPhoto {
+                Rectangle().fill(Palette.mist).frame(height: 1)
+            }
         }
     }
 
     @ViewBuilder
-    private var tabButtons: some View {
+    private func tabButtons(onPhoto: Bool) -> some View {
         ForEach(Tab.allCases, id: \.self) { tab in
             Button {
                 // D2 §policy: named-token migration, same 0.18 easeInOut
@@ -791,7 +921,7 @@ struct TripView: View {
                 VStack(spacing: Spacing.sm) {
                     Text(tab.rawValue)
                         .font(Typo.body(weight: .semibold))
-                        .foregroundStyle(selectedTab == tab ? Palette.ink : Palette.slate)
+                        .foregroundStyle(tabLabelColor(selected: selectedTab == tab, onPhoto: onPhoto))
                     ZStack {
                         Color.clear.frame(height: 2)
                         if selectedTab == tab {
@@ -808,6 +938,21 @@ struct TripView: View {
             .buttonStyle(.plain)
             .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
         }
+    }
+
+    /// UX "hero-immersive-profile": on paper (`onPhoto == false`, every
+    /// trip before this feature) unchanged — `Palette.ink`/`Palette.slate`.
+    /// On a photo (`onPhoto == true`): selected is plain white (paired with
+    /// the existing amber underline above, itself untouched); unselected is
+    /// `.white.opacity(0.92)` — the same dimming `CoverGradient.textScrim`'s
+    /// own doc comment already established for secondary text on a cover
+    /// (`TripCard`'s meta row uses the identical figure), reused here rather
+    /// than inventing a second one. Both clear WCAG AA 4.5:1 against
+    /// `CoverGradient.tabScrim`'s own worst case with real margin — see that
+    /// constant's doc comment (`PaletteExtras.swift`) for the full math.
+    private func tabLabelColor(selected: Bool, onPhoto: Bool) -> Color {
+        guard onPhoto else { return selected ? Palette.ink : Palette.slate }
+        return selected ? .white : .white.opacity(0.92)
     }
 
     // MARK: - Derived
