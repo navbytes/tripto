@@ -422,6 +422,15 @@ struct TripView: View {
         #endif
     }
 
+    // `-screenshotMode` also hides these — marketing captures run offline by design.
+    private var screenshotModeHidesSyncBanners: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-screenshotMode")
+        #else
+        return false
+        #endif
+    }
+
     private func content(for trip: Trip) -> some View {
         VStack(spacing: 0) {
             TripHeroView(
@@ -436,10 +445,10 @@ struct TripView: View {
                 model: heroScrollModel
             )
 
-            if syncStatus.isOffline {
+            if syncStatus.isOffline && !screenshotModeHidesSyncBanners {
                 SyncBanner()
             }
-            if !syncStatus.syncIssues.isEmpty {
+            if !syncStatus.syncIssues.isEmpty && !screenshotModeHidesSyncBanners {
                 SyncIssueBanner()
             }
 

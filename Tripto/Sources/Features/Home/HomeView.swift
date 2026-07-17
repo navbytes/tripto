@@ -104,16 +104,25 @@ struct HomeView: View {
 
     @ScaledMetric(relativeTo: .caption) private var valueRowIconSize: CGFloat = 13
 
+    // `-screenshotMode` also hides these — marketing captures run offline by design.
+    private var screenshotModeHidesSyncBanners: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-screenshotMode")
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
                 Palette.paper.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    if syncStatus.isOffline {
+                    if syncStatus.isOffline && !screenshotModeHidesSyncBanners {
                         SyncBanner()
                     }
-                    if !syncStatus.syncIssues.isEmpty {
+                    if !syncStatus.syncIssues.isEmpty && !screenshotModeHidesSyncBanners {
                         SyncIssueBanner()
                     }
                     // The empty-trips case is covered by `initialLoadState`

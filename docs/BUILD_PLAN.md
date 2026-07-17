@@ -54,7 +54,7 @@ The single biggest risk to this project is trying to build the moat (email impor
 - Add-to-calendar + directions handoff (uses OS, cheap).
 
 ### v1.5 — "The magic" (fast-follow, after v1 retains)
-- Email-forwarding parser for the top ~10–15 airlines/hotel chains (covers the majority of volume; do not attempt the long tail).
+- Email-forwarding parser: ✅ **SHIPPED EARLY (2026-07-12).** General LLM-based parsing via gpt-4.1-mini (Cloudflare AI Gateway) — supersedes the initial "top ~10–15 providers" approach, covering the full long tail.
 - Real-time flight status via **one** aggregator API.
 - Suggestions from Companions (propose-without-editing-master).
 

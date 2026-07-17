@@ -1638,4 +1638,156 @@ final class TriptoUITests: XCTestCase {
         )
         XCTAssertTrue(freshResult.exists, "the fresh query's own result must still be showing")
     }
+
+    // MARK: - Release 1.1 App Store screenshot refresh (WP5a)
+    //
+    // Distinct from every `testCaptureXxxScreen` milestone-review test
+    // above: those all launch through the shared `launch(_:)` helper (or an
+    // inline equivalent) with `-simulateOffline` and no `-screenshotMode` —
+    // fine for internal design/eng review, but that combination shows
+    // Home's debug ladybug menu, which the shipped marketing set has never
+    // shown. These two methods instead add `-screenshotMode`, and — unlike
+    // every plan for this recipe that starts from docs/RELEASE_READINESS.md
+    // §7's own literal BASE string — deliberately KEEP `-simulateOffline`
+    // rather than drop it.
+    //
+    // That doc's BASE omits `-simulateOffline`, and this file's own top doc
+    // comment explains why every OTHER test here still pairs it with
+    // `-uitestAutoSignIn`: without it, `-uitestAutoSignIn`'s fixed fake
+    // bearer token still lets `SyncEngine.start()` reach the real backend
+    // (`isEffectivelyOffline` only reflects `-simulateOffline`/genuine
+    // `NWPathMonitor` state, never auth validity). Confirmed live, the hard
+    // way (a first attempt at this WP without `-simulateOffline`, kept only
+    // as this comment now): the fake token doesn't hard-401 — it reaches
+    // PostgREST as an unauthenticated/RLS-scoped request, which succeeds
+    // with an EMPTY result. `SyncStore.applyTrips`/`pruneOrphans` then read
+    // that empty pull as "every local trip was deleted server-side" the
+    // moment DemoSeeder's own seed push (also real, also rejected) drops a
+    // row out of the protecting `pendingIds` set — caught only by this
+    // capture's own mandatory eyeball pass: a live run produced a red
+    // "Couldn't save 70 changes" `SyncIssueBanner`, an itinerary emptied
+    // back to "Add your first flight, stay, or plan," a booking item
+    // replaced by "This item is no longer available," and a Share people
+    // list collapsed to "ON THIS TRIP · 0." `-simulateOffline` is the only
+    // launch-arg-level lever that pauses both push AND pull
+    // (`SyncEngine.isEffectivelyOffline`), and it's the one this whole
+    // suite already relies on everywhere else — correct, uncorrupted
+    // content wins over exactly matching that one doc's BASE string.
+    //
+    // The tradeoff: `SyncBanner` (the amber "Offline — changes will sync…"
+    // strip) renders whenever `SyncStatus.isOffline` is true, forced or
+    // real, with no way to distinguish the two — and it's wired into
+    // `HomeView`/`TripView` only (confirmed by grep; `BookingDetailView`/
+    // `ShareTripView`/`SettingsView`/`PrivacySummaryView` never render
+    // either sync banner). So `store-01-home`, `store-02-itinerary`, and
+    // `store-05-packing` (all Home- or TripView-bodied) DO show that amber
+    // strip — a real, deliberate, documented deviation from the pre-1.1 set
+    // (which shows no banner at all) — while boarding/share/privacy stay
+    // exactly as clean as before, unaffected either way. See the Coder
+    // report for this WP for the full tradeoff writeup and a suggested
+    // follow-up (extending `-screenshotMode` to also suppress the sync
+    // banners, the same "clean for App Store captures" intent it already
+    // serves for the debug menu) — out of scope here since it would touch
+    // production `HomeView`/`TripView` source, not just this test file.
+
+    /// 01-home + 02-itinerary: the photo-cover trip as Home's hero card
+    /// alongside a gradient-only card, then that same trip's own hero
+    /// (bounded photo + tabs on paper) — the 1.1 marquee feature this
+    /// refresh exists to showcase. `-uitestSeedCoverShowcase` seeds
+    /// "Zanzibar Escape" (photo, ahead) alongside "Helsinki Weekend"
+    /// (gradient, ahead); deliberately NO `-uitestSeedToday` — shifting
+    /// "Lisbon" onto today's date would make it the live/"now" register
+    /// slot and outrank Zanzibar for the hero position
+    /// (`seedRegisterShowcaseTrips`'s own doc comment: a live trip always
+    /// outranks a future one there), which is exactly the slot this capture
+    /// needs Zanzibar to hold instead. Same "no accessibility signal for a
+    /// loaded LazyImage, so a bounded settle sleep is the deliberate
+    /// exception" reasoning as `testCaptureHomeCoverPhotoCardAndGradientControl`/
+    /// `testCaptureTripHeroCoverPhotoExpandedAndCollapsed` above.
+    func testCaptureAppStorePhotoCoverScreens() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-screenshotMode", "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedCoverShowcase"
+        ]
+        app.launch()
+        let photoCard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Zanzibar Escape")).firstMatch
+        XCTAssertTrue(photoCard.waitForExistence(timeout: 30), "'Zanzibar Escape' cover-photo trip never appeared")
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Helsinki Weekend")).firstMatch.exists,
+            "gradient-only control trip never appeared alongside it"
+        )
+        Thread.sleep(forTimeInterval: 1.5)
+        attachScreenshot(named: "store-01-home", of: app)
+
+        photoCard.tap()
+        XCTAssertTrue(app.staticTexts["Zanzibar Escape"].waitForExistence(timeout: 15), "trip screen never opened")
+        Thread.sleep(forTimeInterval: 1.5)
+        attachScreenshot(named: "store-02-itinerary", of: app)
+    }
+
+    /// 03-boarding, 04-share, 05-packing, 06-privacy: the same four scenes
+    /// docs/RELEASE_READINESS.md §7 names, on "Lisbon" (today-shifted via
+    /// `-uitestSeedToday` so the itinerary's "Now" line and the boarding
+    /// pass's travel-day pill both read live), each its own terminate +
+    /// relaunch with that scene's own launch-arg combo — matches the doc's
+    /// "per screen: terminate, launch with the screen's arg(s)" recipe.
+    /// Sequential relaunches within this one method reuse the same
+    /// already-seeded "Lisbon" every time (same "seeded trip persists
+    /// across relaunches" convention this file's other tests already rely
+    /// on, e.g. `testDoubleTapSaveCreatesAtMostOneFlightItem`) since none of
+    /// these launches carry a showcase flag
+    /// (`HomeView.applyUITestAutopilotIfNeeded`'s `needsShowcaseReset` never
+    /// trips), so there's no risk of the store being wiped/re-seeded
+    /// mid-method.
+    func testCaptureAppStoreLisbonScreens() {
+        let baseArgs = ["-screenshotMode", "-uitestAutoSignIn", "-simulateOffline", "-uitestSeedIfEmpty", "-uitestSeedToday"]
+        let app = XCUIApplication()
+
+        app.launchArguments = baseArgs + ["-uitestOpenFirstTrip", "-uitestOpenBookingDetail"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Booking details"].waitForExistence(timeout: 30), "Booking detail never appeared")
+        XCTAssertTrue(waitHittable(app.navigationBars["Booking details"]), "Booking detail screen never settled")
+        attachScreenshot(named: "store-03-boarding", of: app)
+        app.terminate()
+        // Same "purely simulator/OS-level teardown margin" reasoning as
+        // `relaunch(_:)`'s own settle sleep above.
+        Thread.sleep(forTimeInterval: 1.0)
+
+        app.launchArguments = baseArgs + ["-uitestOpenFirstTrip", "-uitestOpenShare"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Share this trip"].waitForExistence(timeout: 30), "Share screen never appeared")
+        XCTAssertTrue(waitHittable(app.navigationBars["Share this trip"]), "Share screen never settled")
+        attachScreenshot(named: "store-04-share", of: app)
+        app.terminate()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        app.launchArguments = baseArgs + ["-uitestOpenFirstTrip", "-uitestOpenPacking"]
+        app.launch()
+        let packingFab = app.buttons["Add a packing item"]
+        XCTAssertTrue(packingFab.waitForExistence(timeout: 30), "Packing tab never appeared")
+        XCTAssertTrue(waitHittable(packingFab), "Packing tab never settled")
+        attachScreenshot(named: "store-05-packing", of: app)
+        app.terminate()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        app.launchArguments = baseArgs + ["-uitestOpenSettings"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30), "Settings screen never appeared")
+        // "Privacy" (About section) sits below Profile/Delete-account/Data —
+        // confirmed off-screen on first render (a live run's own "Vertical
+        // scroll bar, 2 pages" accessibility snapshot) — same bounded-swipe
+        // recipe `testCaptureHomeBeenRowSwipeReveal` uses for a different
+        // below-the-fold row.
+        let privacyRow = app.buttons["Privacy"]
+        for _ in 0..<15 where !privacyRow.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(privacyRow.waitForExistence(timeout: 10), "Privacy row never scrolled into view")
+        XCTAssertTrue(waitHittable(privacyRow), "Privacy row exists but never actually scrolled into view")
+        privacyRow.tap()
+        let privacyTitle = app.navigationBars["Your privacy at a glance"]
+        XCTAssertTrue(privacyTitle.waitForExistence(timeout: 10), "Privacy screen never opened")
+        XCTAssertTrue(waitHittable(privacyTitle), "Privacy screen never settled")
+        attachScreenshot(named: "store-06-privacy", of: app)
+    }
 }

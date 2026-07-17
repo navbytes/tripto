@@ -16,7 +16,7 @@ settings:
     TARGETED_DEVICE_FAMILY: "1" # iPhone first (BUILD_PLAN.md §3.1, §9.2) — iPad/Mac are fast-follows, not v1.
     # "1.0" = the version actually shipped/in review on the App Store (was
     # drifted at "1.0.0" while the plists hardcoded "1.0"). Bump releases here.
-    MARKETING_VERSION: "1.0"
+    MARKETING_VERSION: "1.1"
     CURRENT_PROJECT_VERSION: "2"
     # Xcode's "recommended settings" nudge, pinned here (not via the Xcode UI —
     # the .xcodeproj is generated & gitignored, so UI edits get wiped on the
