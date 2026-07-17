@@ -471,6 +471,13 @@ struct SettingsView: View {
                 actionsBelowAvatar: true
             )
 
+            // Fix round: without an explicit `maxWidth: .infinity` this
+            // block sized itself to its own narrow content (the "Naveen"/
+            // "Display name" text) rather than the row's remaining width,
+            // leaving the rest of the row unclaimed — which (avatar block
+            // pinned leading, this block narrow within the space right of
+            // it) reads as "centered" rather than the intended
+            // fills-the-row, leading-aligned block.
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("Display name")
                     .font(Typo.body(Typo.Size.caption, weight: .semibold))
@@ -478,6 +485,7 @@ struct SettingsView: View {
                 TextField("Display name", text: $displayName)
                     .font(Typo.body(weight: .semibold))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
