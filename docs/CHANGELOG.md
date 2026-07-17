@@ -4,6 +4,15 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### UX round — hero covers, Home avatar, profile layout (2026-07-17)
+
+#### Fixed
+- **Photo trip covers no longer bleed past the hero:** the cover photo painted under the sync banner and the Itinerary/Bookings/Packing tab row on every photo-cover trip (any text size), leaving tab labels on unpredictable photo pixels. The photo is now bounded to the hero exactly like gradient covers — tabs always sit on the paper background. (`CoverImage` bounds its photo internally; the hero call site mirrors its proposed frame.)
+- **Home screen avatar now shows your profile photo** (and your chosen avatar color when there's no photo) — it previously drew a plain initials circle that predated photo support.
+
+#### Changed
+- **Settings → Profile relayout:** avatar sits beside a labeled "Display name" field; "Change photo" (now the app's standard capsule style) and "Remove" form a full-width action row under the avatar; the avatar-color row explains itself ("Shows on your initials when there's no photo"). The trip-member edit sheet keeps its existing layout.
+
 ### Code quality — principles review & fixes (2026-07-17)
 
 #### Changed
