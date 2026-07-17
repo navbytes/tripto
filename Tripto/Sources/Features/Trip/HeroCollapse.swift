@@ -420,24 +420,42 @@ struct TripHeroView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            // P8b: `CoverImage` layers a photo (if `trip.coverImagePath` is
-            // set) over the same `CoverGradient.from(key:)` this rendered
-            // pre-P8b — the `textScrim` overlay right below is unchanged and
-            // composites over whichever of the two actually shows through.
-            CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
-                // Finding 3: swapped the flat 8%-black scrim for the same
-                // bottom-anchored `textScrim` `TripCard` uses for the
-                // identical white-text-on-gradient problem (clear until 35%
-                // down, ramping to 45%-black at the bottom — see
-                // `PaletteExtras.swift`). The hero's title/meta sit
-                // bottom-anchored in the densest band: the meta row at
-                // ~85% depth composites to ~4.5-5:1, the 30pt display title
-                // at ~70% depth to ~4+:1 — clearing AA's 4.5:1 and 3:1
-                // large-text bars respectively on all three gradients' worst
-                // corners. The top-row glyph buttons no longer need this
-                // scrim now that their own fill is `coverPillFill`.
-                .overlay(CoverGradient.textScrim)
-                .ignoresSafeArea(edges: .top)
+            // UX "hero-immersive-profile" (Option B): a photo cover now
+            // paints ONCE, behind {hero, banners, tab row} together
+            // (`TripView.immersiveHeroSection`), clipped there so it can
+            // never escape past the tab row's own bottom edge — the fix for
+            // a pre-existing bug where this view's own `CoverImage` (the
+            // photo branch specifically — a flat `CoverGradient`
+            // `LinearGradient` never overflows its proposed frame the same
+            // way a `scaledToFill` photo can) painted past the hero's own
+            // bounds with nothing here ever clipping it. So: gradient-only
+            // trips render exactly as before (untouched branch below);
+            // photo trips keep ONLY `textScrim` here, still scoped to the
+            // hero's own frame, so title/meta keep the exact same
+            // protection as before — the photo itself, and its clip, now
+            // live one level up.
+            if trip.coverImagePath == nil {
+                // P8b: `CoverImage` layers a photo (if `trip.coverImagePath` is
+                // set) over the same `CoverGradient.from(key:)` this rendered
+                // pre-P8b — the `textScrim` overlay right below is unchanged and
+                // composites over whichever of the two actually shows through.
+                CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
+                    // Finding 3: swapped the flat 8%-black scrim for the same
+                    // bottom-anchored `textScrim` `TripCard` uses for the
+                    // identical white-text-on-gradient problem (clear until 35%
+                    // down, ramping to 45%-black at the bottom — see
+                    // `PaletteExtras.swift`). The hero's title/meta sit
+                    // bottom-anchored in the densest band: the meta row at
+                    // ~85% depth composites to ~4.5-5:1, the 30pt display title
+                    // at ~70% depth to ~4+:1 — clearing AA's 4.5:1 and 3:1
+                    // large-text bars respectively on all three gradients' worst
+                    // corners. The top-row glyph buttons no longer need this
+                    // scrim now that their own fill is `coverPillFill`.
+                    .overlay(CoverGradient.textScrim)
+                    .ignoresSafeArea(edges: .top)
+            } else {
+                CoverGradient.textScrim
+            }
         }
         // PLAN-signature-layer.md §D1 point 3: the flight's convergence
         // target. A no-op outside a flight (see the modifier's own doc

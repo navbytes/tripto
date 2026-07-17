@@ -142,6 +142,62 @@ public extension CoverGradient {
         startPoint: .top,
         endPoint: .bottom
     )
+
+    /// UX "hero-immersive-profile" (Option B): the bottom scrim behind
+    /// `TripView.tabBar()`'s own frame ONLY, when a trip's cover is a PHOTO
+    /// — never behind the hero (which keeps `textScrim` above, scoped to
+    /// its own frame) or the sync banners (`TripView.immersiveHeroSection`
+    /// keeps those on an explicit opaque `Palette.paper` backing regardless
+    /// of cover type — see that function's own doc comment for why).
+    ///
+    /// The approved mockup's own ramp is clear at 0%, 38%-black by 45%
+    /// down, 62%-black at the bottom. Worked out against a worst-case
+    /// pure-white photo pixel (same method `CoverSearchSheet
+    /// .resultCaptionBacking`'s doc comment already uses for this exact
+    /// class of problem — white text over an arbitrary, uncontrolled
+    /// photo: alpha-blend black directly in sRGB space, then the standard
+    /// WCAG sRGB -> linear relative-luminance conversion), that ramp
+    /// under-protects the row's actual label glyphs: a tab button's label
+    /// sits inside a `.frame(minHeight: 44, alignment: .bottom)` column
+    /// (`TripView.tabButtons`) whose own content — a `Typo.body` caption,
+    /// `Spacing.sm`, and the 2pt underline row — is roughly 29pt tall at
+    /// the default Dynamic Type size, so its cap-height starts only about
+    /// 30-35% down the row; at THIS ramp's 45% mark the mockup is barely
+    /// past its own clear-to-.38 transition, nowhere near enough (a
+    /// full-white label there composites to under 3:1).
+    ///
+    /// This keeps the mockup's three-stop SHAPE (clear top -> quick rise ->
+    /// deep bottom) but front-loads it: 60%-black by 20% down (not 45%),
+    /// 72%-black at the bottom (not 62% — reusing
+    /// `CoverSearchSheet.resultCaptionBacking`'s own already-verified
+    /// figure for "white text over worst-case pure-white photo" instead of
+    /// inventing a new one). At the 20% mark a full-white SELECTED label
+    /// composites to ~5.7:1; a `.white.opacity(0.92)` UNSELECTED label
+    /// (`TripView.tabLabelColor` — the same dimming `textScrim`'s own doc
+    /// comment above already established for secondary text on a cover) to
+    /// ~5.2:1 — both clear the 4.5:1 AA bar with real margin, comfortably
+    /// before the label's own ~30-35% starting depth, and only gain more
+    /// margin further down.
+    ///
+    /// Residual, disclosed risk: at large-but-non-accessibility Dynamic
+    /// Type sizes the row's `minHeight: 44` floor stops binding and a
+    /// label can start nearer the row's own top edge, where this gradient
+    /// is still close to its clear end by design (the approved mockup's
+    /// soft top edge) — not chased further here; `accessibilityReduce
+    /// Transparency` (`TripView.immersiveHeroSection`) swaps this whole
+    /// gradient for a solid `Palette.indigo` backing instead, which is
+    /// safe regardless of the photo, for anyone who needs that guarantee.
+    /// Screenshot-verified at default size and AX1
+    /// (`TriptoUITests.testCaptureTripHeroCoverPhotoExpandedAndCollapsed`).
+    static let tabScrim = LinearGradient(
+        stops: [
+            .init(color: .clear, location: 0.0),
+            .init(color: .black.opacity(0.60), location: 0.2),
+            .init(color: .black.opacity(0.72), location: 1.0)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+    )
 }
 
 /// UX P6.5 (docs/UX_REDESIGN_ROADMAP.md; `.claude/company/ux-redesign/
