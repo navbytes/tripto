@@ -57,6 +57,20 @@ final class StayConflictsTests: XCTestCase {
         XCTAssertTrue(StayConflicts.conflicts(in: [a, b]).isEmpty)
     }
 
+    /// Walk-in twin of the adjacency test above: same same-day
+    /// checkout-then-check-in shape, but B has no `endsAt` at all. Reviewer
+    /// D3 (fixed): the nil-endsAt fallback used to start its window at
+    /// LOCAL MIDNIGHT of the check-in day — hours before A's real 11:00
+    /// checkout — manufacturing a phantom "overlap" between a stay that had
+    /// already checked out and a walk-in that hadn't checked in yet.
+    func testWalkInCheckInAfterAnotherStaysSameDayCheckoutIsNotAConflict() {
+        // First hotel (nights 20-22), checks out the morning of the 23rd.
+        let a = hotel("First hotel", checkIn: instant(2026, 7, 20, 14, 0), checkOut: instant(2026, 7, 23, 11, 0))
+        // Walk-in booking, checks in the afternoon of the 23rd — after checkout.
+        let b = hotel("Walk-in booking", checkIn: instant(2026, 7, 23, 15, 0), checkOut: nil)
+        XCTAssertTrue(StayConflicts.conflicts(in: [a, b]).isEmpty)
+    }
+
     func testDisjointStaysAreNotAConflict() {
         let a = hotel("First hotel", checkIn: instant(2026, 7, 20, 14, 0), checkOut: instant(2026, 7, 23, 11, 0))
         let b = hotel("Second hotel", checkIn: instant(2026, 7, 25, 14, 0), checkOut: instant(2026, 7, 28, 11, 0))
@@ -83,6 +97,23 @@ final class StayConflictsTests: XCTestCase {
         // Later stay (nights 21-23).
         let b = hotel("Later stay", checkIn: instant(2026, 7, 21, 14, 0), checkOut: instant(2026, 7, 24, 11, 0))
         XCTAssertTrue(StayConflicts.conflicts(in: [a, b]).isEmpty)
+    }
+
+    /// Mirror ordering: a walk-in checking in EARLY in the day still claims
+    /// its whole check-in night — `[startsAt, following midnight)` — so a
+    /// real stay checking in LATER that same day genuinely lands inside the
+    /// walk-in's still-open night and must still be flagged. This is the
+    /// fix's other half: moving the fallback's START to the real check-in
+    /// (instead of midnight) kills the phantom pre-check-in overlap above
+    /// without also hiding a same-day collision that's actually real.
+    func testWalkInCheckInEarlyInTheDayStillConflictsWithARealStayCheckingInLaterThatDay() {
+        // Walk-in booking, checks in first thing in the morning, no known checkout.
+        let a = hotel("Walk-in booking", checkIn: instant(2026, 7, 20, 9, 0), checkOut: nil)
+        // Second booking, checks in that afternoon — genuinely collides with
+        // the walk-in's claimed night ([09:00, midnight the 21st)).
+        let b = hotel("Afternoon booking", checkIn: instant(2026, 7, 20, 15, 0), checkOut: instant(2026, 7, 22, 11, 0))
+        let conflicts = StayConflicts.conflicts(in: [a, b])
+        XCTAssertEqual(conflicts.count, 1, "walk-in's claimed night [09:00, midnight) genuinely overlaps the 15:00 check-in")
     }
 
     func testNonHotelItemsNeverProduceAConflictEvenWhenTheirDatesOverlap() {

@@ -162,17 +162,26 @@ enum StayConflicts {
     /// whenever there's a genuine `endsAt` after `startsAt`: a checkout
     /// instant is real evidence of when the room actually frees up, so
     /// comparing it directly is immune to the cross-zone midnight-label
-    /// mismatch `instantRange` is prone to (see its doc comment). Falls
-    /// back to `instantRange`'s midnight expansion only when `endsAt` is
-    /// missing or not after `startsAt` (a single-night/walk-in stay with no
-    /// real end instant to compare against). A mixed pair — one side a real
-    /// window, the other an expanded night — still compares fine: both are
-    /// just `(Date, Date)` instant intervals by the time `overlap` sees them.
+    /// mismatch `instantRange` is prone to (see its doc comment). Falls back
+    /// to `[startsAt, end of its check-in night)` — the real check-in
+    /// instant, paired with only `instantRange`'s midnight-expanded END —
+    /// when `endsAt` is missing or not after `startsAt` (a single-night/
+    /// walk-in stay with no real end instant to compare against). The START
+    /// is deliberately the real `startsAt`, never `instantRange`'s
+    /// midnight-of-check-in-day: starting at midnight let a same-day
+    /// walk-in's fallback window reach back BEFORE its own check-in, far
+    /// enough to overlap another stay's same-day real checkout that
+    /// happened hours earlier — a phantom overlap neither stay could
+    /// physically have had (reviewer-caught regression). A mixed pair —
+    /// one side a real window, the other this fallback — still compares
+    /// fine: the fallback claims only `[check-in, end of its night)`, so it
+    /// can never fabricate an overlap before its own check-in.
     private static func decisionRange(_ item: ItineraryItem) -> (Date, Date) {
         if let endsAt = item.endsAt, endsAt > item.startsAt {
             return (item.startsAt, endsAt)
         }
-        return instantRange(item)
+        let (_, endOfNight) = instantRange(item)
+        return (item.startsAt, endOfNight)
     }
 
     /// Same "step a `DayDate` by one calendar day via a UTC calendar" recipe
