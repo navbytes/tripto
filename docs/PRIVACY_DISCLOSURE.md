@@ -9,9 +9,12 @@ Tripto collects minimal data. Trip data (notes, confirmation codes, etc.) is
 visible only to invited trip members, and public-link viewers see a sanitized
 subset. Profile and trip-cover **photos** are the one exception: they live in
 a public-read storage bucket at an unguessable address, so anyone holding
-that exact URL could view the image even without being a trip member. Tripto
-uses no tracking, analytics, or ads SDKs. One feature — import (paste or
-email) — involves third-party processing for booking extraction.
+that exact URL could view the image even without being a trip member. Photos
+are collected only when users explicitly pick or upload them (via system
+photo picker or Pexels search); the app performs no library scan, and the
+photo picker runs out-of-process requiring no explicit photo-library
+permission. Tripto uses no tracking, analytics, or ads SDKs. One feature —
+import (paste or email) — involves third-party processing for booking extraction.
 
 ---
 
@@ -34,23 +37,52 @@ form.)
 - **User Content:**
   - Trip data (itinerary, items: flights, stays, activities with locations,
     confirmation codes, notes, packing lists, trip-member profiles).
-  - **Photos:** profile avatar photos and trip-cover photos the user uploads
-    (downsampled on-device before upload).
-  - **Purpose:** App functionality; stored in user's account and synced across
-    devices. Trip data (notes, codes, etc.) is shared only with invited trip
-    members (role-based access) and — for public share links — a sanitized
-    subset (dates, places, times only; no codes, notes, emails, coordinates).
-    **Photos are the exception:** they're stored in a public-read bucket at an
-    unguessable address, so anyone holding that exact URL can view the image
+  - **Photos:** profile avatar photos and trip-cover photos.
+    - **Collection:** Only photos the user explicitly picks or uploads. No
+      library scanning or enumeration occurs. Avatar photos are selected via
+      the system PhotosPicker (runs out-of-process; requires no photo-library
+      permission prompt). Trip covers are selected either via PhotosPicker or
+      by searching Pexels (proxied through a backend edge function; search
+      queries are not logged or stored beyond the edge function's own error
+      handling).
+    - **Processing:** All photos are downsampled on-device to ~1600px before
+      upload, reducing size and protecting privacy by discarding metadata
+      (Exif, etc.).
+    - **Storage:** Stored in Supabase Storage buckets (`avatars` and `trip-covers`,
+      public-read, owner-folder write RLS). Photos live at unguessable URLs
+      generated server-side; access control is enforced by RLS on the database
+      rows that reference them, not the URLs themselves. Anyone holding an
+      image's exact URL can view it without authentication.
+  - **Purpose:** App functionality (user profile, trip cover imagery); stored in
+    user's account and synced across devices. Trip data (notes, codes, etc.) is
+    shared only with invited trip members (role-based access) and — for public
+    share links — a sanitized subset (dates, places, times only; no codes,
+    notes, emails, coordinates). **Photos are the exception:** they are stored
+    at public-read URLs, so anyone holding the exact URL can view the image
     without being a trip member or signing in.
-  - **Tracking:** No. **Deletion:** Deleted when user deletes the account —
-    account deletion also purges the user's photo objects from storage, not
-    just the database rows referencing them.
+  - **Tracking:** No. **Deletion:** Photos are deleted immediately when the user
+    removes them from a profile or trip. Account deletion also purges the user's
+    entire photo storage folder (not just database rows). Orphaned objects from
+    replaced photos are cleaned up via the account-deletion path.
 
 ### Does your app use third-party services or sub-processors for any of the data above?
 
-**YES, for the remote import path only.** When a user chooses to import trip
-details via paste:
+**YES, for two optional features: remote import and Pexels photo search.**
+
+#### When searching for trip covers via Pexels:
+
+**Optional feature:** users may search the Pexels photo library when choosing a trip cover image. The Pexels API key is server-side only and never enters the app. Search queries are sent to a **Tripto backend edge function (`search-covers`)** which proxies the request to **Pexels** and returns results.
+
+**All paths:**
+- **Not automatic:** user must explicitly tap "Search photos" in the trip cover picker.
+- **No local logging:** search queries are not logged locally in the app.
+- **Edge function logging:** the `search-covers` function logs only error conditions (e.g., Pexels API failures, rate limit status codes) for debugging. Queries themselves are not retained. See `~/repos/backend/projects/tripto/functions/search-covers/` for full logging detail.
+- **Photo download:** when a search result is selected, the Pexels image is downloaded, downsampled on-device (no metadata retention), and uploaded to Tripto's own `trip-covers` Supabase Storage bucket. The image then belongs entirely to the user's account, and the Pexels original is no longer accessed.
+- **Attribution:** Pexels requires credit to photographers. Tripto displays "Photos provided by Pexels" as a header link in the search sheet and credits each photographer by name on the result card. Credit details are stored alongside the chosen photo for later reference (trip info page) but are optional to display on the final cover image itself.
+
+#### When pasting or importing emails for bookings:
+
+When a user chooses to import trip details via paste:
 
 **On supported iPhones (iOS 26+ with Apple Intelligence enabled):** users choose
 where processing happens. The default is on-device: import extraction runs
@@ -121,14 +153,20 @@ When completing App Store Connect's form:
 - ✅ "App does NOT collect any user data"? **NO** (uncheck).
 - ✅ "User data is collected"? **YES** (check).
   - Data types: Email Address, Name, **Other User Content** (booking text &
-    trip details), **Photos or Videos** (profile/trip-cover photos).
+    trip details), **Photos or Videos** (profile avatar photos & trip-cover
+    photos, selected via system picker or Pexels search; no library scan).
   - Purpose: App Functionality.
   - Linked to account: Yes.
   - Tracking: No.
 - ✅ "Third parties have access to user data"? **YES** (check).
-  - Sub-processors: the LLM provider (currently OpenAI), Cloudflare (AI Gateway).
-  - Data type: User Content (booking text for paste + email import extraction only).
-  - Purpose: App Functionality (import features). Email-import requires explicit consent before use.
+  - Sub-processors: the LLM provider (currently OpenAI), Cloudflare (AI Gateway),
+    and Pexels (during optional cover photo search only).
+  - Data types & scope:
+    - **LLM provider & Cloudflare:** booking text (paste + email import extraction only).
+    - **Pexels:** search queries only (received during the photo search, not the selection or storage phase).
+  - Purpose: App Functionality (import features and optional photo search). Email-import
+    requires explicit consent before use; Pexels search is optional and implicit
+    (user initiates the search).
 - ✅ "App tracks users across other apps/websites"? **NO** (uncheck).
 
 ---
