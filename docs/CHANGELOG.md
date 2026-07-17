@@ -4,6 +4,8 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [1.1] — 2026-07-17
+
 ### UX round — hero covers, Home avatar, profile layout (2026-07-17)
 
 #### Fixed
