@@ -19,6 +19,10 @@ struct SettingsView: View {
     /// actual pull+push, unchanged.
     @Environment(AppRouter.self) private var appRouter
     @Environment(\.dismiss) private var dismiss
+    /// V1 aligned-rows relayout: stacks the avatar+name row vertically at
+    /// accessibility Dynamic Type sizes — same `isAccessibilitySize`
+    /// convention `TripCard`'s `metaLayout`/`topLayout` already establish.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// UX P6.5: the toggle side of `HomeView`'s "been" reveal row — device-
     /// local (see the section's own doc comment below), read/written
     /// through the shared key so the two views can't drift apart.
@@ -123,26 +127,14 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Profile") {
-                // P8a: replaces the old decorative-only preview circle —
-                // this is now the one avatar representation on this screen,
-                // upgraded to show/manage a real photo (plan D6: "photo row
-                // above the existing AvatarColorPicker"), same position the
-                // old circle held (leading the Name field).
-                AvatarPhotoPicker(
-                    initial: initials(from: displayName),
-                    colorName: avatarColor.isEmpty ? "slate" : avatarColor,
-                    avatarPath: $avatarPath,
-                    uploaderUserId: authManager.userId,
-                    toast: $toast,
-                    diameter: 52
-                )
-                .disabled(isDeletingAccount)
-                .opacity(isDeletingAccount ? 0.5 : 1)
-                .padding(.vertical, Spacing.xs)
-
-                TextField("Display name", text: $displayName)
-                    .font(Typo.body(weight: .semibold))
+                // V1 aligned-rows relayout (client-approved): the 56pt
+                // avatar (with "Change photo"/"Remove" grouped directly
+                // under it, no separator — `AvatarPhotoPicker`'s own
+                // `actionsBelowAvatar: true`) beside a labeled "Display
+                // name" field — see `profileAvatarRow`'s own doc comment.
+                profileAvatarRow
                     .disabled(isDeletingAccount)
+                    .opacity(isDeletingAccount ? 0.5 : 1)
 
                 // UX audit finding 9: same `AvatarColorPicker`
                 // `TripProfileFormSheet` uses for a non-app profile — the
@@ -153,6 +145,12 @@ struct SettingsView: View {
                         .font(Typo.body(Typo.Size.caption, weight: .semibold))
                         .foregroundStyle(Palette.slate)
                     AvatarColorPicker(selection: $avatarColor)
+                    // V1 relayout: this row's whole reason to exist is
+                    // otherwise invisible until the one time a photo comes
+                    // off — names it right under the swatches instead.
+                    Text("Shows on your initials when there\u{2019}s no photo")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
                 }
                 .disabled(isDeletingAccount)
                 .opacity(isDeletingAccount ? 0.5 : 1)
@@ -441,6 +439,48 @@ struct SettingsView: View {
                     onSeeTrips: { dismiss() }
                 )
             }
+        }
+    }
+
+    /// V1 aligned-rows relayout (client-approved): Row 1 of the Profile
+    /// section — the avatar (`AvatarPhotoPicker` with `actionsBelowAvatar:
+    /// true`, so "Change photo"/"Remove" render grouped directly under it,
+    /// not beside it) next to a labeled "Display name" field. The field's
+    /// own binding/validation/save flow is untouched — only its position
+    /// (now labeled, beside the avatar rather than its own bare row below)
+    /// changed.
+    ///
+    /// Stacks vertically at accessibility Dynamic Type sizes — same
+    /// `isAccessibilitySize` -> `AnyLayout` swap `TripCard`'s own
+    /// `metaLayout`/`topLayout` already establish: side by side, a 56pt
+    /// circle plus a full-width text field has no room for both to stay
+    /// legible once type scales up.
+    private var profileAvatarRow: some View {
+        // Fix round 2: the name block rides `AvatarPhotoPicker`'s
+        // `besideAvatar` slot instead of an outer HStack — composed outside,
+        // the picker's column (avatar over the "Change photo"/"Remove" row)
+        // was as wide as that actions row, so the field started mid-card and
+        // read as centered. Inside the slot, the field hugs the 56pt circle
+        // and the actions row spans full width below, matching the approved
+        // V1 mockup. AX-size stacking lives in the component now.
+        AvatarPhotoPicker(
+            initial: initials(from: displayName),
+            colorName: avatarColor.isEmpty ? "slate" : avatarColor,
+            avatarPath: $avatarPath,
+            uploaderUserId: authManager.userId,
+            toast: $toast,
+            diameter: 56,
+            removeLabel: "Remove",
+            actionsBelowAvatar: true
+        ) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("Display name")
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                TextField("Display name", text: $displayName)
+                    .font(Typo.body(weight: .semibold))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

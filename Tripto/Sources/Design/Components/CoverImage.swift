@@ -44,6 +44,19 @@ struct CoverImage: View {
                 photo(url: url)
             }
         }
+        // Option A hero fix: bounds the WHOLE composed view (gradient +
+        // photo), not just the photo's own inner `.clipped()` above — a
+        // Nuke `LazyImage` with no explicit `.frame()` ahead of it (this
+        // view is deliberately frame-less, see the doc comment above) can
+        // still report/paint past whatever frame a caller assigns it, same
+        // as Nuke's own docs always pair `LazyImage` with an external
+        // `.frame().clipped()`. Every existing caller already bounds this
+        // view externally (`.frame`/`.clipShape` right after the call
+        // site), so this internal clip is a no-op for them; it's the ONE
+        // caller that skips its own bound (`HeroCollapse`'s `.background`,
+        // which relies on `.ignoresSafeArea(edges: .top)` sizing instead of
+        // a frame/clipShape) that this protects.
+        .clipped()
     }
 
     @ViewBuilder

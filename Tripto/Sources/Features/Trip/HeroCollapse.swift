@@ -424,20 +424,46 @@ struct TripHeroView: View {
             // set) over the same `CoverGradient.from(key:)` this rendered
             // pre-P8b — the `textScrim` overlay right below is unchanged and
             // composites over whichever of the two actually shows through.
-            CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
-                // Finding 3: swapped the flat 8%-black scrim for the same
-                // bottom-anchored `textScrim` `TripCard` uses for the
-                // identical white-text-on-gradient problem (clear until 35%
-                // down, ramping to 45%-black at the bottom — see
-                // `PaletteExtras.swift`). The hero's title/meta sit
-                // bottom-anchored in the densest band: the meta row at
-                // ~85% depth composites to ~4.5-5:1, the 30pt display title
-                // at ~70% depth to ~4+:1 — clearing AA's 4.5:1 and 3:1
-                // large-text bars respectively on all three gradients' worst
-                // corners. The top-row glyph buttons no longer need this
-                // scrim now that their own fill is `coverPillFill`.
-                .overlay(CoverGradient.textScrim)
-                .ignoresSafeArea(edges: .top)
+            //
+            // Option A hero fix, root cause: a plain `CoverImage(...)
+            // .overlay(scrim).ignoresSafeArea(edges:.top)` here measurably
+            // still bled past the hero into the tab row below (confirmed:
+            // reproduced identically whether `.clipped()` was added inside
+            // `CoverImage` itself, immediately before `.ignoresSafeArea`, or
+            // immediately after it — and reproduced identically even with
+            // `.ignoresSafeArea` removed outright, which also proved that
+            // modifier was never the operative mechanism for either the
+            // (wanted) top status-bar bleed or the (unwanted) bottom one).
+            // `.clipped()` alone never fixed it because it bounds a view to
+            // its OWN resolved size, and a Nuke `LazyImage` with no explicit
+            // `.frame()` ahead of it (this view is deliberately frame-less —
+            // see `CoverImage`'s doc comment) resolves that size from the
+            // photo's own geometry, not from whatever this hero proposes —
+            // so every clip position was bounding to that same inflated
+            // frame. A `GeometryReader` here reads the TRUE proposed size
+            // (it always mirrors its proposal, unlike `LazyImage`) and an
+            // explicit `.frame(width:height:)` forces `CoverImage` down to
+            // exactly that, regardless of what it would otherwise resolve
+            // to — `.clipped()` then only has to catch ordinary
+            // `scaledToFill` overhang, not a wholesale size mismatch.
+            GeometryReader { geo in
+                CoverImage(coverGradientKey: trip.coverGradient, coverImagePath: trip.coverImagePath)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    // Finding 3: swapped the flat 8%-black scrim for the same
+                    // bottom-anchored `textScrim` `TripCard` uses for the
+                    // identical white-text-on-gradient problem (clear until 35%
+                    // down, ramping to 45%-black at the bottom — see
+                    // `PaletteExtras.swift`). The hero's title/meta sit
+                    // bottom-anchored in the densest band: the meta row at
+                    // ~85% depth composites to ~4.5-5:1, the 30pt display title
+                    // at ~70% depth to ~4+:1 — clearing AA's 4.5:1 and 3:1
+                    // large-text bars respectively on all three gradients' worst
+                    // corners. The top-row glyph buttons no longer need this
+                    // scrim now that their own fill is `coverPillFill`.
+                    .overlay(CoverGradient.textScrim)
+            }
+            .ignoresSafeArea(edges: .top)
         }
         // PLAN-signature-layer.md §D1 point 3: the flight's convergence
         // target. A no-op outside a flight (see the modifier's own doc

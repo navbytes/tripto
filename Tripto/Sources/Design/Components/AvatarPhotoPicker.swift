@@ -13,7 +13,7 @@ import SwiftUI
 /// .upload`. `avatarPath` only ever changes on a *successful* upload — a
 /// failure leaves it untouched and reuses the host screen's own toast (P8a
 /// brief: "no path write on failed upload — atomicity").
-struct AvatarPhotoPicker: View {
+struct AvatarPhotoPicker<BesideAvatar: View>: View {
     let initial: String
     let colorName: String
     @Binding var avatarPath: String?
@@ -26,9 +26,61 @@ struct AvatarPhotoPicker: View {
     /// var toast: String?` + `.toastOverlay`.
     @Binding var toast: String?
     var diameter: CGFloat = 72
+    /// Settings' V1 aligned-rows relayout shortens this to "Remove" for its
+    /// own grouped avatar-actions row; `TripProfileFormSheet` keeps the
+    /// original wording via this default.
+    var removeLabel: String = "Remove photo"
+    /// Settings' V1 relayout groups "Change photo"/"Remove" directly under
+    /// the avatar (an `HStack`, side by side with each other) instead of the
+    /// default beside-the-circle `VStack` (`TripProfileFormSheet`'s
+    /// unchanged layout, one button stacked above the other).
+    var actionsBelowAvatar: Bool = false
+    /// Fix round 2: content rendered BESIDE the avatar circle (Settings' V1
+    /// labeled "Display name" block). Composing that field in an OUTER
+    /// HStack next to this view made the whole column as wide as the
+    /// actions row under the avatar, so the name block floated mid-card —
+    /// hosting the slot here keeps the actions row a full-width sibling
+    /// while the name hugs the circle. `EmptyView` (every existing call
+    /// site, via the convenience init below) collapses the internal HStack
+    /// to the bare avatar — both original layouts render unchanged.
+    let besideAvatar: BesideAvatar
 
+    init(
+        initial: String,
+        colorName: String,
+        avatarPath: Binding<String?>,
+        uploaderUserId: UUID?,
+        toast: Binding<String?>,
+        diameter: CGFloat = 72,
+        removeLabel: String = "Remove photo",
+        actionsBelowAvatar: Bool = false,
+        @ViewBuilder besideAvatar: () -> BesideAvatar
+    ) {
+        self.initial = initial
+        self.colorName = colorName
+        self._avatarPath = avatarPath
+        self.uploaderUserId = uploaderUserId
+        self._toast = toast
+        self.diameter = diameter
+        self.removeLabel = removeLabel
+        self.actionsBelowAvatar = actionsBelowAvatar
+        self.besideAvatar = besideAvatar()
+    }
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var pickerItem: PhotosPickerItem?
+    @State private var isPresentingPicker = false
     @State private var isUploading = false
+
+    /// The avatar+`besideAvatar` pair stacks at accessibility sizes — the
+    /// same `isAccessibilitySize` -> `AnyLayout` swap `TripCard` established
+    /// (a 56pt circle plus a full-width field can't share a row once type
+    /// scales up). Lives here since the pair now composes inside this view.
+    private var topRowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.sm))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: Spacing.md))
+    }
 
     /// P7e (round-2 re-audit item 2a): both call sites (`SettingsView
     /// .initials(from:)`, `TripProfileFormSheet.initials`) hand this a
@@ -44,65 +96,22 @@ struct AvatarPhotoPicker: View {
     }
 
     var body: some View {
-        HStack(spacing: Spacing.md) {
-            ZStack {
-                if isEmptyState {
-                    emptyAvatarPlaceholder
-                } else {
-                    AvatarPhotoCircle(initial: initial, colorName: colorName, avatarPath: avatarPath, diameter: diameter)
-                }
-                if isUploading {
-                    Circle()
-                        .fill(.black.opacity(0.35))
-                        .frame(width: diameter, height: diameter)
-                    ProgressView()
-                        .tint(.white)
-                }
-            }
-            // Decorative — the buttons beside it (and the Name field
-            // elsewhere on these forms) already say whose photo this is;
-            // same treatment the plain preview circle this row replaces
-            // already had on both call sites.
-            .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                // Fix-round (client-reported bug): the visual pill rendered
-                // bare-text small (~20pt) despite a correct 44pt hit band —
-                // `.background` used to sit BEFORE `.frame(minHeight:)`, so
-                // the painted capsule sized itself to the unpadded text,
-                // floating small inside the invisible 44pt frame around it.
-                // `.frame(minHeight:)` before `.contentShape` (still) is what
-                // makes the whole frame tappable; `.background` LAST is what
-                // makes the capsule actually fill it — same order as every
-                // other 44pt pill CTA already shipped in this codebase
-                // (`HomeView`, `BookingsTabView`, `PackingListView`,
-                // `ItineraryTabView`, `TripView`, `BookingDetailView`).
-                PhotosPicker(selection: $pickerItem, matching: .images) {
-                    Text(avatarPath == nil ? "Add photo" : "Change photo")
-                        .font(Typo.body(Typo.Size.caption, weight: .bold))
-                        .foregroundStyle(Palette.onAmber)
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.md)
-                        .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
-                        .contentShape(Capsule())
-                        .background(Palette.amber, in: Capsule())
-                }
-                .disabled(isUploading)
-
-                if avatarPath != nil {
-                    Button(role: .destructive) {
-                        avatarPath = nil
-                    } label: {
-                        Text("Remove photo")
-                            .font(Typo.body(Typo.Size.caption, weight: .semibold))
-                            .foregroundStyle(Palette.rose)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
+        Group {
+            if actionsBelowAvatar {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    topRowLayout {
+                        preview
+                        besideAvatar
                     }
-                    .disabled(isUploading)
+                    actionsContent
+                }
+            } else {
+                HStack(spacing: Spacing.md) {
+                    preview
+                    actionsContent
+                    Spacer(minLength: 0)
                 }
             }
-            Spacer(minLength: 0)
         }
         .onChange(of: pickerItem) { _, newItem in
             guard let newItem else { return }
@@ -110,12 +119,132 @@ struct AvatarPhotoPicker: View {
         }
     }
 
+    /// Decorative — the buttons beside/below it (and the Name field
+    /// elsewhere on these forms) already say whose photo this is; same
+    /// treatment the plain preview circle this row replaces already had on
+    /// both call sites.
+    private var preview: some View {
+        ZStack {
+            if isEmptyState {
+                emptyAvatarPlaceholder
+            } else {
+                AvatarPhotoCircle(initial: initial, colorName: colorName, avatarPath: avatarPath, diameter: diameter)
+            }
+            if isUploading {
+                Circle()
+                    .fill(.black.opacity(0.35))
+                    .frame(width: diameter, height: diameter)
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// "Change/Add photo" + (once set) "Remove" — `actionsBelowAvatar`
+    /// switches only the ARRANGEMENT of these two buttons (`HStack`,
+    /// Settings' V1 row) vs. the original stacked `VStack` beside the circle
+    /// (`TripProfileFormSheet`); the buttons themselves are identical either
+    /// way.
+    @ViewBuilder
+    private var actionsContent: some View {
+        if actionsBelowAvatar {
+            HStack(spacing: Spacing.md) {
+                changePhotoButton
+                if avatarPath != nil { removeButton }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                changePhotoButton
+                if avatarPath != nil { removeButton }
+            }
+        }
+    }
+
+    /// The system picker itself is presented via `.photosPicker(isPresented
+    /// :selection:matching:)` rather than `PhotosPicker(selection:matching:)
+    /// { label }` — the trigger and `pickerItem`/upload flow are otherwise
+    /// byte-identical either branch below.
+    ///
+    /// Reviewer finding: the standard `.primaryCapsule` recipe (font/
+    /// padding/44pt-floor/contentShape/background order a fix-round bug
+    /// elsewhere in this codebase depended on) is real, but only for
+    /// Settings' own grouped row (`actionsBelowAvatar`) — applying it to
+    /// BOTH call sites visually drifted `TripProfileFormSheet`'s default
+    /// path from its pre-branch look (caption 12.5 bold + `Spacing.md` vs.
+    /// the standard style's body 14.5 semibold + `Spacing.xl`). The `else`
+    /// branch restores that original bespoke chain byte-for-byte, same
+    /// modifier order (frame -> contentShape -> background).
+    ///
+    /// `label` carries `.lineLimit(1)` + `.fixedSize(horizontal: true,
+    /// vertical: false)` on both branches — fix round: "Change photo"
+    /// wrapped to two lines inside Settings' narrower grouped-actions
+    /// column; `.fixedSize` makes this Text always report its full
+    /// single-line width as its ideal size (the row's sibling — the
+    /// "Display name" field — is the one meant to flex, via its own
+    /// `maxWidth: .infinity` in `SettingsView.profileAvatarRow`) instead of
+    /// this button silently accepting a too-narrow proposal and wrapping.
+    @ViewBuilder
+    private var changePhotoButton: some View {
+        let label = Text(avatarPath == nil ? "Add photo" : "Change photo")
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        if actionsBelowAvatar {
+            Button {
+                isPresentingPicker = true
+            } label: {
+                label
+            }
+            .buttonStyle(PrimaryCapsuleButtonStyle())
+            .disabled(isUploading)
+            .photosPicker(isPresented: $isPresentingPicker, selection: $pickerItem, matching: .images)
+        } else {
+            Button {
+                isPresentingPicker = true
+            } label: {
+                label
+                    .font(Typo.body(Typo.Size.caption, weight: .bold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.md)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                    .contentShape(Capsule())
+                    .background(Palette.amber, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isUploading)
+            .photosPicker(isPresented: $isPresentingPicker, selection: $pickerItem, matching: .images)
+        }
+    }
+
+    private var removeButton: some View {
+        Button(role: .destructive) {
+            avatarPath = nil
+        } label: {
+            Text(removeLabel)
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.rose)
+                // Fix round: pairs with `changePhotoButton`'s own
+                // `.fixedSize` — making ONLY that sibling refuse to shrink
+                // just shifted the same "too little width proposed" problem
+                // onto this Text instead (Settings' grouped-actions row
+                // squeezed "Remove" down to a sliver, wrapping it one
+                // letter per line). Same fix, same reasoning: always report
+                // this Text's full single-line width as its ideal size.
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(isUploading)
+    }
+
     /// `isEmptyState`'s own rendering — same circle fill (`colorName`) and
     /// diameter as `AvatarPhotoCircle` so nothing jumps in size or color the
     /// moment a name or photo actually lands, just the glyph inside it.
-    /// Decorative — the whole `ZStack` above is already `.accessibilityHidden`
-    /// (the "Add photo" `PhotosPicker` button beside it is the one real
-    /// control, and already carries that exact label).
+    /// Decorative — `preview` above is already `.accessibilityHidden` (the
+    /// "Add photo" button beside/below it is the one real control, and
+    /// already carries that exact label).
     private var emptyAvatarPlaceholder: some View {
         Circle()
             .fill(AvatarColor.color(named: colorName))
@@ -166,8 +295,41 @@ struct AvatarPhotoPicker: View {
         // typed — the "?" glyph this replaces, previewed alongside the
         // normal-initial rows above for an easy side-by-side comparison.
         AvatarPhotoPicker(initial: "?", colorName: "sky", avatarPath: $pathC, uploaderUserId: UUID(), toast: $toast)
+        // Settings' V1 aligned-rows layout: actions grouped below the
+        // avatar, shortened "Remove" label.
+        AvatarPhotoPicker(
+            initial: "N", colorName: "amber", avatarPath: $pathA, uploaderUserId: UUID(), toast: $toast,
+            diameter: 56, removeLabel: "Remove", actionsBelowAvatar: true
+        )
     }
     .padding(Spacing.xl)
     .background(Palette.paper)
     .toastOverlay($toast)
+}
+
+/// Every pre-slot call site (`TripProfileFormSheet`, previews) — same
+/// signature the struct's old memberwise init had, so they compile
+/// unchanged and render the bare avatar exactly as before.
+extension AvatarPhotoPicker where BesideAvatar == EmptyView {
+    init(
+        initial: String,
+        colorName: String,
+        avatarPath: Binding<String?>,
+        uploaderUserId: UUID?,
+        toast: Binding<String?>,
+        diameter: CGFloat = 72,
+        removeLabel: String = "Remove photo",
+        actionsBelowAvatar: Bool = false
+    ) {
+        self.init(
+            initial: initial,
+            colorName: colorName,
+            avatarPath: avatarPath,
+            uploaderUserId: uploaderUserId,
+            toast: toast,
+            diameter: diameter,
+            removeLabel: removeLabel,
+            actionsBelowAvatar: actionsBelowAvatar
+        ) { EmptyView() }
+    }
 }
