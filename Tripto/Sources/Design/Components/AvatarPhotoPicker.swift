@@ -119,21 +119,57 @@ struct AvatarPhotoPicker: View {
     /// The system picker itself is presented via `.photosPicker(isPresented
     /// :selection:matching:)` rather than `PhotosPicker(selection:matching:)
     /// { label }` — the trigger and `pickerItem`/upload flow are otherwise
-    /// byte-identical, but this lets the VISIBLE trigger be a real `Button`
-    /// styled with the app's standard `.primaryCapsule` (`PrimaryCapsule
-    /// ButtonStyle`), which already encodes the font/padding/44pt-floor/
-    /// contentShape/background order a fix-round bug elsewhere in this
-    /// codebase depended on — reusing it here instead of hand-copying that
-    /// chain a third time.
+    /// byte-identical either branch below.
+    ///
+    /// Reviewer finding: the standard `.primaryCapsule` recipe (font/
+    /// padding/44pt-floor/contentShape/background order a fix-round bug
+    /// elsewhere in this codebase depended on) is real, but only for
+    /// Settings' own grouped row (`actionsBelowAvatar`) — applying it to
+    /// BOTH call sites visually drifted `TripProfileFormSheet`'s default
+    /// path from its pre-branch look (caption 12.5 bold + `Spacing.md` vs.
+    /// the standard style's body 14.5 semibold + `Spacing.xl`). The `else`
+    /// branch restores that original bespoke chain byte-for-byte, same
+    /// modifier order (frame -> contentShape -> background).
+    ///
+    /// `label` carries `.lineLimit(1)` + `.fixedSize(horizontal: true,
+    /// vertical: false)` on both branches — fix round: "Change photo"
+    /// wrapped to two lines inside Settings' narrower grouped-actions
+    /// column; `.fixedSize` makes this Text always report its full
+    /// single-line width as its ideal size (the row's sibling — the
+    /// "Display name" field — is the one meant to flex, via its own
+    /// `maxWidth: .infinity` in `SettingsView.profileAvatarRow`) instead of
+    /// this button silently accepting a too-narrow proposal and wrapping.
+    @ViewBuilder
     private var changePhotoButton: some View {
-        Button {
-            isPresentingPicker = true
-        } label: {
-            Text(avatarPath == nil ? "Add photo" : "Change photo")
+        let label = Text(avatarPath == nil ? "Add photo" : "Change photo")
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        if actionsBelowAvatar {
+            Button {
+                isPresentingPicker = true
+            } label: {
+                label
+            }
+            .buttonStyle(PrimaryCapsuleButtonStyle())
+            .disabled(isUploading)
+            .photosPicker(isPresented: $isPresentingPicker, selection: $pickerItem, matching: .images)
+        } else {
+            Button {
+                isPresentingPicker = true
+            } label: {
+                label
+                    .font(Typo.body(Typo.Size.caption, weight: .bold))
+                    .foregroundStyle(Palette.onAmber)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.md)
+                    .frame(minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+                    .contentShape(Capsule())
+                    .background(Palette.amber, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isUploading)
+            .photosPicker(isPresented: $isPresentingPicker, selection: $pickerItem, matching: .images)
         }
-        .buttonStyle(PrimaryCapsuleButtonStyle())
-        .disabled(isUploading)
-        .photosPicker(isPresented: $isPresentingPicker, selection: $pickerItem, matching: .images)
     }
 
     private var removeButton: some View {
@@ -143,6 +179,15 @@ struct AvatarPhotoPicker: View {
             Text(removeLabel)
                 .font(Typo.body(Typo.Size.caption, weight: .semibold))
                 .foregroundStyle(Palette.rose)
+                // Fix round: pairs with `changePhotoButton`'s own
+                // `.fixedSize` — making ONLY that sibling refuse to shrink
+                // just shifted the same "too little width proposed" problem
+                // onto this Text instead (Settings' grouped-actions row
+                // squeezed "Remove" down to a sliver, wrapping it one
+                // letter per line). Same fix, same reasoning: always report
+                // this Text's full single-line width as its ideal size.
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
