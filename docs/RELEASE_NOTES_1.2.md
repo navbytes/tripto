@@ -13,13 +13,11 @@ Then attach the actual ticket to the item. Keep hotel vouchers, baggage stickers
 
 Viewers can now suggest plans (a flight, a dinner, a museum day) without editing the main itinerary. Your ideas go straight to the organizer's review queue — they confirm or dismiss, you see the status.
 
-On iPhones with Apple Intelligence, ask Siri to read your itinerary ("What's on my trip?") or add to your packing list by voice. Say "Add sunscreen to my packing list" and it's there — same permissions as the app, offline-capable. Ask for a booking confirmation code and Siri whispers it only when your phone is unlocked.
+New Siri actions on every iPhone: say "Add sunscreen to my packing list" and it's there — same permissions as the app, works offline. Ask for a booking's confirmation code and Siri answers only after your phone is unlocked; the code never appears in search or suggestions.
 
-Trip summaries and packing suggestions arrive on-device (no cloud, no consent) if you have Apple Intelligence. A tap generates a plain-language rundown of your plans or proposes practical packing items — you always review before adding.
+On iPhones with Apple Intelligence, trip summaries and packing suggestions happen entirely on-device — no cloud, no sign-off dialogs. A tap generates a plain-language rundown of your plans or proposes practical packing items; you always review before anything is added.
 
-Throughout: your booking data never leaves your phone unless you share it. Screenshots, PDFs, all extracted text — read on-device first, sent to the cloud only if you choose, routed through Cloudflare for privacy.
-
-**What was new in 1.1:** photo covers for trips, shared packing lists with per-person assignment, widget, Live Activity countdown, app-launch Siri shortcut ("When's my next flight?"), Spotlight indexing, WidgetKit and Home screen photo avatar.
+Throughout: your booking data stays on your phone unless you choose otherwise. Screenshots and PDFs are always read on-device first; only if you pick cloud processing is the extracted text (never the image) sent — and we tell you exactly where it goes before the first send.
 
 ---
 
