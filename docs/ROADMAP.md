@@ -8,6 +8,11 @@ work and records what each item needs to ship. The UX-redesign adoption
 program (2026-07-15) runs as its own phased track in
 [UX_REDESIGN_ROADMAP.md](UX_REDESIGN_ROADMAP.md).
 
+> **Post-1.1 product scope (2026-07-21):** [PRODUCT_PLAN.md](PRODUCT_PLAN.md)
+> defines releases 1.2–1.4 (attachments + screenshot/PDF import; flight
+> status + push; collaboration + on-device AI) and supersedes this doc's
+> Phase 4/5 *ordering*. Engineering content below stays authoritative.
+
 **Position today (updated 2026-07-14):** v1 submitted to App Review
 2026-07-12 (Build 6, Waiting for Review). Backend cutover complete (anon
 sign-ins off, anon data purged, `/privacy` live). 610 unit + 6 UI tests

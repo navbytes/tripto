@@ -68,6 +68,16 @@ enum ShareScope: String, Codable, CaseIterable, Sendable {
     case view
 }
 
+/// `item_attachments.content_type` (release 1.2, `.claude/company/
+/// release-1.2/PLAN.md` C1) — check constraint restricts uploads to these
+/// two MIME types. `AttachmentService.attach` only ever re-encodes to
+/// `.jpeg` or passes a `.pdf` through verbatim, so there is no third case to
+/// plan for.
+enum AttachmentContentType: String, Codable, CaseIterable, Sendable {
+    case jpeg = "image/jpeg"
+    case pdf = "application/pdf"
+}
+
 // MARK: - Sync bookkeeping enums
 
 /// Every server table this app mirrors locally (SYNC_DESIGN.md "Local
@@ -86,6 +96,12 @@ enum SyncTable: String, Codable, CaseIterable, Sendable {
     /// — see `ItemAssignee`'s doc comment for how this app's single-`rowId`
     /// outbox represents that.
     case itemAssignees = "item_assignees"
+    /// Release 1.2 (`.claude/company/release-1.2/PLAN.md` C1): immutable
+    /// insert/delete-only rows (no `updated_at`), own `trip_id` column
+    /// (unlike `itemAssignees` above, so pull-apply scopes it directly by
+    /// trip rather than indirectly through this trip's item ids) — see
+    /// `ItemAttachment`'s doc comment.
+    case itemAttachments = "item_attachments"
 }
 
 /// `OutboxOp.op` (SYNC_DESIGN.md "Local store").

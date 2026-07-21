@@ -80,7 +80,14 @@ struct ImportAddressCard: View {
             switch state {
             case .needsConsent:
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Forwarded emails are sent to a third-party AI service to find your bookings.")
+                    // Compliance (Nov-2025 Guideline 5.1.2(i) — NAMED
+                    // pre-transmission disclosure): "OpenAI" must change if
+                    // backend's LLM_MODEL secret changes
+                    // (~/repos/backend/projects/tripto/RUNBOOK.md §5) —
+                    // ingest-text and ingest-email share that ONE secret, so
+                    // a provider switch means updating this string AND both
+                    // dialog copies below/in PasteImportSheet.swift together.
+                    Text("Forwarded emails are sent to OpenAI, routed through our Cloudflare gateway, to find your bookings.")
                         .font(Typo.body(Typo.Size.caption))
                         .foregroundStyle(.white.opacity(0.72))
                         .fixedSize(horizontal: false, vertical: true)
@@ -175,8 +182,11 @@ struct ImportAddressCard: View {
             }
             Button("Not now", role: .cancel) {}
         } message: {
+            // Compliance: same provider as the explainer above — keep both
+            // (and PasteImportSheet's own consent copy) in sync with
+            // backend's LLM_MODEL.
             Text(
-                "Forwarded emails are processed by a third-party AI service (via Cloudflare) to extract bookings. "
+                "Forwarded emails are processed by OpenAI, routed through our Cloudflare gateway, to extract bookings. "
                     + "The raw email is kept for up to 7 days, then deleted. Confirmation codes stay private to trip members."
             )
         }

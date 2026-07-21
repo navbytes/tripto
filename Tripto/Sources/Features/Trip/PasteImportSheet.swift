@@ -1,6 +1,8 @@
+import PhotosUI
 import Supabase
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// TI-0→TI-3 (`docs/BUILD_PLAN.md`): the app-side half of paste-to-import —
 /// a large free-text box the user pastes anything trip-related into
@@ -63,11 +65,26 @@ struct PasteImportSheet: View {
     /// this; `submitOnDevice()` falls back to remote rather than inserting
     /// with no creator at all in that case.
     var tripCreatedBy: UUID?
+    /// C2/C3 (`.claude/company/release-1.2/PLAN.md`): optional seam for
+    /// "attach the original scanned file to the item it created" — `nil` at
+    /// every EXISTING call site (default), which hides the review step's
+    /// attach toggle entirely and leaves behavior byte-identical to before
+    /// this milestone. `AttachmentService` (coder A, `Data/
+    /// AttachmentService.swift`) conforms via the zero-behavior
+    /// `extension AttachmentService: AttachmentAttaching {}` near the bottom
+    /// of this file; wiring a real instance in at a call site (this trip's
+    /// `modelContext`/`syncEngine`/uploader id) is integration work for
+    /// whoever mounts this sheet, not this file's job.
+    var attachmentAttacher: (any AttachmentAttaching)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.syncEngine) private var syncEngine
     @Environment(AuthManager.self) private var authManager
+    /// UX-5: the two picker buttons need to reflow to a `VStack` at
+    /// accessibility sizes (same recipe as `AvatarPhotoPicker.topRowLayout`)
+    /// rather than truncate side by side.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var rawText = ""
     @State private var isSubmitting = false
     /// Guideline 5.1.2(i) (rewritten 2025-11-13): true while the AI-import
@@ -121,6 +138,55 @@ struct PasteImportSheet: View {
     /// `UserDefaults` on every render.
     @State private var processingMode: ImportProcessingMode = ImportProcessingMode.current()
 
+    // MARK: - Scan-to-add batch state (C3, PLAN.md) — photos/PDF picked
+    // beside the paste box. `pickerPhotoItems`/`isPresentingFileImporter`
+    // are the two picker triggers; everything else tracks ONE in-flight
+    // batch (both pickers share the same serial queue — `processBatch`'s
+    // own guard refuses a second batch while one is already running).
+
+    @State private var isPresentingPhotosPicker = false
+    @State private var pickerPhotoItems: [PhotosPickerItem] = []
+    @State private var isPresentingFileImporter = false
+    @State private var isProcessingBatch = false
+    /// "Reading 2 of 3…" — nil whenever no batch is in flight.
+    @State private var batchProgressText: String?
+    /// One friendly row per input OCR/PDF-extraction couldn't read — the
+    /// batch continues past each of these rather than aborting (this
+    /// milestone's brief: "batch continues").
+    @State private var batchSkippedFileNames: [String] = []
+    /// Resumed by the AI-consent dialog's own buttons in `body` — bridges
+    /// that SwiftUI-driven confirmation into `processBatch`'s async loop so
+    /// "once per batch" (this milestone's brief) reuses the exact same
+    /// dialog/state the single-paste flow already has, rather than a second
+    /// one. Only ever non-nil while `processBatch` is actively awaiting a
+    /// decision.
+    @State private var pendingConsentContinuation: CheckedContinuation<Bool, Never>?
+    /// UX-4: which copy variant the AI-consent dialog shows — set right
+    /// before each of its two trigger points (`runRemoteImportFlow`'s
+    /// `.showConsentPrompt`, `requestCloudConsentIfNeeded`) flips
+    /// `isPresentingAIConsent` on. A scan input's SOURCE FILE never leaves
+    /// the device — only its extracted text does — which a plain paste's
+    /// own copy doesn't need to say at all (there is no source file).
+    @State private var consentDialogContext: ConsentDialogContext = .pastedText
+    private enum ConsentDialogContext {
+        case pastedText
+        case scannedInput
+    }
+
+    @State private var pendingAttachment: PendingAttachment?
+    /// "Attach original to the new item" toggle default (this milestone's
+    /// brief: "default ON").
+    @State private var attachSourceToNewItem = true
+    /// UX-1/UX-2: true while `confirmReview()` awaits a cloud-routed
+    /// attach's `pullTrip`/resolve/attach chain — keeps the review screen
+    /// (and its toast surface) alive until that finishes, success or not,
+    /// instead of `dismiss()`ing before a failure has anywhere to report to.
+    @State private var isConfirmingReview = false
+    /// UX-2: standard per-screen toast (`Design/Components/Toast.swift`) —
+    /// this sheet had none before; attach failures on EITHER route now
+    /// surface here rather than failing silently.
+    @State private var toast: String?
+
     private struct PackingCandidate: Identifiable {
         let id = UUID()
         var label: String
@@ -128,9 +194,37 @@ struct PasteImportSheet: View {
         var isChecked = true
     }
 
-    private var isReviewingPacking: Bool { !packingCandidates.isEmpty }
+    /// Captured once a batch (photo/PDF) import creates its first itinerary
+    /// item, on EITHER route (UX-1) — `nil` only for a text-paste import
+    /// (no source bytes to offer).
+    private struct PendingAttachment {
+        var target: PendingAttachmentTarget
+        let data: Data
+        let fileName: String
+        let contentType: AttachmentContentType
+    }
+
+    /// On-device path: the actual local object — already on this device.
+    /// Cloud path (UX-1, `ingest-text`'s `createdItemIds`): the row exists
+    /// only server-side at capture time, so only its id is known up front —
+    /// resolved to a live local `ItineraryItem` lazily, at confirm time
+    /// (`resolveAttachTarget`'s direct point-read).
+    private enum PendingAttachmentTarget {
+        case local(ItineraryItem)
+        case remoteId(UUID)
+    }
+
+    /// True once there's a results screen to show instead of the paste box —
+    /// packing items to vet, and/or a pending attach offer from a batch
+    /// import. A batch that produced ONLY itinerary items (no packing text
+    /// at all — the common case for a single scanned boarding pass) still
+    /// needs this screen when there's an attach toggle to show, where a
+    /// packing-only gate would skip straight to dismiss.
+    private var isReviewingResults: Bool {
+        !packingCandidates.isEmpty || pendingAttachment != nil
+    }
     private var trimmedText: String { rawText.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var canSubmit: Bool { !trimmedText.isEmpty && !isSubmitting }
+    private var canSubmit: Bool { !trimmedText.isEmpty && !isSubmitting && !isProcessingBatch }
 
     /// The runtime capability check (R4 §6's verified `canImport` +
     /// `#available` combo): `OnDeviceExtractor` only exists inside that
@@ -178,8 +272,8 @@ struct PasteImportSheet: View {
                 SheetHeader(title: title, onCancel: { dismiss() })
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
-                        if isReviewingPacking {
-                            packingReviewSection
+                        if isReviewingResults {
+                            resultsReviewSection
                         } else {
                             pasteSection
                         }
@@ -205,6 +299,20 @@ struct PasteImportSheet: View {
             }
             #endif
         }
+        // R-L3 (reviewer LOW): if this sheet is torn down while
+        // `processBatch` is awaiting `requestCloudConsentIfNeeded`'s
+        // continuation (the confirmationDialog is modal, so only reachable
+        // via e.g. the sheet being force-dismissed by its owner), the
+        // continuation would otherwise never resume — a suspended-Task leak
+        // plus a `withCheckedContinuation` runtime warning. Resuming with
+        // `false` (the same outcome as "Not now") is always safe here: it
+        // just stops the batch from sending anything else to the cloud,
+        // exactly as if the user had declined.
+        .onDisappear {
+            pendingConsentContinuation?.resume(returning: false)
+            pendingConsentContinuation = nil
+        }
+        .toastOverlay($toast)
         // Guideline 5.1.2(i) (rewritten 2025-11-13): explicit, affirmative
         // permission before sharing pasted text with the third-party AI —
         // the passive disclosure line in `pasteSection` is no longer
@@ -222,15 +330,49 @@ struct PasteImportSheet: View {
         ) {
             Button("Continue") {
                 AIImportConsent.grant()
-                Task { await submit() }
+                // Task 2 (scan-to-add): a batch's `processOneBatchText` awaits
+                // this decision via `requestCloudConsentIfNeeded` instead of
+                // calling `submit()` itself (a batch item's text never lives
+                // in `rawText`) — resuming its continuation IS this tap for
+                // that flow. The single-paste flow never sets one, so it
+                // falls through to the original `submit()` call unchanged.
+                if let pendingConsentContinuation {
+                    pendingConsentContinuation.resume(returning: true)
+                    self.pendingConsentContinuation = nil
+                } else {
+                    Task { await submit() }
+                }
             }
-            Button("Not now", role: .cancel) {}
+            Button("Not now", role: .cancel) {
+                pendingConsentContinuation?.resume(returning: false)
+                pendingConsentContinuation = nil
+            }
         } message: {
-            Text(
-                "To find your bookings, this text is sent to a third-party AI service (via Cloudflare) "
-                    + "and used only to extract booking details \u{2014} it isn\u{2019}t stored afterward. "
-                    + "You can add trips manually instead if you\u{2019}d rather not."
-            )
+            // Compliance (Nov-2025 Guideline 5.1.2(i) — NAMED pre-transmission
+            // disclosure): "OpenAI" must change if backend's LLM_MODEL secret
+            // changes (~/repos/backend/projects/tripto/RUNBOOK.md §5) —
+            // ingest-text and ingest-email share that ONE secret, so a
+            // provider switch means updating this string AND
+            // ImportAddressCard's consent copy (Design/Components/
+            // ImportAddressCard.swift) together. UX-4: a scanned input's
+            // source photo/PDF never leaves the device — only text OCR'd
+            // ON this iPhone is what reaches the cloud — so that variant
+            // says so explicitly rather than reusing the plain-paste
+            // wording, which has no source file to reassure about at all.
+            switch consentDialogContext {
+            case .pastedText:
+                Text(
+                    "To find your bookings, this text is sent to OpenAI, routed through our Cloudflare gateway, "
+                        + "and used only to extract booking details \u{2014} it isn\u{2019}t stored afterward. "
+                        + "You can add trips manually instead if you\u{2019}d rather not."
+                )
+            case .scannedInput:
+                Text(
+                    "To find your bookings, the photo or PDF is read on this iPhone and only the extracted "
+                        + "text is sent to OpenAI, routed through our Cloudflare gateway \u{2014} it isn\u{2019}t "
+                        + "stored afterward. You can add trips manually instead if you\u{2019}d rather not."
+                )
+            }
         }
         // Review fix (D1): `submitOnDevice()`'s on-device attempt hard-
         // failed after the footer already promised "text never leaves your
@@ -250,14 +392,19 @@ struct PasteImportSheet: View {
             }
             Button("Not now", role: .cancel) {}
         } message: {
+            // Compliance: same provider as the dialog above — keep both in
+            // sync with backend's LLM_MODEL (see that comment).
             Text(
-                "Send the pasted text to a third-party AI service instead? "
+                "Send the pasted text to OpenAI instead, routed through our Cloudflare gateway? "
                     + "(You can also switch to Cloud AI above.)"
             )
         }
     }
 
-    private var title: String { isReviewingPacking ? "Review packing list" : "Paste to import" }
+    private var title: String {
+        guard isReviewingResults else { return "Paste to import" }
+        return packingCandidates.isEmpty ? "Review import" : "Review packing list"
+    }
 
     // MARK: - Paste box (initial state)
 
@@ -279,11 +426,28 @@ struct PasteImportSheet: View {
                     RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
                         .stroke(Palette.mist, lineWidth: 1)
                 }
-                .disabled(isSubmitting)
+                .disabled(isSubmitting || isProcessingBatch)
                 // A bare `TextEditor` otherwise reads as an unlabeled text
                 // field — the instruction sentence above it explains what
                 // to paste, but isn't itself attached to this control.
                 .accessibilityLabel("Text to import")
+
+            inputPickerRow
+
+            if let batchProgressText {
+                HStack(spacing: Spacing.sm) {
+                    ProgressView()
+                    Text(batchProgressText)
+                        .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                        .foregroundStyle(Palette.slate)
+                }
+                // One combined VoiceOver stop reading the progress text
+                // itself, same recipe as `processingModeRow` below.
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(batchProgressText)
+            }
+
+            batchSkippedSummary
 
             // PLAN.md Addendum: which line shows is keyed off the route's
             // REASON, not just on-device-vs-not — `ImportRouting
@@ -355,6 +519,94 @@ struct PasteImportSheet: View {
         }
     }
 
+    // MARK: - Batch input pickers (C3, PLAN.md — "Choose photos"/"Choose file")
+
+    /// UX-5: the two buttons truncate side by side at accessibility sizes —
+    /// same `isAccessibilitySize` -> `AnyLayout` swap `AvatarPhotoPicker
+    /// .topRowLayout` established for its own avatar+field pair
+    /// (`AvatarPhotoPicker.swift:79-83`), reflowing to a `VStack` instead.
+    private var inputPickerLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.sm))
+            : AnyLayout(HStackLayout(spacing: Spacing.sm))
+    }
+
+    /// Two secondary affordances beside the paste box — mirrors
+    /// `AvatarPhotoPicker`'s own pick-then-auto-process shape (no separate
+    /// "start" button; selecting IS starting, via the `.onChange`/
+    /// `.fileImporter` completion below).
+    private var inputPickerRow: some View {
+        inputPickerLayout {
+            Button {
+                isPresentingPhotosPicker = true
+            } label: {
+                inputPickerLabel(systemImage: "photo.on.rectangle", title: "Choose photos")
+            }
+            .buttonStyle(.plain)
+            .disabled(isSubmitting || isProcessingBatch)
+            .photosPicker(
+                isPresented: $isPresentingPhotosPicker, selection: $pickerPhotoItems, maxSelectionCount: 5, matching: .images
+            )
+            .accessibilityHint("Import up to 5 photos of a booking or itinerary")
+
+            Button {
+                isPresentingFileImporter = true
+            } label: {
+                inputPickerLabel(systemImage: "doc.text.viewfinder", title: "Choose file")
+            }
+            .buttonStyle(.plain)
+            .disabled(isSubmitting || isProcessingBatch)
+            .accessibilityHint("Import a PDF booking or itinerary")
+        }
+        .fileImporter(
+            isPresented: $isPresentingFileImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                Task { await processFileImporterSelection(urls) }
+            }
+        }
+        .onChange(of: pickerPhotoItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            Task { await processPhotoPickerSelection(newItems) }
+        }
+    }
+
+    private func inputPickerLabel(systemImage: String, title: String) -> some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                // Decorative — the title right next to it already says the
+                // same thing (same treatment as `packingCandidateRow`'s
+                // group icon).
+                .accessibilityHidden(true)
+            Text(title)
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(Palette.ink)
+        .frame(maxWidth: .infinity, minHeight: 44) // BUILD_PLAN §6.5's 44pt floor
+        .background(Palette.mist.opacity(0.5), in: RoundedRectangle(cornerRadius: Radii.card - 4, style: .continuous))
+        .contentShape(Rectangle())
+    }
+
+    /// One row per input `processBatch` couldn't read — shown both here
+    /// (`pasteSection`, e.g. a batch that found nothing at all) and in
+    /// `resultsReviewSection` (a batch that found SOMETHING alongside these).
+    /// `EmptyView` when there's nothing to report, so both call sites can
+    /// include this unconditionally.
+    @ViewBuilder
+    private var batchSkippedSummary: some View {
+        if !batchSkippedFileNames.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(batchSkippedFileNames, id: \.self) { fileName in
+                    Text("Couldn\u{2019}t read \u{201C}\(fileName)\u{201D} \u{2014} skipped.")
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                }
+            }
+        }
+    }
+
     // MARK: - Processing mode row (only offered when a real choice exists)
 
     /// "Processing" row (PLAN.md Addendum) — same row shape as
@@ -408,9 +660,15 @@ struct PasteImportSheet: View {
         .accessibilityValue(processingMode.displayName)
     }
 
-    // MARK: - Packing vetting checklist (post-extraction, if any packing items were found)
+    // MARK: - Results review (post-extraction: packing checklist and/or attach offer)
 
-    private var packingReviewSection: some View {
+    /// Shown instead of `pasteSection` once `isReviewingResults` is true —
+    /// originally just the packing vetting checklist; now also the (gated)
+    /// attach-toggle screen for a batch that created itinerary items with no
+    /// packing text at all. Either or both sections below may be empty for a
+    /// given result; the confirm button at the bottom adapts to whichever
+    /// combination actually applies (see `reviewConfirmLabel`).
+    private var resultsReviewSection: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if itineraryItemsCreated > 0 {
                 Text(
@@ -427,36 +685,94 @@ struct PasteImportSheet: View {
                     .foregroundStyle(Palette.rose)
             }
 
-            Text(
-                "We found \(packingCandidates.count) packing item\(packingCandidates.count == 1 ? "" : "s") "
-                    + "\u{2014} uncheck anything you don\u{2019}t want to add."
-            )
-            .font(Typo.body(Typo.Size.caption))
-            .foregroundStyle(Palette.slate)
+            batchSkippedSummary
 
-            VStack(spacing: Spacing.sm) {
-                ForEach($packingCandidates) { $candidate in
-                    packingCandidateRow($candidate)
+            if !packingCandidates.isEmpty {
+                Text(
+                    "We found \(packingCandidates.count) packing item\(packingCandidates.count == 1 ? "" : "s") "
+                        + "\u{2014} uncheck anything you don\u{2019}t want to add."
+                )
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+
+                VStack(spacing: Spacing.sm) {
+                    ForEach($packingCandidates) { $candidate in
+                        packingCandidateRow($candidate)
+                    }
                 }
             }
 
+            if attachmentAttacher != nil, pendingAttachment != nil {
+                attachToggleRow
+            }
+
             Button {
-                onPackingConfirmed?(toAddCandidates)
-                dismiss()
+                Task { await confirmReview() }
             } label: {
-                Text("Add \(toAddCandidates.count) item\(toAddCandidates.count == 1 ? "" : "s")")
-                    .font(Typo.body(weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .foregroundStyle(toAddCandidates.isEmpty ? Palette.slate : Palette.onAmber)
-                    .padding(.vertical, Spacing.md)
-                    .background(
-                        toAddCandidates.isEmpty ? Palette.mist : Palette.amber,
-                        in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
-                    )
+                HStack(spacing: Spacing.sm) {
+                    if isConfirmingReview {
+                        ProgressView().tint(isReviewConfirmDisabled ? Palette.slate : Palette.onAmber)
+                    }
+                    Text(isConfirmingReview ? "Attaching\u{2026}" : reviewConfirmLabel)
+                        .font(Typo.body(weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(isReviewConfirmDisabled ? Palette.slate : Palette.onAmber)
+                .padding(.vertical, Spacing.md)
+                .background(
+                    isReviewConfirmDisabled ? Palette.mist : Palette.amber,
+                    in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                )
             }
             .buttonStyle(.plain)
-            .disabled(toAddCandidates.isEmpty)
+            .disabled(isReviewConfirmDisabled)
         }
+    }
+
+    /// "Add N items" once there are still-checked packing candidates to
+    /// insert; "Done" once this screen exists ONLY for the attach offer,
+    /// with no packing checklist at all.
+    private var reviewConfirmLabel: String {
+        packingCandidates.isEmpty ? "Done" : "Add \(toAddCandidates.count) item\(toAddCandidates.count == 1 ? "" : "s")"
+    }
+
+    /// P-12 fix: a pending attach ALONE must keep Confirm enabled, even once
+    /// every packing candidate has been unchecked — the original
+    /// `!packingCandidates.isEmpty && toAddCandidates.isEmpty` check didn't
+    /// know about `pendingAttachment` at all, so unchecking every packing
+    /// suggestion on a batch that also had an attach offer disabled the
+    /// ONLY button on screen with no way to finish. Also disabled while
+    /// `confirmReview()` is in flight (same `isSubmitting`-folded-into-
+    /// `canSubmit` shape the Import button already uses).
+    private var isReviewConfirmDisabled: Bool {
+        if isConfirmingReview { return true }
+        guard pendingAttachment == nil else { return false }
+        return !packingCandidates.isEmpty && toAddCandidates.isEmpty
+    }
+
+    /// "Attach original to the new item" — default ON (this milestone's
+    /// brief). Native `Toggle`, same "platform control gives Dynamic
+    /// Type/VoiceOver/44pt for free" recipe as every other control in this
+    /// file.
+    private var attachToggleRow: some View {
+        Toggle(isOn: $attachSourceToNewItem) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Attach original to the new item")
+                    .font(Typo.body(Typo.Size.body, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                if let pendingAttachment {
+                    Text(pendingAttachment.fileName)
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+        .tint(Palette.amber)
+        .padding(Spacing.md)
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+        .accessibilityHint("Keeps a copy of the imported file on this item")
     }
 
     private func packingCandidateRow(_ candidate: Binding<PackingCandidate>) -> some View {
@@ -520,6 +836,10 @@ struct PasteImportSheet: View {
         errorMessage = nil
         noResultsMessage = nil
         partialFailureNote = nil
+        // P-10: a prior batch's skipped-file rows (`pasteSection` renders
+        // them unconditionally) must not linger once the user switches back
+        // to a plain paste and imports that instead.
+        batchSkippedFileNames = []
         let request = IngestTextRequest(tripId: tripId, rawText: trimmedText)
         do {
             let response: IngestTextResponse = try await Supa.invoke("ingest-text", params: request)
@@ -546,6 +866,7 @@ struct PasteImportSheet: View {
         case .sendImmediately:
             await submit()
         case .showConsentPrompt:
+            consentDialogContext = .pastedText
             isPresentingAIConsent = true
         }
     }
@@ -589,6 +910,7 @@ struct PasteImportSheet: View {
         errorMessage = nil
         noResultsMessage = nil
         partialFailureNote = nil
+        batchSkippedFileNames = [] // P-10 — same reset as submit(), same reason
 
         // Mirrors `AddItemSheet.save()`'s create-branch creator fallback
         // (Finding 1 there) — the signed-out local trip creator is still
@@ -606,7 +928,7 @@ struct PasteImportSheet: View {
             switch await OnDeviceExtractor.extractAll(from: trimmedText) {
             case .success(let items, let packing):
                 let rows = items.compactMap(ImportExtraction.mapItemToRow)
-                let created = insertValidatedItineraryItems(rows, creatorId: creatorId)
+                let (created, _) = insertValidatedItineraryItems(rows, creatorId: creatorId)
                 let candidates = packing.compactMap { raw in
                     ImportExtraction.mapPackingItem(raw).map { PackingCandidate(label: $0.label, groupKey: $0.groupKey) }
                 }
@@ -646,12 +968,17 @@ struct PasteImportSheet: View {
     /// review pipeline (`ImportReviewBanner`/`SuggestedItemsSheet`)
     /// email-import and remote paste-import suggestions already use.
     /// Returns the count of rows actually persisted, for
-    /// `handleImportOutcome`'s `created`.
+    /// `handleImportOutcome`'s `created` — and (Task 3, PLAN.md) the FIRST
+    /// row actually persisted, so a batch import can offer to attach its
+    /// source bytes to it. `nil` when every row failed to save; unused by
+    /// `submitOnDevice()`'s own call site (single-paste import has no source
+    /// bytes to attach), read only by `processOneBatchText`.
     private func insertValidatedItineraryItems(
         _ rows: [ImportExtraction.ValidatedItineraryRow], creatorId: UUID
-    ) -> Int {
+    ) -> (created: Int, firstItem: ItineraryItem?) {
         let now = Date()
         var created = 0
+        var firstItem: ItineraryItem?
         for row in rows {
             let item = ItineraryItem(
                 id: UUID(), tripId: tripId, categoryRaw: row.category.rawValue, title: row.title,
@@ -680,8 +1007,9 @@ struct PasteImportSheet: View {
             let capturedTripId = tripId
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: capturedTripId, payload: dto) }
             created += 1
+            if firstItem == nil { firstItem = item }
         }
-        return created
+        return (created, firstItem)
     }
 
     /// Shared UI-state transition once EITHER path — remote `ingest-text`
@@ -694,7 +1022,8 @@ struct PasteImportSheet: View {
     /// the logic `submit()` used to inline before it had a second caller.
     private func handleImportOutcome(
         created: Int, packingCandidates newPackingCandidates: [PackingCandidate],
-        itineraryFailed: Bool, packingFailed: Bool
+        itineraryFailed: Bool, packingFailed: Bool,
+        emptyResultMessage: String = "Couldn\u{2019}t find anything to import in that text. Try editing it, or paste something else."
     ) {
         isSubmitting = false
         itineraryItemsCreated = created
@@ -711,7 +1040,7 @@ struct PasteImportSheet: View {
             packingCandidates = newPackingCandidates
             partialFailureNote = failedNote
             // The checklist screen itself shows the itinerary count (see
-            // `packingReviewSection`) — report it now since this sheet
+            // `resultsReviewSection`) — report it now since this sheet
             // won't dismiss until the checklist is confirmed.
             if created > 0 { onItineraryItemsImported?(created) }
         } else if created > 0 {
@@ -721,14 +1050,388 @@ struct PasteImportSheet: View {
                 // dropped something the user pasted — give them a chance
                 // to see the note and retry.
                 noResultsMessage = failedNote
-            } else {
+            } else if !isReviewingResults {
                 dismiss()
             }
+            // else: `isReviewingResults` is true here only via a (gated)
+            // `pendingAttachment` — `newPackingCandidates` is empty in this
+            // branch — already set by `processBatch` before this call, so
+            // stay open and let `resultsReviewSection` offer the attach
+            // toggle before the user dismisses.
         } else if let failedNote {
             noResultsMessage = failedNote
         } else {
-            noResultsMessage = "Couldn\u{2019}t find anything to import in that text. Try editing it, or paste something else."
+            noResultsMessage = emptyResultMessage
         }
+    }
+
+    // MARK: - Scan-to-add batch (C3, PLAN.md)
+
+    /// One picked-but-not-yet-processed input for `processBatch` — an image
+    /// (from `PhotosPicker`) or PDF (from `.fileImporter`), together with the
+    /// original bytes/name a batch may later offer to attach (Task 3).
+    private enum BatchInput {
+        case image(fileName: String, data: Data)
+        case pdf(fileName: String, data: Data)
+
+        var fileName: String {
+            switch self {
+            case .image(let fileName, _), .pdf(let fileName, _): return fileName
+            }
+        }
+
+        var data: Data {
+            switch self {
+            case .image(_, let data), .pdf(_, let data): return data
+            }
+        }
+
+        var isPDF: Bool {
+            if case .pdf = self { return true }
+            return false
+        }
+    }
+
+    private func processPhotoPickerSelection(_ items: [PhotosPickerItem]) async {
+        defer { pickerPhotoItems = [] } // clears selection so re-picking the same assets later still fires `.onChange`
+        var inputs: [BatchInput] = []
+        for (index, item) in items.enumerated() {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            inputs.append(.image(fileName: "Photo \(index + 1)", data: data))
+        }
+        await processBatch(inputs)
+    }
+
+    /// PDFs cap at 5 too (`.prefix`), the same ceiling as the photos picker —
+    /// bounds worst-case serial processing time on a single "Choose file"
+    /// pick, since `fileImporter` (unlike `PhotosPicker`) has no built-in
+    /// max-selection option.
+    private func processFileImporterSelection(_ urls: [URL]) async {
+        var inputs: [BatchInput] = []
+        for url in urls.prefix(5) {
+            let didAccessSecurityScope = url.startAccessingSecurityScopedResource()
+            defer { if didAccessSecurityScope { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            inputs.append(.pdf(fileName: url.lastPathComponent, data: data))
+        }
+        await processBatch(inputs)
+    }
+
+    /// Entry point for BOTH pickers above — mirrors `submit()`/
+    /// `submitOnDevice()`'s shape (guard, reset transient state, do the
+    /// work, `handleImportOutcome`) but drives `ImportRouting`'s decision
+    /// once PER ITEM instead of once for the whole call, since each
+    /// image/PDF OCRs to its own text with its own length
+    /// (`ImportContextBudget.textFits` varies per item even though
+    /// `processingMode` itself is fixed for the whole batch).
+    ///
+    /// Serial by construction — `for` + `await`, never a `TaskGroup` — per
+    /// this milestone's brief: Vision/Foundation Models both compete for the
+    /// same on-device thermal & rate budget, so items never run concurrently.
+    private func processBatch(_ inputs: [BatchInput]) async {
+        guard !inputs.isEmpty, !isProcessingBatch, !isSubmitting else { return }
+        isProcessingBatch = true
+        errorMessage = nil
+        noResultsMessage = nil
+        partialFailureNote = nil
+        batchSkippedFileNames = []
+        defer {
+            isProcessingBatch = false
+            batchProgressText = nil
+        }
+
+        // Mirrors `submitOnDevice()`'s own creator fallback — `nil` here
+        // just means every item routes remote (see `processOneBatchText`'s
+        // `let creatorId` guard), never a crash.
+        let creatorId = authManager.userId ?? tripCreatedBy
+
+        var totalCreated = 0
+        var aggregatedPacking: [PackingCandidate] = []
+        var anyItineraryFailed = false
+        var anyPackingFailed = false
+        var consentDeclined = false
+        var firstAttachCandidate: (target: PendingAttachmentTarget, input: BatchInput)?
+
+        for (index, input) in inputs.enumerated() {
+            // "Not now" on the mid-batch consent dialog (`requestCloudConsentIfNeeded`)
+            // stops sending anything else in THIS batch to the cloud —
+            // mirrors the single-paste dialog's own "Not now leaves nothing
+            // sent" rule, just applied to the rest of the queue instead of
+            // one paste. Checked BEFORE touching `batchProgressText` so a
+            // decline doesn't flash a "Reading N of M…" for an item that's
+            // actually about to be skipped.
+            if consentDeclined { break }
+            batchProgressText = "Reading \(index + 1) of \(inputs.count)\u{2026}"
+
+            let extractedText: String
+            do {
+                switch input {
+                case .image(_, let data):
+                    // S-2 (security review): a bounded ImageIO thumbnail
+                    // decode, never a full-resolution `UIImage(data:)` —
+                    // `OCRService.decodedImage` already bakes in EXIF
+                    // orientation, so no separate orientation lookup here.
+                    guard let cgImage = OCRService.decodedImage(from: data) else { throw OCRService.OCRError.invalidImage }
+                    extractedText = try await OCRService.extractText(from: cgImage)
+                case .pdf(_, let data):
+                    extractedText = try await PDFTextExtractor.extractText(from: data)
+                }
+            } catch {
+                batchSkippedFileNames.append(input.fileName)
+                continue
+            }
+
+            let trimmedExtractedText = extractedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Empty-OCR result — this milestone's brief: friendly row, batch
+            // continues (not an error; a blank photo just has nothing to add).
+            guard !trimmedExtractedText.isEmpty else {
+                batchSkippedFileNames.append(input.fileName)
+                continue
+            }
+
+            guard let outcome = await processOneBatchText(trimmedExtractedText, creatorId: creatorId) else {
+                consentDeclined = true
+                continue
+            }
+
+            totalCreated += outcome.created
+            aggregatedPacking.append(contentsOf: outcome.packingCandidates)
+            anyItineraryFailed = anyItineraryFailed || outcome.itineraryFailed
+            anyPackingFailed = anyPackingFailed || outcome.packingFailed
+
+            // UX-1: both routes are now candidates — on-device gives a local
+            // object directly; cloud gives an id that resolves later
+            // (`resolveAttachTarget`, at confirm time).
+            if firstAttachCandidate == nil {
+                if let firstItem = outcome.firstCreatedItem {
+                    firstAttachCandidate = (.local(firstItem), input)
+                } else if let firstId = outcome.firstCreatedItemId {
+                    firstAttachCandidate = (.remoteId(firstId), input)
+                }
+            }
+        }
+
+        if let firstAttachCandidate {
+            // Raw picked bytes, not pre-re-encoded — `AttachmentService
+            // .attach` already re-encodes any `.jpeg`-content-typed payload
+            // through `ImageProcessing.downsampledJPEG` internally (2400px/
+            // q0.85, PLAN.md C1), regardless of the source format
+            // (`CGImageSourceCreateWithData` reads HEIC/PNG/JPEG alike), so
+            // handing it the original bytes here is correct as-is — no
+            // separate re-encode step belongs in this file.
+            pendingAttachment = PendingAttachment(
+                target: firstAttachCandidate.target,
+                data: firstAttachCandidate.input.data,
+                fileName: firstAttachCandidate.input.fileName,
+                contentType: firstAttachCandidate.input.isPDF ? .pdf : .jpeg
+            )
+        }
+
+        handleImportOutcome(
+            created: totalCreated, packingCandidates: aggregatedPacking,
+            itineraryFailed: anyItineraryFailed, packingFailed: anyPackingFailed,
+            emptyResultMessage: "Couldn\u{2019}t find anything to import in those files."
+        )
+    }
+
+    private struct BatchTextOutcome {
+        var created: Int
+        var packingCandidates: [PackingCandidate]
+        var itineraryFailed: Bool
+        var packingFailed: Bool
+        /// On-device branch only: the actual local object.
+        var firstCreatedItem: ItineraryItem?
+        /// UX-1: cloud branch only — `ingest-text`'s `createdItemIds.first`.
+        /// Exactly one of these two fields is ever non-nil for a
+        /// `created > 0` outcome.
+        var firstCreatedItemId: UUID?
+    }
+
+    /// Routes ONE already-extracted text (from an OCR'd photo or PDF page)
+    /// through the exact same `ImportRouting`/`OnDeviceExtractor`/
+    /// `ingest-text` decision `submit()`/`submitOnDevice()` use for
+    /// `rawText` — the "EXISTING ImportExtraction flow unchanged" this
+    /// milestone's brief requires; only the text's SOURCE differs (OCR
+    /// output vs. a direct paste).
+    ///
+    /// Deliberately skips `submitOnDevice()`'s own extra "couldn't process
+    /// on this iPhone, reconfirm before sending to the AI service?" dialog
+    /// on a `.fallback` (falls straight through to `sendToRemote` instead) —
+    /// that dialog exists because `pasteSection`'s footer makes an explicit
+    /// on-device PROMISE before the user taps Import; a batch import makes
+    /// no equivalent per-item promise, and pausing a "Reading N of M…"
+    /// progress loop for a second modal per fallback would be worse UX for a
+    /// rare case. The `AIImportConsent` gate below still always fires before
+    /// any upload either way — nothing here ever skips consent, only the
+    /// extra reconfirm.
+    ///
+    /// Returns `nil` when this text needed the cloud path and the user
+    /// declined consent (`requestCloudConsentIfNeeded`) — `processBatch`
+    /// stops sending anything else in this batch to the cloud when that
+    /// happens.
+    private func processOneBatchText(_ text: String, creatorId: UUID?) async -> BatchTextOutcome? {
+        let route = ImportRouting.route(
+            mode: processingMode, isOnDeviceAvailable: isOnDeviceAvailable, textFitsOnDevice: ImportContextBudget.textFits(text)
+        )
+
+        if route == .onDevice, let creatorId {
+            #if canImport(FoundationModels)
+            if #available(iOS 26.0, *) {
+                switch await OnDeviceExtractor.extractAll(from: text) {
+                case .success(let items, let packing):
+                    let rows = items.compactMap(ImportExtraction.mapItemToRow)
+                    let (created, firstItem) = insertValidatedItineraryItems(rows, creatorId: creatorId)
+                    let candidates = packing.compactMap { raw in
+                        ImportExtraction.mapPackingItem(raw).map { PackingCandidate(label: $0.label, groupKey: $0.groupKey) }
+                    }
+                    return BatchTextOutcome(
+                        created: created, packingCandidates: candidates,
+                        itineraryFailed: false, packingFailed: false, firstCreatedItem: firstItem, firstCreatedItemId: nil
+                    )
+                case .fallback:
+                    break // falls through to the remote send below
+                }
+            }
+            #endif
+        }
+
+        return await sendToRemote(text)
+    }
+
+    private func sendToRemote(_ text: String) async -> BatchTextOutcome? {
+        guard await requestCloudConsentIfNeeded() else { return nil }
+        let request = IngestTextRequest(tripId: tripId, rawText: text)
+        do {
+            let response: IngestTextResponse = try await Supa.invoke("ingest-text", params: request)
+            let candidates = response.packingItems.map {
+                PackingCandidate(label: $0.label, groupKey: PackingGroupKey(rawValue: $0.groupKey) ?? .custom)
+            }
+            // UX-1: `createdItemIds` is insertion order, first = primary
+            // (navbytes/backend#18) — the same "first row actually
+            // persisted" convention `insertValidatedItineraryItems` already
+            // uses for the on-device side. `?.first` (not `.first`): the
+            // field is optional (contract discipline — see its own doc
+            // comment), so an older/rolled-back function response with no
+            // `createdItemIds` key at all just means no attach offer this
+            // time, not a decode failure for the whole response.
+            return BatchTextOutcome(
+                created: response.created, packingCandidates: candidates,
+                itineraryFailed: response.itineraryFailed, packingFailed: response.packingFailed,
+                firstCreatedItem: nil, firstCreatedItemId: response.createdItemIds?.first
+            )
+        } catch {
+            // One item's send failing doesn't sink the batch (same "log and
+            // continue" rule the rest of this file already applies) — rolls
+            // up into the aggregate `itineraryFailed`, which reuses the
+            // EXISTING "couldn't check for bookings" note
+            // (`handleImportOutcome`) rather than inventing new copy.
+            return BatchTextOutcome(
+                created: 0, packingCandidates: [], itineraryFailed: true, packingFailed: false,
+                firstCreatedItem: nil, firstCreatedItemId: nil
+            )
+        }
+    }
+
+    /// Bridges the existing `AIImportConsent` dialog (SwiftUI-state-driven)
+    /// into this `async` loop — `processOneBatchText` awaits the user's tap
+    /// instead of the dialog's own button action re-entering `submit()` the
+    /// way the single-paste flow does (see `body`'s "Continue"/"Not now"
+    /// actions). Returns immediately (no dialog shown) once consent is
+    /// already on record, which is what makes this "once per batch" (this
+    /// milestone's brief): the first item that needs it is the only one that
+    /// ever waits.
+    private func requestCloudConsentIfNeeded() async -> Bool {
+        if AIImportConsent.isGranted() { return true }
+        consentDialogContext = .scannedInput
+        return await withCheckedContinuation { continuation in
+            pendingConsentContinuation = continuation
+            isPresentingAIConsent = true
+        }
+    }
+
+    /// `resultsReviewSection`'s confirm button — packing insert is
+    /// synchronous/unconditional (unchanged), then, only when there's a real
+    /// attach to attempt (toggle ON, a pending target, an attacher
+    /// injected), AWAITS it before dismissing: UX-1/UX-2 need this sheet to
+    /// still be alive (for `toast`/`resolveAttachTarget`'s network read)
+    /// when an attach fails, which a fire-and-forget `Task` racing an
+    /// immediate `dismiss()` can't guarantee. Every other case (no attach to
+    /// make) dismisses immediately, byte-identical to before.
+    private func confirmReview() async {
+        if !packingCandidates.isEmpty {
+            onPackingConfirmed?(toAddCandidates)
+        }
+        guard attachSourceToNewItem, let pendingAttachment, let attacher = attachmentAttacher else {
+            dismiss()
+            return
+        }
+
+        isConfirmingReview = true
+        defer { isConfirmingReview = false }
+        do {
+            let item = try await resolveAttachTarget(pendingAttachment.target)
+            try await attacher.attach(
+                data: pendingAttachment.data, contentType: pendingAttachment.contentType,
+                fileName: pendingAttachment.fileName, to: item
+            )
+            dismiss()
+        } catch {
+            // UX-2: never silent on either route — standard toast, same
+            // surface every other screen uses. The itinerary item itself
+            // was already created and already reported via
+            // `onItineraryItemsImported` regardless, so this failure never
+            // blocks or undoes the import it rode along with; the user
+            // stays on this screen to see why, rather than losing the
+            // message to an already-dismissed sheet.
+            toast = "Couldn\u{2019}t attach \u{201C}\(pendingAttachment.fileName)\u{201D} to the new item."
+            // A second tap of this same button should just dismiss, not
+            // repeat a failed attempt automatically.
+            attachSourceToNewItem = false
+        }
+    }
+
+    /// UX-1 fix round (MED reentrancy): on-device targets resolve instantly
+    /// (already local, no network). Cloud targets (`ingest-text`'s
+    /// `createdItemIds.first`) used to go through `syncEngine.pullTrip`, but
+    /// that method no-ops against an already-in-flight pull for the same
+    /// trip (`SyncEngine`'s own `pullingTrips` self-guard) — both the
+    /// original call AND its retry could land during someone else's
+    /// unrelated in-flight pull and miss the just-created row entirely,
+    /// producing a spurious "couldn't attach" toast for an item that lands
+    /// moments later anyway. A direct point-read of this ONE row instead —
+    /// the exact `select().eq("id", value:).single()` shape
+    /// `SyncEngine+ShareLinks.insertAndReadBack` already uses for the same
+    /// "read the row this device's own write just created" need (RLS scopes
+    /// it identically to `pullTrip`'s own `itinerary_items` query) — has no
+    /// dependency on any pull's timing: `ingest-text` already committed the
+    /// insert before this method is ever reached, so the row is always
+    /// there to read. No retry needed, and per this fix round: no sleeps.
+    private func resolveAttachTarget(_ target: PendingAttachmentTarget) async throws -> ItineraryItem {
+        switch target {
+        case .local(let item):
+            return item
+        case .remoteId(let id):
+            let dto: ItineraryItemDTO = try await Supa.client.from(SyncTable.itineraryItems.rawValue)
+                .select().eq("id", value: id).single().execute().value
+            if let existing = try fetchLocalItineraryItem(id: id) {
+                existing.apply(dto)
+                try modelContext.save()
+                return existing
+            }
+            // Mirrors a pull's own apply-only behavior (`SyncStore
+            // .applyItineraryItems`) — never `syncEngine.enqueueUpsert` this:
+            // the row already exists server-side (this IS that row), so
+            // re-enqueueing it would just push an unmodified duplicate
+            // upsert of a write this device never actually authored.
+            let item = ItineraryItem(dto: dto)
+            modelContext.insert(item)
+            try modelContext.save()
+            return item
+        }
+    }
+
+    private func fetchLocalItineraryItem(id: UUID) throws -> ItineraryItem? {
+        try modelContext.fetch(FetchDescriptor<ItineraryItem>(predicate: #Predicate { $0.id == id })).first
     }
 
     /// Maps `ingest-text`'s documented error responses (this milestone's
@@ -835,6 +1538,31 @@ enum AIImportConsent {
     }
 }
 
+/// C2/C3 (`.claude/company/release-1.2/PLAN.md`): the seam `PasteImportSheet`
+/// uses to offer "Attach original to the new item" after a scan-to-add
+/// (photo/PDF) import — owned here (coder B), implemented by coder A's
+/// `AttachmentService` (`Data/AttachmentService.swift`). Initially written
+/// (and briefly shipped behind a `TRIPTO_ATTACHMENTS` flag) before
+/// `AttachmentContentType`/`ItemAttachment` existed in-tree; both landed
+/// during this same milestone, confirmed to match this protocol's shape
+/// exactly, so the flag was removed again — this is now real, compiled,
+/// tested code, not a placeholder.
+protocol AttachmentAttaching {
+    @discardableResult
+    func attach(
+        data: Data, contentType: AttachmentContentType, fileName: String, to item: ItineraryItem
+    ) async throws -> ItemAttachment
+}
+
+/// `AttachmentService.attach`'s signature already matches
+/// `AttachmentAttaching` exactly (see that type's own doc comment, which
+/// anticipated this exact one-line conformance from whichever side landed
+/// second) — a zero-behavior extension, not a reimplementation. Lives here
+/// rather than in `Data/AttachmentService.swift` (coder A's exclusive file,
+/// PLAN.md ownership) since Swift extensions may declare a type's
+/// conformance to a protocol from any file in the same module.
+extension AttachmentService: AttachmentAttaching {}
+
 /// `ingest-text`'s request body — plain camelCase, matching that function's
 /// own `req.json()` shape exactly (see `Supa.invoke`'s doc comment for why
 /// this is encoded without `JSONCoding`'s snake_case conversion). No `kind`
@@ -844,7 +1572,11 @@ private struct IngestTextRequest: Encodable {
     let rawText: String
 }
 
-private struct IngestTextResponse: Decodable {
+/// `internal` (not `private`, unlike its sibling `IngestTextRequest` above)
+/// so `IngestTextResponseDecodingTests` can decode it directly via
+/// `@testable import Tripto` — a plain data-only `Decodable`, no behavior to
+/// protect by hiding it.
+struct IngestTextResponse: Decodable {
     struct PackingItemPayload: Decodable {
         let label: String
         let groupKey: String
@@ -855,6 +1587,17 @@ private struct IngestTextResponse: Decodable {
     /// apart from "extraction failed" — see `partialFailureNote`.
     let itineraryFailed: Bool
     let packingFailed: Bool
+    /// UX-1 (navbytes/backend#18, additive): insertion order, first =
+    /// primary itinerary item — lets a cloud-routed scan-to-add batch offer
+    /// auto-attach too (`sendToRemote`/`resolveAttachTarget`), which used to
+    /// be impossible with no created-row id at all in this response.
+    ///
+    /// Optional, NOT required (§3.6 contract discipline: additive-field
+    /// tolerance) — a rollback/redeploy of `ingest-text` from a pre-#18 ref
+    /// must not fail `Decodable` with `keyNotFound` and break cloud
+    /// text-import entirely; a missing key here just means the attach offer
+    /// doesn't fire for that response (`sendToRemote` reads `?.first`).
+    let createdItemIds: [UUID]?
 }
 
 // No `#Preview` here (like every other `@Environment(AuthManager.self)`

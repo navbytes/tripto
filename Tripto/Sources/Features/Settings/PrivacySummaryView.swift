@@ -105,11 +105,21 @@ struct PrivacySummaryView: View {
         PrivacyPoint(
             id: "import",
             symbolName: "sparkles",
-            title: "AI helps only when you paste to import",
+            // P-11: was "AI helps only when you paste to import" — scan-to-add
+            // (photos/PDFs) is a second import path this screen didn't cover.
+            title: "AI helps when you paste or scan to import",
+            // Guideline 5.1.2(i): the cloud provider is NAMED here — this
+            // string must change if the backend's LLM_MODEL secret moves off
+            // OpenAI (same rule as the consent dialogs it summarizes). P-11:
+            // also states the on-device-OCR fact — scanning a photo/PDF reads
+            // it on THIS iPhone even when cloud AI is the chosen/only path;
+            // only the extracted text (never the image) can reach the cloud.
             body: "On supported iPhones you choose where processing happens \u{2014} on-device by default "
-                + "(never leaves), or cloud AI (via Cloudflare) if you prefer; other iPhones always use "
-                + "the cloud. It isn\u{2019}t stored in your account afterward, and we ask permission "
-                + "before the first cloud send."
+                + "(never leaves), or cloud AI (sent to OpenAI through our Cloudflare gateway) if you "
+                + "prefer; other iPhones always use the cloud. When you scan a photo or PDF instead of "
+                + "pasting text, it\u{2019}s always read on this iPhone first \u{2014} only the extracted "
+                + "text can be sent to the cloud, never the image itself. Nothing is stored in your "
+                + "account afterward, and we ask permission before the first cloud send."
         ),
         PrivacyPoint(
             id: "delete",

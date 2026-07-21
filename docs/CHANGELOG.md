@@ -4,6 +4,31 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [1.2] — 2026-07-21
+
+### Attachments & scan-to-add (2026-07-21)
+
+#### Added
+- **Per-booking attachments (photos & PDFs):** attach files to any itinerary item — a boarding pass, hotel voucher, or museum tickets live with the booking they belong to. Formats: JPEG/PNG/HEIC (re-encoded, ≈2400px quality 0.85 for crisp barcodes) and PDF (stored verbatim). Visible to all trip members; only uploader or organizer can delete. Attachments sync alongside items and cache locally after first view; items within the next 7 days prefetch on trip open (the airport-basement case). Caps: 10 files per item, 10 MB per file.
+- **Scan-to-add for screenshots and PDFs:** turn a booking screenshot or airline PDF into a structured itinerary item — no competitor does this. Progressive OCR across iOS versions: iOS 26+ uses native `RecognizeDocumentsRequest` (on any chip); iOS 17–25 falls back to `VNRecognizeTextRequest`. Extracted text routes through the existing on-device/cloud AI pipeline (on-device by default on iOS 26+ with Apple Intelligence, cloud with named OpenAI consent elsewhere). Batches process serially with progress; unreadable items become friendly skipped rows. After extraction, users can attach the original screenshot or PDF to the created item — the import and its attachment land together, including cloud paths via `createdItemIds`.
+- **Attachment viewing via QuickLook:** full-screen viewer with real file names (no UUID filenames), swipe through multi-attachment items.
+
+#### Changed
+- **Consent dialogs now name OpenAI:** four pre-transmission gates updated (two in paste-import + two in email-address entry). Scan-to-add variants state "the photo or PDF is read on this iPhone and only the extracted text is sent to OpenAI, routed through our Cloudflare gateway"; paste keeps its wording. Paste-import and email-address consent dialogs both name OpenAI concretely (was generic "third-party AI service").
+- **Privacy disclosure updated:** `docs/PRIVACY_DISCLOSURE.md` updated to state the shared `LLM_MODEL` secret fact (paste and email use the same provider) and new dialog wording.
+
+#### Fixed
+- **Attachment cache wiped on sign-out:** `AttachmentStore.removeAll()` fires on `SyncEngine.wipeForSignOut()`, confirmed to cover delete-account (routes through `signOut()`). Cache is marked `.completeFileProtection` at rest (PII/codes) and excluded from backup (server is source of truth).
+- **PDF render-bomb protection:** render pipeline caps to ~12MP hard pixel budget — hostile `/MediaBox` directives render safe, small bitmaps instead of unbounded ones.
+- **Filename sanitization:** control characters stripped, length capped at 120 characters preserving extension.
+- **MainActor data-integrity fix:** `AttachmentService.attach/delete/localFileURL` marked `@MainActor` to prevent SwiftUI-held `ModelContext` mutations off main. Assertion guards catch regressions in tests.
+
+#### Verified
+- Unit test suite: 1008 → 1026 tests, 0 failures, 3 pre-existing skipped.
+- All new suites green: `AttachmentServiceTests` (15), `AttachmentStorageTests` (10), `AttachmentStoreTests` (11), `ItemAttachmentSyncTests` (10), `PDFTextExtractorTests` (1 hostile render), `IngestTextResponseDecodingTests` (2), `PasteImportSheetReviewTests` (4), extended `DTORoundTripTests` (+2), extended `ShareSummaryTests` (+1).
+- Share-link sentinel tests confirm attachments never expose through public payload (structural: `ShareSummary.text(for:)` has no attachment parameter).
+- Backend PRs: [navbytes/backend#17](https://github.com/navbytes/backend/pull/17) (schema + private `item-attachments` bucket, RLS membership-gated); [navbytes/backend#18](https://github.com/navbytes/backend/pull/18) (`ingest-text` returns `createdItemIds` for auto-attach).
+
 ## [1.1] — 2026-07-17
 
 ### UX round — hero covers, Home avatar, profile layout (2026-07-17)

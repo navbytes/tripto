@@ -80,4 +80,27 @@ enum TestFixtures {
         item.details = details
         return item
     }
+
+    /// Release 1.2 (`.claude/company/release-1.2/PLAN.md` C1): kept as tiny
+    /// and boring as the DTO builders above.
+    static func makeItemAttachmentDTO(
+        id: UUID = UUID(),
+        tripId: UUID = UUID(),
+        itemId: UUID = UUID(),
+        fileName: String = "boarding-pass.pdf",
+        contentType: AttachmentContentType = .pdf,
+        byteSize: Int = 12_345,
+        storagePath: String? = nil,
+        createdBy: UUID? = UUID(),
+        createdAt: Date = .now
+    ) -> ItemAttachmentDTO {
+        ItemAttachmentDTO(
+            id: id, tripId: tripId, itemId: itemId, fileName: fileName,
+            contentType: contentType.rawValue, byteSize: byteSize,
+            storagePath: storagePath ?? AttachmentStorage.path(
+                tripId: tripId, itemId: itemId, attachmentId: id, contentType: contentType
+            ),
+            createdBy: createdBy, createdAt: createdAt
+        )
+    }
 }

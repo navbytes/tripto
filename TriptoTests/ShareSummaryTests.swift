@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import Tripto
 
@@ -210,5 +211,49 @@ final class ShareSummaryTests: XCTestCase {
             ShareSummary.text(for: firstWeek), ShareSummary.text(for: secondWeek),
             "changing only the calendar day must change the summary"
         )
+    }
+
+    // MARK: - Release 1.2: attachments must never reach the share payload
+
+    /// `docs/PRODUCT_PLAN.md` §2.1: "Share link never exposes attachments —
+    /// extend the existing `ShareSummary` sentinel tests to pin this."
+    /// `ShareSummary.text(for:)` takes only an `ItineraryItem` — no
+    /// `ItemAttachment`/storage-path parameter exists for it to leak through
+    /// even by accident — so this is a structural guarantee, pinned here the
+    /// same way as every other leak sentinel in this file: plant a
+    /// sentinel-tagged `ItemAttachment` for the item (in a real, if
+    /// unrelated to `ShareSummary`, model container — attachments are a
+    /// separate SwiftData table from `ItineraryItem`, joined only by
+    /// `itemId`, never a property `ItineraryItem` itself carries) and assert
+    /// none of its fields ever surface in the summary text for every
+    /// category, matching this file's own category coverage above.
+    func testShareSummaryNeverIncludesAttachmentFileNamesOrStoragePathsForAnyCategory() throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let context = ModelContext(container)
+
+        for category in ItemCategory.allCases {
+            let tag = category.rawValue.uppercased()
+            let sentinelFileName = "SENTINEL-ATTACHMENT-\(tag)-boarding-pass.pdf"
+            let item = TestFixtures.makeItineraryItem(
+                category: category, title: "\(tag) booking", startsAt: utcInstant(2026, 5, 14, 12, 0), tz: "UTC"
+            )
+            context.insert(item)
+            let attachment = ItemAttachment(
+                dto: TestFixtures.makeItemAttachmentDTO(tripId: item.tripId, itemId: item.id, fileName: sentinelFileName)
+            )
+            context.insert(attachment)
+
+            let output = ShareSummary.text(for: item)
+
+            XCTAssertFalse(
+                output.contains(sentinelFileName),
+                "\(category) share summary must never include an attachment's file name"
+            )
+            XCTAssertFalse(
+                output.contains(attachment.storagePath),
+                "\(category) share summary must never include an attachment's storage path"
+            )
+        }
+        try context.save() // proves the sentinel rows were real, attached SwiftData state, not unused fixtures
     }
 }

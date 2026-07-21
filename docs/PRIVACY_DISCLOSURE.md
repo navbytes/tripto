@@ -95,13 +95,18 @@ picker.
 (including confirmation codes and personal names) is sent to a **third-party
 LLM provider (currently OpenAI)** through **Cloudflare AI Gateway** to extract
 structured booking information. The provider is set by the `LLM_MODEL` env var
-— if you switch providers, update this disclosure. On devices without Apple
-Intelligence, cloud processing is used automatically with no choice offered.
+— **shared by both this path and email import below (one secret, not
+per-path)**, so it always names the same provider on both consent dialogs —
+if you switch providers, update this disclosure AND both in-app dialog
+strings (`PasteImportSheet.swift`, `ImportAddressCard.swift`). On devices
+without Apple Intelligence, cloud processing is used automatically with no
+choice offered.
 
 **All paths:**
 - **Not automatic:** user must explicitly tap "Import" (or choose to paste).
 - **Consent-gated:** before the first cloud send via any route, a dialog
-  discloses third-party processing (on-device path requires no consent).
+  names the provider concretely ("sent to OpenAI, routed through our
+  Cloudflare gateway") — on-device path requires no consent.
 - **Not for training:** OpenAI API data is not used to train or improve models
   (per OpenAI's data-usage terms). Reconfirm if the provider changes. On-device
   processing uses Apple's first-party model and is not used for training.
@@ -117,13 +122,14 @@ Intelligence, cloud processing is used automatically with no choice offered.
 to email processing before the import address is shown. Forwarded emails are
 sent to a **third-party LLM provider (currently OpenAI)** through **Cloudflare
 AI Gateway** (with logs disabled) for booking-extraction. The provider is set
-by the `LLM_MODEL` env var.
+by the `LLM_MODEL` env var — the same secret paste import uses above, so both
+paths always name the same provider.
 
 **Email handling:**
 - **Consent-gated:** address reveal requires affirmative tap on a dialog
-  disclosing "third-party AI service," "Cloudflare gateway," "raw email kept
-  7 days, then deleted," and "codes stay private to trip members"
-  (ImportAddressCard.swift).
+  naming the provider concretely ("processed by OpenAI, routed through our
+  Cloudflare gateway"), "raw email kept 7 days, then deleted," and "codes
+  stay private to trip members" (ImportAddressCard.swift).
 - **Raw email retention:** raw_text and raw_html are purged via pg_cron after
   6 days (≤7d guarantee); metadata (subject, timestamp, status) persists for
   audit.

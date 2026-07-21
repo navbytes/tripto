@@ -205,6 +205,35 @@ final class SyncIssueLifecycleTests: XCTestCase {
         XCTAssertEqual(decoded.displayName, "Meera")
     }
 
+    /// Release 1.2: `.itemAttachments` is single-`id`-keyed like the four
+    /// cases above it (`SyncStore.reenqueueUpsertFromLocalRow`'s own doc
+    /// comment) — the file itself already landed in storage during the
+    /// original `AttachmentService.attach`, so "Try again" on a
+    /// permanently-failed row upsert only needs to resend the metadata row,
+    /// same shape as `PackingItem`/`TripProfile` above.
+    func testReenqueueUpsertFromLocalRowRebuildsAnItemAttachmentUpsert() async throws {
+        let container = AppSchema.makeContainer(inMemory: true)
+        let store = SyncStore(modelContainer: container)
+        let context = ModelContext(container)
+
+        let tripId = UUID()
+        let attachment = ItemAttachment(
+            dto: TestFixtures.makeItemAttachmentDTO(tripId: tripId, fileName: "boarding-pass.pdf")
+        )
+        context.insert(attachment)
+        try context.save()
+
+        let didRetry = try await store.reenqueueUpsertFromLocalRow(rowId: attachment.id, table: .itemAttachments)
+        XCTAssertTrue(didRetry)
+
+        let ops = try await store.pendingOps()
+        XCTAssertEqual(ops.count, 1)
+        XCTAssertEqual(ops.first?.table, .itemAttachments)
+        XCTAssertEqual(ops.first?.tripId, tripId, "an attachment's own tripId is threaded through as its outbox op's tripId")
+        let decoded = try JSONCoding.decoder.decode(ItemAttachmentDTO.self, from: Data(ops[0].payloadJSON.utf8))
+        XCTAssertEqual(decoded.fileName, "boarding-pass.pdf")
+    }
+
     func testReenqueueUpsertFromLocalRowIsANoOpForCompositeKeyTables() async throws {
         let store = makeStore()
         let didRetry = try await store.reenqueueUpsertFromLocalRow(rowId: UUID(), table: .itemAssignees)

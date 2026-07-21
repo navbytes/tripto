@@ -216,7 +216,8 @@ actor SyncEngine {
 
     /// Sign-out: wipe local state but do not re-pull (there's no session to
     /// pull with, and a stray pull mid-sign-out could race a subsequent
-    /// sign-in). `AuthManager.signOut()` calls this.
+    /// sign-in). `AuthManager.signOut()` calls this (and the delete-account
+    /// flow routes through the same wipe).
     func wipeForSignOut() async {
         await stopAllRealtime()
         try? await store.wipeAll()
@@ -225,6 +226,11 @@ actor SyncEngine {
         // PLAN-signature-layer.md §D6: a widget/Live Activity/Spotlight
         // result must never keep showing the previous account's trip.
         await snapshotWriter.clear()
+        // Security audit S-1: `wipeAll` above clears the `ItemAttachment`
+        // ROWS, but the cached bytes on disk (`AttachmentStore`) are a
+        // separate filesystem store `SyncStore` never touches — must not
+        // survive sign-out on a shared device.
+        AttachmentStore.removeAll()
     }
 }
 

@@ -637,4 +637,80 @@ final class DTORoundTripTests: XCTestCase {
         let redecoded = try JSONCoding.decoder.decode(TripDTO.self, from: reencoded)
         XCTAssertEqual(redecoded, dto)
     }
+
+    // MARK: - Release 1.2: `item_attachments`
+
+    func testItemAttachmentDTODecodesAndRoundTripsThroughTheModel() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let itemId = UUID()
+        let createdBy = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "item_id": "\(itemId.uuidString)",
+          "file_name": "boarding-pass.pdf",
+          "content_type": "application/pdf",
+          "byte_size": 245760,
+          "storage_path": "\(tripId.uuidString.lowercased())/\(itemId.uuidString.lowercased())/\(id.uuidString.lowercased()).pdf",
+          "created_by": "\(createdBy.uuidString)",
+          "created_at": "2026-07-08T12:34:56.789+00:00"
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ItemAttachmentDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(dto.fileName, "boarding-pass.pdf")
+        XCTAssertEqual(dto.contentType, "application/pdf")
+        XCTAssertEqual(dto.byteSize, 245_760)
+        XCTAssertEqual(dto.createdBy, createdBy)
+
+        // DTO -> Model -> DTO
+        let model = ItemAttachment(dto: dto)
+        XCTAssertEqual(model.id, id)
+        XCTAssertEqual(model.contentType, .pdf)
+        XCTAssertEqual(model.toDTO(), dto)
+
+        // DTO -> wire JSON -> DTO
+        let reencoded = try JSONCoding.encoder.encode(dto)
+        let redecoded = try JSONCoding.decoder.decode(ItemAttachmentDTO.self, from: reencoded)
+        XCTAssertEqual(redecoded, dto)
+    }
+
+    /// The uploader's account can be deleted after the fact (`ON DELETE SET
+    /// NULL`, the same F3 survivorship convention as
+    /// `ItineraryItemDTO`/`PackingItemDTO`'s own `createdBy`) — a row must
+    /// still decode with `created_by: null`, and `apply(_:)` (the pull-path
+    /// mutation of an already-existing local row) must carry that through
+    /// rather than keeping a stale non-nil value.
+    func testItemAttachmentDTODecodesNullCreatedByAndApplyOverwritesAnExistingRowToNil() throws {
+        let id = UUID()
+        let tripId = UUID()
+        let itemId = UUID()
+        let json = """
+        {
+          "id": "\(id.uuidString)",
+          "trip_id": "\(tripId.uuidString)",
+          "item_id": "\(itemId.uuidString)",
+          "file_name": "voucher.jpg",
+          "content_type": "image/jpeg",
+          "byte_size": 512,
+          "storage_path": "\(tripId.uuidString)/\(itemId.uuidString)/\(id.uuidString).jpg",
+          "created_by": null,
+          "created_at": "2026-07-08T12:34:56.789+00:00"
+        }
+        """
+
+        let dto = try JSONCoding.decoder.decode(ItemAttachmentDTO.self, from: Data(json.utf8))
+        XCTAssertNil(dto.createdBy)
+
+        let model = ItemAttachment(dto: dto)
+        XCTAssertNil(model.createdBy)
+
+        let existing = ItemAttachment(
+            dto: TestFixtures.makeItemAttachmentDTO(id: id, tripId: tripId, itemId: itemId, createdBy: UUID())
+        )
+        existing.apply(dto)
+        XCTAssertNil(existing.createdBy, "apply must overwrite a real prior uploader down to nil, not skip a falsy-looking value")
+    }
 }
