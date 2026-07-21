@@ -66,6 +66,37 @@ enum OCRService {
         return try await extractText(from: cgImage, orientation: CGImagePropertyOrientation(image.imageOrientation))
     }
 
+    /// S-2 (security review, MEDIUM): worst-case (square) source bounds a
+    /// picked photo is decoded at before OCR — ~12MP, matching
+    /// `PDFTextExtractor`'s own render budget (same order of magnitude, one
+    /// ceiling shared conceptually across both scan-to-add input paths).
+    /// Comfortably legible for a photographed boarding pass/confirmation —
+    /// Vision's recognizer needs the TEXT to be sharp, not the whole frame
+    /// to be huge.
+    static let maxDecodePixelSize: CGFloat = 3464
+
+    /// Decodes `data` directly to a bounded `CGImage` via ImageIO's own
+    /// thumbnail path (`CGImageSourceCreateThumbnailAtIndex`) — never a
+    /// full-resolution `UIImage(data:)` decode. A hostile/huge source image
+    /// (e.g. a crafted multi-hundred-megapixel JPEG/HEIC) must never fully
+    /// decode into memory just to run OCR on it.
+    /// `kCGImageSourceCreateThumbnailWithTransform` bakes the EXIF
+    /// orientation into the returned pixels (same technique
+    /// `ImageProcessing.downsampledJPEG` uses for attachments) — the result
+    /// is already upright, so callers should pass it to
+    /// `extractText(from:orientation:)` with the default `.up`, never derive
+    /// an orientation from the original source separately.
+    static func decodedImage(from data: Data, maxPixelSize: CGFloat = maxDecodePixelSize) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
     @available(iOS 26.0, *)
     private static func extractWithDocumentRecognition(
         _ cgImage: CGImage, orientation: CGImagePropertyOrientation

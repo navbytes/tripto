@@ -75,17 +75,35 @@ enum PDFTextExtractor {
         return pageTexts.joined(separator: "\n\n")
     }
 
-    /// Renders a PDF page to a bitmap at 2x its own point size (PDFKit page
-    /// bounds are in points, 72/inch) — a ~144dpi equivalent, generous enough
-    /// for OCR without the memory cost of going higher. The renderer's format
-    /// scale is pinned to 1 so the output size is exactly `bounds * 2`
-    /// regardless of the running device's screen scale — deterministic, and
-    /// avoids an unnecessary further 2x/3x multiplication on a Retina device.
+    /// S-2 (security review, MEDIUM): a hostile/malformed PDF can declare an
+    /// enormous `/MediaBox` (a poster-sized page, or worse) — `render` used
+    /// to size its bitmap at `bounds * 2` with no ceiling, so a crafted page
+    /// could demand a multi-gigabyte allocation and get the app jetsammed.
+    /// ~12MP hard budget, chosen to match the same order of magnitude as
+    /// `OCRService.maxDecodePixelSize`'s own bound for the sibling
+    /// (picked-photo) OCR input path.
+    private static let maxRenderPixels: CGFloat = 12_000_000
+
+    /// Renders a PDF page to a bitmap at up to 2x its own point size (PDFKit
+    /// page bounds are in points, 72/inch — 2x is a ~144dpi equivalent,
+    /// generous for OCR), but NEVER above `maxRenderPixels` regardless of how
+    /// large the page's own `MediaBox` claims to be — the scale is shrunk
+    /// (never enlarged) to fit the budget first, so a hostile page always
+    /// renders a small, safe bitmap instead of allocating unbounded memory.
+    /// The renderer's format scale is pinned to 1 so the output size is
+    /// exactly what this method computes, regardless of the running device's
+    /// screen scale — deterministic, and avoids an unnecessary further
+    /// 2x/3x multiplication on a Retina device.
     private static func render(_ page: PDFPage) -> CGImage? {
         let bounds = page.bounds(for: .mediaBox)
-        let scale: CGFloat = 2
+        let pageArea = bounds.width * bounds.height
+        guard pageArea > 0 else { return nil }
+
+        let preferredScale: CGFloat = 2
+        let maxScaleForBudget = (maxRenderPixels / pageArea).squareRoot()
+        let scale = min(preferredScale, maxScaleForBudget)
         let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
-        guard size.width > 0, size.height > 0 else { return nil }
+        guard size.width >= 1, size.height >= 1 else { return nil }
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

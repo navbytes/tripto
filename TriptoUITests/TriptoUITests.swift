@@ -1152,6 +1152,37 @@ final class TriptoUITests: XCTestCase {
         attachScreenshot(named: "booking-detail-original-pass", of: app)
     }
 
+    // MARK: - Release 1.2: attachment add entry point (`AttachmentStrip`).
+    // Everything past this dialog (`PhotosPicker`/`.fileImporter`) is a
+    // system sheet XCUITest cannot drive at all (PLAN.md's own note) — this
+    // only proves the in-app half (the "Add" button + its confirmation
+    // dialog) is wired end to end. Nothing exercised `AttachmentStrip` at
+    // all before this test.
+
+    /// Organizer role (the `-uitestAutoSignIn` fixed user seeds as the
+    /// Lisbon trip's organizer — `DemoSeeder`), so `AttachmentStrip`'s "Add"
+    /// button renders even though the seeded outbound flight has no
+    /// attachments yet (`canAdd` alone is enough to show the section).
+    /// Tapping it must offer exactly the two picker entry points named in
+    /// `AttachmentStrip`'s `confirmationDialog`.
+    func testAttachmentAddButtonOffersPhotoAndPDFFileOptions() {
+        let app = launch(["-uitestOpenBookingDetail"])
+        XCTAssertTrue(app.navigationBars["Booking details"].waitForExistence(timeout: 30), "Booking detail never appeared")
+
+        let addButton = app.buttons["Add attachment"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 10), "attachment Add button never appeared for the organizer")
+        XCTAssertTrue(waitHittable(addButton), "attachment Add button never settled on screen")
+        addButton.tap()
+
+        // Not asserting on "Cancel" here — this confirmationDialog's cancel
+        // button resolves to a different automation type on-device than a
+        // plain `Button` (observed on the iOS 27 sim runtime), which is a
+        // platform/XCUITest quirk unrelated to what this test pins.
+        let photoOption = app.buttons["Photo"]
+        XCTAssertTrue(photoOption.waitForExistence(timeout: 5), "Photo option never appeared in the add-attachment dialog")
+        XCTAssertTrue(app.buttons["PDF file"].exists, "PDF file option never appeared in the add-attachment dialog")
+    }
+
     // MARK: - P7 refresh: New-trip generated gradient cover (P6.5)
 
     /// P6.5's generated gradient covers (`CoverGradientGenerator`, mixed in

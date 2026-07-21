@@ -26,13 +26,29 @@ enum AttachmentStore {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// Creates the cache directory if needed and marks it excluded from
+    /// iCloud/iTunes backup (security audit S-1, ratified: the server is the
+    /// source of truth for every attachment; this cache is re-downloadable,
+    /// so it has no business riding along in a device backup). Idempotent —
+    /// `createDirectory(withIntermediateDirectories: true)` no-ops if the
+    /// directory already exists, and re-setting the resource value on every
+    /// `write` is cheap and self-healing if it's ever lost (e.g. the
+    /// directory was recreated).
+    private static func ensureDirectory() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var dir = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? dir.setResourceValues(values)
+    }
+
     /// Writes (or overwrites) the cached copy and returns its URL.
     /// `.completeFileProtection` at rest — same posture as
     /// `TripArchiveExporter.writeTempFile` for the same reason: these bytes
     /// carry PII/confirmation codes (boarding passes, hotel vouchers).
     @discardableResult
     static func write(_ data: Data, id: UUID, contentType: AttachmentContentType) throws -> URL {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try ensureDirectory()
         let url = fileURL(id: id, contentType: contentType)
         try data.write(to: url, options: [.atomic, .completeFileProtection])
         return url
@@ -43,6 +59,18 @@ enum AttachmentStore {
     /// (nothing references its id anymore, so it's never rendered again).
     static func remove(id: UUID, contentType: AttachmentContentType) {
         try? FileManager.default.removeItem(at: fileURL(id: id, contentType: contentType))
+    }
+
+    /// Security audit S-1: the whole cache is per-account bytes (boarding
+    /// passes, vouchers) that must not survive sign-out on a shared device —
+    /// `SyncStore.wipeAll`/`SyncEngine.wipeForSignOut` already clear every
+    /// mirrored row, but rows are not bytes, so this is the matching
+    /// filesystem half. Best-effort (mirrors `remove(id:contentType:)`); a
+    /// leftover directory with no matching local row is never rendered
+    /// (`AttachmentStrip` only ever looks up by an `ItemAttachment.id` that
+    /// exists locally) and self-heals on the next `write`.
+    static func removeAll() {
+        try? FileManager.default.removeItem(at: directory)
     }
 
     // ponytail: no eviction/size ceiling — the 10 files/item x 10MB cap

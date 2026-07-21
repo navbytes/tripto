@@ -122,4 +122,41 @@ final class PDFTextExtractorTests: XCTestCase {
             XCTFail("expected a PDFTextExtractor.PDFError, got \(error)")
         }
     }
+
+    /// S-2 (security review, MEDIUM): a hostile PDF can declare an enormous
+    /// `/MediaBox` (e.g. a poster-sized page) — before the fix, `render`
+    /// sized its bitmap at `bounds * 2` with NO ceiling, so a page like this
+    /// would have demanded a multi-gigabyte allocation. `UIGraphicsPDFRenderer`
+    /// itself is cheap to construct at an oversized `bounds` (it emits a
+    /// VECTOR PDF, not a rasterized canvas — only setting the page's
+    /// `/MediaBox`, not actually allocating pixels), so this fixture is safe
+    /// to build even though it's testing a memory-bomb fix: only
+    /// `PDFTextExtractor`'s OWN page-render step (private, reached only
+    /// through the scanned-page fallback) is what must stay bounded.
+    ///
+    /// Can't assert the exact clamped pixel dimensions from outside (`render`
+    /// is `private`, returns no observable size) — proves the fix
+    /// behaviorally instead: completing quickly is only possible if the
+    /// bitmap stayed small; the old unbounded code would have tried a
+    /// ~1.6-billion-pixel (6.4GB RGBA) allocation for this same page.
+    func testHostileMediaBoxRenderStaysBoundedInsteadOfHangingOrCrashing() async throws {
+        let hostileBounds = CGRect(x: 0, y: 0, width: 20_000, height: 20_000) // unclamped 2x → 40,000×40,000px
+        let renderer = UIGraphicsPDFRenderer(bounds: hostileBounds)
+        let pdf = renderer.pdfData { context in
+            context.beginPage()
+            // A tiny raster mark (not real glyphs) keeps the text layer
+            // empty, forcing the scanned/render branch this fix guards —
+            // `makeScannedPDF` above draws a much smaller page; this needs
+            // the hostile bounds instead.
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 10, height: 10))
+        }
+
+        let start = Date()
+        let text = try await PDFTextExtractor.extractText(from: pdf)
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertLessThan(elapsed, 15, "a clamped render completes in seconds; an unbounded one would hang/crash on the allocation")
+        XCTAssertTrue(text.isEmpty, "a blank oversized page has nothing to recognize")
+    }
 }

@@ -14,6 +14,27 @@ import XCTest
 /// risk a genuine stray network call once its own debounced push loop fires
 /// (see `SyncEnginePushLoopTests`'s doc comment on that exact risk), which a
 /// hermetic suite must not do for a validly-encoded payload.
+///
+/// W3 review H1 fix: `AttachmentService.attach`/`delete`/`localFileURL` are
+/// now `@MainActor`. Every test method here is a plain (non-`@MainActor`)
+/// `async throws` XCTest method, so calling `try await service.attach(...)`
+/// genuinely exercises the cross-actor hop into those `@MainActor` methods —
+/// and `MainActor.assertIsolated()` inside each of them (see
+/// `AttachmentService`'s own doc comment) means EVERY test in this file, not
+/// just one dedicated case, traps immediately if that isolation ever
+/// regresses. Tried switching `makeContext()` to the container's real
+/// `mainContext` (closer still to production's `@Environment(\.modelContext)`)
+/// to close the reviewer's own diagnosed blind spot ("a fresh context has no
+/// main-thread affinity") — reverted: a freshly-created in-memory
+/// `ModelContainer`'s `mainContext`, accessed from a `Task` that just hopped
+/// onto `MainActor` itself, deadlocks in this Xcode/SDK's XCTest host (every
+/// context-touching test timed out and the runner restarted, confirmed by
+/// the pure `sanitizedFileName` tests below — no context involved — passing
+/// instantly). The isolation fix itself doesn't need `mainContext`
+/// specifically to be proven: `@MainActor` on the service methods is what's
+/// under test, and a plain, freestanding `ModelContext` has no thread
+/// affinity of its own either way, so running it via the now-forced
+/// actor-hop is a faithful enough exercise of the real bug's mechanism.
 private final class StubAttachmentBucket: AttachmentBucketAccessing, @unchecked Sendable {
     private(set) var uploadedPath: String?
     private(set) var uploadedData: Data?
@@ -79,6 +100,8 @@ final class AttachmentServiceTests: XCTestCase {
         XCTAssertEqual(attachment.createdBy, userId)
         XCTAssertEqual(attachment.itemId, item.id)
         XCTAssertEqual(attachment.tripId, item.tripId)
+        // R-L1's rollback must never fire on the happy path.
+        XCTAssertTrue(stub.removedPaths.isEmpty, "a successful attach must never remove the object it just uploaded")
 
         let rows = try context.fetch(FetchDescriptor<ItemAttachment>())
         XCTAssertEqual(rows.count, 1)
@@ -182,6 +205,52 @@ final class AttachmentServiceTests: XCTestCase {
                 "a failed upload must leave no local row — the storage write happens before the SwiftData insert"
             )
         }
+    }
+
+    // MARK: - attach() filename sanitization (S-3)
+
+    /// `fileName` is member-controlled (a `.fileImporter` pick's name is
+    /// whatever's on the picking device) and renders verbatim in dialogs,
+    /// the VoiceOver label, and the QuickLook nav title — control characters
+    /// could break single-line rendering/announcement.
+    func testSanitizedFileNameStripsControlCharacters() {
+        XCTAssertEqual(
+            AttachmentService.sanitizedFileName("bad\nname\t.pdf"), "badname.pdf",
+            "newlines/tabs must never survive into a rendered file name"
+        )
+    }
+
+    func testSanitizedFileNameFallsBackWhenEverythingWasStripped() {
+        XCTAssertEqual(AttachmentService.sanitizedFileName("\n\t"), "attachment")
+    }
+
+    func testSanitizedFileNameCapsLengthWhilePreservingTheExtension() {
+        let huge = String(repeating: "a", count: 300) + ".pdf"
+        let sanitized = AttachmentService.sanitizedFileName(huge)
+        XCTAssertLessThanOrEqual(sanitized.count, 120)
+        XCTAssertTrue(sanitized.hasSuffix(".pdf"), "truncation must not eat the extension")
+    }
+
+    func testSanitizedFileNameLeavesAnOrdinaryNameUntouched() {
+        XCTAssertEqual(AttachmentService.sanitizedFileName("boarding-pass.pdf"), "boarding-pass.pdf")
+    }
+
+    /// End-to-end: `attach` actually calls the sanitizer, not just a
+    /// unit-level pure-function proof.
+    func testAttachSanitizesTheStoredFileName() async throws {
+        let context = makeContext()
+        let stub = StubAttachmentBucket()
+        let service = AttachmentService(modelContext: context, syncEngine: nil, uploaderUserId: UUID(), bucket: stub)
+        let item = TestFixtures.makeItineraryItem(startsAt: .now)
+        context.insert(item)
+        try context.save()
+
+        let attachment = try await service.attach(
+            data: Data([0x25]), contentType: .pdf, fileName: "evil\nname.pdf", to: item
+        )
+        defer { AttachmentStore.remove(id: attachment.id, contentType: .pdf) }
+
+        XCTAssertEqual(attachment.fileName, "evilname.pdf")
     }
 
     // MARK: - delete()

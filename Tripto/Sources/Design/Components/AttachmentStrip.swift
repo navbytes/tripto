@@ -28,6 +28,9 @@ struct AttachmentStrip: View {
     @State private var loadingAttachmentId: UUID?
     @State private var previewTarget: AttachmentPreviewItem?
     @State private var attachmentPendingDelete: ItemAttachment?
+    /// UX-13: toggled, never read — `.sensoryFeedback` trigger, same
+    /// convention as `BookingDetailView.didDeleteItem`.
+    @State private var didDeleteAttachment = false
 
     init(item: ItineraryItem, myRole: TripRole?, myUserId: UUID?, toast: Binding<String?>) {
         self.item = item
@@ -56,6 +59,8 @@ struct AttachmentStrip: View {
         return myRole == .organizer || createdBy == myUserId
     }
 
+    private var atCap: Bool { attachments.count >= AttachmentService.maxPerItem }
+
     private var service: AttachmentService {
         AttachmentService(modelContext: modelContext, syncEngine: syncEngine, uploaderUserId: myUserId)
     }
@@ -67,6 +72,17 @@ struct AttachmentStrip: View {
                     .font(Typo.body(12, weight: .bold))
                     .foregroundStyle(Palette.slate)
                     .tracking(0.5)
+
+                // UX-8 (BUILD_PLAN.md §6.6: "empty screens are invitations,
+                // not mood") — the empty-but-addable state used to render
+                // just the header + Add pill with no explanation, unlike
+                // this screen's own TRIP NOTE sibling (`notesBlock`), which
+                // always names what to add.
+                if attachments.isEmpty && canAdd {
+                    Text("Add a boarding pass, voucher, or ticket \u{2014} anyone on the trip can see it.")
+                        .font(Typo.body())
+                        .foregroundStyle(Palette.slate)
+                }
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Spacing.md) {
@@ -113,6 +129,10 @@ struct AttachmentStrip: View {
                     Text("This removes \u{201C}\(attachmentPendingDelete.fileName)\u{201D} for everyone on the trip.")
                 }
             }
+            // UX-13: matches `BookingDetailView`'s own warning haptic on
+            // its item-delete confirm (`didDeleteItem`) — same vocabulary
+            // (`Design/Motion.swift`), same "destructive confirm" tier.
+            .sensoryFeedback(Haptics.warning, trigger: didDeleteAttachment)
         }
     }
 
@@ -144,6 +164,41 @@ struct AttachmentStrip: View {
                 }
             }
         }
+        .overlay(alignment: .topTrailing) {
+            // UX-3: the contextMenu above has no visible affordance at all
+            // (long-press-only); this adds an always-visible one without
+            // removing that menu.
+            if canDelete(attachment) {
+                deleteBadge(for: attachment)
+            }
+        }
+    }
+
+    /// Deliberately smaller than this screen's usual 44pt tap-target floor:
+    /// at 64pt thumbnails spaced `Spacing.md` (12pt) apart, a full 44pt
+    /// free-floating corner target would overlap the next thumbnail's own
+    /// tap area. Sized like the platform's own dense-list remove badges
+    /// (Photos multi-select, Safari tab-close chips) — `.padding`+
+    /// `.contentShape` still widens the tap area well past the visible
+    /// glyph. VoiceOver is unaffected by the smaller visual/tap size (focus
+    /// + double-tap-anywhere, not precision pointing), and the fully-sized
+    /// `contextMenu` row above remains the robust affordance either way.
+    private func deleteBadge(for attachment: ItemAttachment) -> some View {
+        Button {
+            attachmentPendingDelete = attachment
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Palette.rose, in: Circle())
+                .overlay { Circle().stroke(Palette.paper, lineWidth: 1.5) }
+        }
+        .buttonStyle(.plain)
+        .padding(6)
+        .contentShape(Circle())
+        .offset(x: 8, y: -8)
+        .accessibilityLabel("Delete \(attachment.fileName)")
     }
 
     /// "Attachment, boarding pass dot pdf" — VoiceOver reads a literal "."
@@ -160,15 +215,24 @@ struct AttachmentStrip: View {
             HStack(spacing: Spacing.xs) {
                 if isUploading {
                     ProgressView().tint(Palette.onAmber)
-                } else {
+                } else if !atCap {
                     Image(systemName: "plus")
                 }
-                Text("Add")
+                // UX-6/UX-7: the cap is pre-surfaced as a short "10/10"
+                // caption right on the pill (matching PasteImportSheet's
+                // own busy-label precedent, "Import" -> "Importing…")
+                // rather than only failing after a tap.
+                Text(addButtonLabel)
             }
         }
         .buttonStyle(.primaryCapsule)
-        .disabled(isUploading)
-        .accessibilityLabel("Add attachment")
+        .disabled(isUploading || atCap)
+        .accessibilityLabel(atCap ? "Add attachment, limit reached" : "Add attachment")
+    }
+
+    private var addButtonLabel: String {
+        if atCap { return "\(AttachmentService.maxPerItem)/\(AttachmentService.maxPerItem)" }
+        return isUploading ? "Adding\u{2026}" : "Add"
     }
 
     // MARK: - Add flow
@@ -242,6 +306,10 @@ struct AttachmentStrip: View {
     }
 
     private func delete(_ attachment: ItemAttachment) {
+        // UX-13: fires the moment the destructive confirm is tapped, same
+        // "instant feedback on confirm, not on eventual async completion"
+        // timing as `BookingDetailView.deleteItem`'s own `didDeleteItem`.
+        didDeleteAttachment.toggle()
         Task {
             do {
                 try await service.delete(attachment)
