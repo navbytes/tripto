@@ -6,6 +6,11 @@
   "routes": [
     { "pattern": "tripto.navbytes.io", "custom_domain": true }
   ],
+  // Brand/SEO images (og card + touch icon) are bundled into the Worker as
+  // binary Data modules — regenerate them with scripts/generate-assets.mjs.
+  "rules": [
+    { "type": "Data", "globs": ["**/*.jpg", "**/*.png"], "fallthrough": false }
+  ],
   "vars": {
     "SUPABASE_URL": "https://qgtveaqukvbtyunupzhn.supabase.co",
     "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_4x21OrhJWtnB1tDrhD9ueA_79p98yN-",

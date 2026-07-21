@@ -13,6 +13,17 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 #### Changed
 - **Packing checklist checkboxes now meet the 44pt tap floor** (shared component — paste-import inherits the fix); generation failures offer an in-place "Try again" instead of a dead end.
 
+### Website: "unicorn mode" landing redesign + SEO (2026-07-21)
+
+#### Added
+- **Landing page redesign (tripto.navbytes.io):** loud startup energy — night-violet hero with pink→purple→cyan gradients, sticker pills, a pure-CSS phone mockup, marquee strip, neo-brutalist feature cards, 3-step how-it-works, manifesto pull-quote, and a native `<details>` FAQ. Still zero JavaScript, strict CSP, system fonts only; all motion behind `prefers-reduced-motion`, small-text accents darkened to hold AA contrast.
+- **SEO surface:** canonical URLs, Open Graph + Twitter cards with a generated 1200×630 `og.jpg`, JSON-LD `@graph` (Organization, WebSite, WebPage, MobileApplication, FAQPage mirroring the visible FAQ), `robots.txt` (disallows `/t/` + `/join/`), `sitemap.xml`, `llms.txt`, SVG favicon + touch icon. Privacy page picks up the brand hero, meta description, and canonical.
+- **Asset pipeline:** `web/share-worker/scripts/generate-assets.mjs` renders the social card + touch icon via headless Chromium; images bundle into the Worker as wrangler `Data` modules.
+
+#### Unchanged
+- Token share pages (`/t/`, `/join/`) keep their calm dusk look, `noindex`/`no-store` posture, and sanitized payload — the redesign touches marketing surfaces only.
+>>>>>>> origin/main
+
 ### Suggest a plan + on-device polish (2026-07-21)
 
 #### Added

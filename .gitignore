@@ -32,3 +32,6 @@ __pycache__/
 web/**/.dev.vars
 web/**/.env
 web/**/.env.*
+
+# Node (workers under web/)
+node_modules/
