@@ -22,7 +22,6 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 #### Unchanged
 - Token share pages (`/t/`, `/join/`) keep their calm dusk look, `noindex`/`no-store` posture, and sanitized payload — the redesign touches marketing surfaces only.
->>>>>>> origin/main
 
 ### Suggest a plan + on-device polish (2026-07-21)
 
