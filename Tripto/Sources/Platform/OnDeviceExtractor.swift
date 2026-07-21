@@ -174,6 +174,22 @@ struct GenerablePackingResult: Equatable {
     var items: [GenerablePackingItem]
 }
 
+/// Packing SUGGESTIONS (PLAN.md ai-garnish) — no `isPackingList` gate (unlike
+/// `GenerablePackingResult` above): there is no source text to judge as
+/// "a packing list or not," the model is asked to generate new items from
+/// the trip's own context instead. Same `GenerablePackingItem` vocabulary,
+/// so `OnDeviceExtractor.toRaw(_ item: GenerablePackingItem)` below already
+/// converts this result's items too.
+@available(iOS 26.0, *)
+@Generable
+struct GenerablePackingSuggestions: Equatable {
+    @Guide(
+        description: "One entry per suggested packing item this trip doesn't already have. Empty if nothing else is needed.",
+        .maximumCount(20)
+    )
+    var items: [GenerablePackingItem]
+}
+
 // MARK: - Extractor
 
 @available(iOS 26.0, *)
@@ -252,6 +268,59 @@ enum OnDeviceExtractor {
         return response.content.items.map(Self.toRaw)
     }
 
+    // MARK: - Trip summary ("Catch me up")
+
+    /// No `@Generable` schema here (unlike every extraction above) — this is
+    /// prose for a person to read, not structured data the app parses, so
+    /// it uses `respond(to:)`'s plain-`String`-generating overload. `context`
+    /// is `TripPromptContext.render(...)`'s output (`Models/
+    /// TripPromptContext.swift`) — the ONLY trip-derived input, passed as
+    /// `respond(to:)`'s prompt argument exactly like `extractItinerary`/
+    /// `extractPacking` above (R4 §5's hard security boundary: instructions
+    /// stay a fixed string, data only ever arrives as the prompt).
+    enum SummaryOutcome {
+        case success(String)
+        case failure
+    }
+
+    static func summarizeTrip(context: String) async -> SummaryOutcome {
+        let session = LanguageModelSession(instructions: Self.summaryInstructions)
+        do {
+            let response = try await session.respond(to: context, options: GenerationOptions(sampling: .greedy))
+            return .success(response.content)
+        } catch {
+            logDebug("OnDeviceExtractor: summarizeTrip failed: \(error)")
+            return .failure
+        }
+    }
+
+    // MARK: - Packing suggestions
+
+    /// `context` carries the trip's own details PLUS its existing packing
+    /// labels (`TripPromptContext.render(existingPackingLabels:)`) so the
+    /// model has something to avoid repeating — the real duplicate guard is
+    /// still client-side (`Features/Trip/PackingSuggestions.dedupe`), never
+    /// trusted from the model alone.
+    enum PackingSuggestionOutcome {
+        case success([RawExtractedPackingItem])
+        case failure
+    }
+
+    static func suggestPacking(context: String) async -> PackingSuggestionOutcome {
+        let session = LanguageModelSession(instructions: Self.packingSuggestionInstructions)
+        do {
+            let response = try await session.respond(
+                to: context,
+                generating: GenerablePackingSuggestions.self,
+                options: GenerationOptions(sampling: .greedy)
+            )
+            return .success(response.content.items.map(Self.toRaw))
+        } catch {
+            logDebug("OnDeviceExtractor: suggestPacking failed: \(error)")
+            return .failure
+        }
+    }
+
     private static func toRaw(_ item: GenerableItineraryItem) -> RawExtractedItem {
         RawExtractedItem(
             category: item.category.rawValue,
@@ -302,6 +371,21 @@ enum OnDeviceExtractor {
         You extract a packing list from text a user pasted into a trip-planning app on their own \
         device, if the text is or contains one. Use ONLY items present in the text; never invent \
         items. If the text is not a packing list, set isPackingList to false and return no items.
+        """
+
+    private static let summaryInstructions = """
+        You write a short "catch me up" summary of a trip for someone opening a trip-planning app on \
+        their own device. Using ONLY the trip details provided, summarize the destination and dates, \
+        who's going, and the key upcoming bookings and activities in 3-4 short sentences a busy \
+        traveler can skim in a few seconds. Do not invent any detail that isn't in the provided trip \
+        details.
+        """
+
+    private static let packingSuggestionInstructions = """
+        You suggest practical packing items for a trip planned in a trip-planning app on the user's \
+        own device. Given the trip's details and the items already on its packing list, suggest \
+        additional items that make sense for this trip. Never repeat or rename an item already on the \
+        list. Only suggest concrete physical items to pack, not advice or reminders.
         """
 }
 

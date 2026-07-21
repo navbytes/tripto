@@ -121,11 +121,6 @@ struct PasteImportSheet: View {
     /// here means "we couldn't check for X, not that there wasn't any."
     @State private var partialFailureNote: String?
 
-    /// Checkbox container + its checkmark glyph, and the group-tag icon —
-    /// see the shared `@ScaledMetric` recipe used throughout Features/Trip.
-    @ScaledMetric(relativeTo: .body) private var checkboxSide: CGFloat = 24
-    @ScaledMetric(relativeTo: .body) private var checkmarkSize: CGFloat = 12
-    @ScaledMetric(relativeTo: .body) private var groupIconSize: CGFloat = 10
     /// `processingModeRow`'s trailing chevron — same recipe as
     /// `ZonePicker`'s own chevron (the row this one's shape mirrors).
     @ScaledMetric(relativeTo: .caption) private var processingChevronSize: CGFloat = 11
@@ -186,13 +181,6 @@ struct PasteImportSheet: View {
     /// this sheet had none before; attach failures on EITHER route now
     /// surface here rather than failing silently.
     @State private var toast: String?
-
-    private struct PackingCandidate: Identifiable {
-        let id = UUID()
-        var label: String
-        let groupKey: PackingGroupKey
-        var isChecked = true
-    }
 
     /// Captured once a batch (photo/PDF) import creates its first itinerary
     /// item, on EITHER route (UX-1) — `nil` only for a text-paste import
@@ -697,7 +685,7 @@ struct PasteImportSheet: View {
 
                 VStack(spacing: Spacing.sm) {
                     ForEach($packingCandidates) { $candidate in
-                        packingCandidateRow($candidate)
+                        PackingCandidateRow(candidate: $candidate)
                     }
                 }
             }
@@ -773,59 +761,6 @@ struct PasteImportSheet: View {
         .padding(Spacing.md)
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
         .accessibilityHint("Keeps a copy of the imported file on this item")
-    }
-
-    private func packingCandidateRow(_ candidate: Binding<PackingCandidate>) -> some View {
-        HStack(spacing: Spacing.md) {
-            Button {
-                candidate.wrappedValue.isChecked.toggle()
-            } label: {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(candidate.wrappedValue.isChecked ? CategoryColor.activity.fg : Color.clear)
-                    .frame(width: checkboxSide, height: checkboxSide)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(candidate.wrappedValue.isChecked ? Color.clear : Palette.mist, lineWidth: 2)
-                    }
-                    .overlay {
-                        if candidate.wrappedValue.isChecked {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: checkmarkSize, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-            }
-            .buttonStyle(.plain)
-            // This checkbox had no accessible label at all — VoiceOver read
-            // either nothing or the checkmark glyph's own SF Symbol name,
-            // depending on state. Mirrors `PackingListView`'s
-            // reference-standard checkbox: label + checked state as a
-            // value, not baked into the label.
-            .accessibilityLabel(candidate.wrappedValue.label.isEmpty ? "Packing item" : candidate.wrappedValue.label)
-            .accessibilityValue(candidate.wrappedValue.isChecked ? "Included" : "Excluded")
-            .accessibilityAddTraits(candidate.wrappedValue.isChecked ? [.isSelected] : [])
-
-            VStack(alignment: .leading, spacing: 2) {
-                TextField("Item", text: candidate.label)
-                    .font(Typo.body(Typo.Size.body, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                HStack(spacing: 4) {
-                    Image(systemName: candidate.wrappedValue.groupKey.symbolName)
-                        .font(.system(size: groupIconSize, weight: .bold))
-                        // Decorative — the group name right next to it says
-                        // the same thing.
-                        .accessibilityHidden(true)
-                    Text(candidate.wrappedValue.groupKey.displayName)
-                        .font(Typo.body(11, weight: .semibold))
-                }
-                .foregroundStyle(Palette.slate)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm + 2)
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
-        .opacity(candidate.wrappedValue.isChecked ? 1 : 0.55)
     }
 
     // MARK: - Submit

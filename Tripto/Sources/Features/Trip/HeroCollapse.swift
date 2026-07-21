@@ -184,6 +184,12 @@ struct TripHeroView: View {
     /// it needs to trigger" shape as `isEditingTrip` above, just imperative
     /// instead of sheet-presenting.
     let onAddToCalendar: () -> Void
+    /// PLAN.md (ai-garnish): drives `CatchMeUpSheet` — a plain `@Binding`,
+    /// not another `TripView`-owned closure like `onAddToCalendar` above,
+    /// since (unlike that EventKit side-effect) this only ever needs to
+    /// flip a `Bool` to true; `isEditingTrip` right above it is the same
+    /// shape for the exact same reason.
+    @Binding var isPresentingCatchUp: Bool
     let model: HeroScrollModel
 
     @Environment(\.dismiss) private var dismiss
@@ -213,6 +219,21 @@ struct TripHeroView: View {
 
     private var progress: Double {
         model.progress(for: selectedTab, reduceMotion: reduceMotion)
+    }
+
+    /// The runtime capability check (R4 §6 belt-and-suspenders) gating the
+    /// "Catch me up" menu entry — mirrors `PasteImportSheet
+    /// .isOnDeviceAvailable` exactly (house rule: every call site into
+    /// `OnDeviceExtractor`-backed functionality repeats this same
+    /// two-guard combo, `Platform/OnDeviceExtractor.swift`'s own doc
+    /// comment).
+    private var isOnDeviceAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            return OnDeviceExtractor.isAvailable
+        }
+        #endif
+        return false
     }
 
     var body: some View {
@@ -257,6 +278,19 @@ struct TripHeroView: View {
                         onAddToCalendar()
                     } label: {
                         Label("Add Trip to Calendar", systemImage: "calendar.badge.plus")
+                    }
+                    // PLAN.md (ai-garnish): on-device only, so this entry
+                    // simply doesn't exist on a device/OS without Apple
+                    // Intelligence — no disabled state, no cloud fallback,
+                    // no consent dialog to gate (`isOnDeviceAvailable`
+                    // below mirrors `PasteImportSheet`'s own belt-and-
+                    // suspenders check, R4 §6's house rule).
+                    if isOnDeviceAvailable {
+                        Button {
+                            isPresentingCatchUp = true
+                        } label: {
+                            Label("Catch me up", systemImage: "sparkles")
+                        }
                     }
                 } label: {
                     GlassCircleGlyph(systemImage: "ellipsis")
