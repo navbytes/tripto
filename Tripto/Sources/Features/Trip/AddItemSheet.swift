@@ -577,8 +577,16 @@ struct AddItemSheet: View {
                         // `ShareTripView` — getting data in \u{2260} getting
                         // people in).
                         if !isEditing {
-                            pasteFirstBanner
-                            importAddressCard
+                            // Suggest mode hides the import entries: the
+                            // paste flow's PACKING branch inserts rows the
+                            // viewer RLS denies (42501 → permanent sync
+                            // banner) — reviewer HIGH, 2026-07-21. Mirrors
+                            // the main screen's paste pill, already hidden
+                            // from viewers via `canAddItems`.
+                            if Self.showsImportEntries(isEditing: isEditing, isSuggesting: isSuggesting) {
+                                pasteFirstBanner
+                                importAddressCard
+                            }
                             categorySelector
                         }
 
@@ -1027,6 +1035,12 @@ struct AddItemSheet: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Palette.mist).frame(height: 1)
         }
+    }
+
+    /// Pure gate for the paste-first/email-import entries so the exposure
+    /// is unit-testable (reviewer: no coverage caught the viewer leak).
+    static func showsImportEntries(isEditing: Bool, isSuggesting: Bool) -> Bool {
+        !isEditing && !isSuggesting
     }
 
     private var saveButtonTitle: String {

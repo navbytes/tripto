@@ -52,6 +52,41 @@ final class TriptoUITests: XCTestCase {
         }
     }
 
+    // MARK: - Suggest-tray: FAB gate/label for the organizer path
+
+    /// Suggest-tray (BRIEF.md) widened `TripView`'s FAB gate from
+    /// `canAddItems` to `canShowFab` (`canAddItems || canSuggestItems`) and
+    /// switched it from `Fab`'s own default `accessibilityLabel` to an
+    /// explicit `fabAccessibilityLabel`, and threads `isSuggesting:
+    /// canSuggestItems` into the sheet it opens — every other add-item test
+    /// in this file opens that sheet via the `-uitestOpenAdd` autopilot hook
+    /// (a direct `isPresentingAdd = true` flip), which skips the FAB/gate
+    /// entirely and so never exercised any of this. This is the one role
+    /// `-uitestAutoSignIn` can seed (`DemoSeeder` always assigns that fixed
+    /// user `.organizer` — confirmed, no launch hook seeds `.viewer`), so it
+    /// pins the untouched-behavior claim: the FAB still reads "Add to
+    /// itinerary" (not "Suggest a plan") and still opens the sheet titled
+    /// "Add to {trip}" (not "Suggest to {trip}") for an organizer. The
+    /// viewer path (`canSuggestItems` true) has no hermetic coverage here —
+    /// it needs a live-device/TestFlight check until the harness grows a
+    /// member-role seeding hook.
+    func testFabReadsAddForOrganizerAndOpensAddModeNotSuggestMode() {
+        let app = launch()
+        XCTAssertTrue(
+            app.staticTexts["Lisbon"].waitForExistence(timeout: 30),
+            "seeded trip hero title never appeared"
+        )
+
+        let fab = app.buttons["Add to itinerary"]
+        XCTAssertTrue(fab.waitForExistence(timeout: 10), "organizer's FAB should read \u{201c}Add to itinerary\u{201d}")
+        fab.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Add to Lisbon"].waitForExistence(timeout: 10),
+            "organizer's FAB must open the sheet in Add mode (\u{201c}Add to {trip}\u{201d}), never Suggest mode"
+        )
+    }
+
     // MARK: - Add item: Flight (default category)
 
     func testAddFlightItem() {

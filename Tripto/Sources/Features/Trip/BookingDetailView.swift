@@ -46,10 +46,6 @@ struct BookingDetailView: View {
 
     // MARK: Boarding-pass physicality state (PLAN-signature-layer.md §D3)
 
-    /// `passCard`'s own minY in `PassEffects.scrollSpace`, written by
-    /// `.measuringMinY` — drives the scroll tilt + header sheen.
-    @State private var passCardMinY: CGFloat = 0
-
     /// Live drag translation (pt) while tearing the stub; 0 when idle or
     /// once torn (the detached constants take over rendering then).
     @State private var tearTranslation: CGFloat = 0
@@ -211,12 +207,13 @@ struct BookingDetailView: View {
     /// carve-out) — a 3D rotation and a sliding highlight are exactly the
     /// kind of motion those settings ask apps to drop, and the AX-branch
     /// flight header already reflows structurally at those sizes.
-    private var tiltDegrees: Double {
-        (reduceMotion || dynamicTypeSize.isAccessibilitySize) ? 0 : PassEffects.tiltDegrees(minY: passCardMinY)
-    }
-
-    private var sheenProgress: Double {
-        (reduceMotion || dynamicTypeSize.isAccessibilitySize) ? 0 : PassEffects.scrollProgress(minY: passCardMinY)
+    /// Captured INTO the `.visualEffect` closures below: scroll-linked
+    /// geometry stays on the render path, so a bounce never re-evaluates
+    /// this screen's body (owner-reported jank, 2026-07-21 — the old
+    /// `.measuringMinY` → `@State` channel invalidated the whole body,
+    /// including the 1.2 attachment strip's query, on every scroll frame).
+    private var passEffectsEnabled: Bool {
+        !(reduceMotion || dynamicTypeSize.isAccessibilitySize)
     }
 
     private func tearDragGesture(for item: ItineraryItem) -> some Gesture {
@@ -326,9 +323,9 @@ struct BookingDetailView: View {
             }
             .padding(Spacing.xl)
         }
-        // Boarding-pass scroll tilt (PLAN-signature-layer.md §D3) measures
-        // `passCard`'s position against this named space via
-        // `.measuringMinY` — see `tiltDegrees`/`sheenProgress`.
+        // Boarding-pass scroll tilt (PLAN-signature-layer.md §D3): the pass
+        // card's `.visualEffect` reads its frame in this named space on the
+        // render path — no state writes, no per-frame body re-evaluation.
         .coordinateSpace(.named(PassEffects.scrollSpace))
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -387,11 +384,16 @@ struct BookingDetailView: View {
         .shadow(color: Palette.shadow.opacity(0.18), radius: 20, y: 12)
         // Scroll-based tilt (PLAN-signature-layer.md §D3) — deliberately
         // scroll position, not CoreMotion: no permission/battery cost,
-        // deterministic in screenshots/tests, trivially off under RM/AX via
-        // `tiltDegrees`. No shadow pumping, no scale — physical, not
-        // gimmicky, per §6.5.
-        .measuringMinY(in: PassEffects.scrollSpace, into: $passCardMinY)
-        .rotation3DEffect(.degrees(tiltDegrees), axis: (x: 1, y: 0, z: 0))
+        // deterministic in screenshots/tests, off under RM/AX via
+        // `passEffectsEnabled`. No shadow pumping, no scale — physical, not
+        // gimmicky, per §6.5. `.visualEffect` so the per-frame math runs on
+        // the render path (see `passEffectsEnabled`'s doc comment).
+        .visualEffect { [enabled = passEffectsEnabled] content, proxy in
+            content.rotation3DEffect(
+                .degrees(enabled ? PassEffects.tiltDegrees(minY: proxy.frame(in: .named(PassEffects.scrollSpace)).minY) : 0),
+                axis: (x: 1, y: 0, z: 0)
+            )
+        }
     }
 
     @ViewBuilder
@@ -421,18 +423,36 @@ struct BookingDetailView: View {
                 )
             )
             // Specular sheen (PLAN-signature-layer.md §D3), gradient
-            // headers only: a faint diagonal highlight whose origin slides
-            // with the same scroll progress driving `passCard`'s tilt —
-            // pinned to its rest position (no slide) under RM/AX via
-            // `sheenProgress`.
+            // headers only: a faint diagonal highlight that slides with the
+            // same scroll progress driving `passCard`'s tilt — pinned to its
+            // rest position (no slide) under RM/AX. The gradient itself is
+            // static (rest-position endpoints); the LAYER translates via
+            // `.visualEffect` (render-path, like the tilt — see
+            // `passEffectsEnabled`), oversized so the slide never reveals an
+            // edge, and clipped back to the header.
             .overlay(
                 LinearGradient(
                     colors: [.white.opacity(0.08), .white.opacity(0)],
-                    startPoint: PassEffects.sheenStart(progress: sheenProgress),
+                    startPoint: PassEffects.sheenRestStart,
                     endPoint: .bottomTrailing
                 )
+                .visualEffect { [enabled = passEffectsEnabled] content, proxy in
+                    content
+                        .scaleEffect(PassEffects.sheenOverscan)
+                        .offset(
+                            enabled
+                                ? PassEffects.sheenOffset(
+                                    progress: PassEffects.scrollProgress(
+                                        minY: proxy.frame(in: .named(PassEffects.scrollSpace)).minY
+                                    ),
+                                    size: proxy.size
+                                )
+                                : .zero
+                        )
+                }
                 .allowsHitTesting(false)
             )
+            .clipped()
     }
 
     private func headerIconBadge(_ systemImage: String) -> some View {

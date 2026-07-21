@@ -1,5 +1,23 @@
 import SwiftData
 import XCTest
+
+// Reviewer HIGH (2026-07-21): a suggesting viewer must never see the
+// paste/email-import entries — the paste flow's packing branch inserts rows
+// the viewer RLS denies. Pins the pure gate the sheet body uses.
+@MainActor
+final class AddItemSheetImportEntriesGateTests: XCTestCase {
+    func testImportEntriesHiddenWhileSuggesting() {
+        XCTAssertFalse(AddItemSheet.showsImportEntries(isEditing: false, isSuggesting: true))
+    }
+
+    func testImportEntriesVisibleForNormalAdd() {
+        XCTAssertTrue(AddItemSheet.showsImportEntries(isEditing: false, isSuggesting: false))
+    }
+
+    func testImportEntriesHiddenWhileEditing() {
+        XCTAssertFalse(AddItemSheet.showsImportEntries(isEditing: true, isSuggesting: false))
+    }
+}
 @testable import Tripto
 
 /// `AddItemSheet.save()`'s create branch — a `private` instance method that
