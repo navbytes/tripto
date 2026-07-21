@@ -50,6 +50,18 @@ final class ConfirmationCodeIntentSupportTests: XCTestCase {
         XCTAssertNil(ConfirmationCodeLookup.code(forItemId: item.id, in: context))
     }
 
+    /// nil-details, true-empty variant: a zero-length string (distinct from
+    /// both nil and whitespace-only above) must read the same way — the
+    /// non-nil, already-empty side of `trimmed?.isEmpty ?? true`.
+    func testReturnsNilWhenConfirmationIsEmptyString() throws {
+        let context = makeContext()
+        let item = TestFixtures.makeItineraryItem(startsAt: .now, confirmation: "")
+        context.insert(item)
+        try context.save()
+
+        XCTAssertNil(ConfirmationCodeLookup.code(forItemId: item.id, in: context))
+    }
+
     // MARK: - ConfirmationCodeDialog
 
     func testBuildReadsTheCodeAloudWhenPresent() {

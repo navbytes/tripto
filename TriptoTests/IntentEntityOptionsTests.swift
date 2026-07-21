@@ -43,6 +43,20 @@ final class IntentEntityOptionsTests: XCTestCase {
         XCTAssertEqual(Set(options.map(\.id)), Set([flight.id, hotel.id, transport.id]))
     }
 
+    /// Two bookings can legitimately share a display title (e.g. two
+    /// "Airport transfer" legs) — options are keyed by id, not title, so a
+    /// duplicate title must never collapse two bookings into one entity.
+    func testBookingOptionsKeepsBothEntriesWhenTitlesAreDuplicated() {
+        let first = makeItem(category: .flight, title: "Airport transfer")
+        let second = makeItem(category: .transport, title: "Airport transfer")
+        let snapshot = TripSnapshot(generatedAt: .now, trips: [], focusTripItems: [first, second])
+
+        let options = BookingEntityOptions.options(from: snapshot)
+
+        XCTAssertEqual(options.count, 2)
+        XCTAssertEqual(Set(options.map(\.id)), Set([first.id, second.id]))
+    }
+
     func testBookingOptionsIsEmptyForNoSnapshot() {
         XCTAssertTrue(BookingEntityOptions.options(from: nil).isEmpty)
     }
