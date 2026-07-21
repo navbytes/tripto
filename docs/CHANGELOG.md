@@ -4,6 +4,15 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Siri & Shortcuts: ask and add by voice (2026-07-22)
+
+#### Added
+- **"Add ... to my packing list":** a Siri/Shortcuts action that adds an item to a trip's packing list (defaults to your current or next trip; a trip can be chosen). Works offline via the same sync queue as in-app adds; viewers get a polite refusal instead of a false success — the same permission rule as the app.
+- **"What's my confirmation code for ...":** pick one of the current trip's bookings and Siri answers with its confirmation code — only after the device is unlocked, and the code itself never enters Spotlight, Siri suggestions, or the widget data file; it exists only in the spoken/shown answer.
+
+#### Changed
+- App version now 1.2 (`MARKETING_VERSION`) ahead of the next App Store submission.
+
 ### On-device AI: catch me up + packing suggestions (2026-07-22)
 
 #### Added
