@@ -23,6 +23,12 @@ struct TriptoApp: App {
         authManager = AuthManager(syncEngine: engine)
         appRouter = AppRouter()
 
+        // App-intents deepening: publishes the seam `AddToPackingIntent`/
+        // `ConfirmationCodeIntent` (Platform/Intents.swift) read — see
+        // `AppServices`'s own doc comment for why assigning it here, once,
+        // is safe for an in-process intent.
+        AppServices.shared = AppServices(modelContainer: container, syncEngine: engine)
+
         // PLAN-signature-layer.md §D7: Spotlight indexing attaches to the
         // frozen `onWrite` hook — same moment, same debounce as every other
         // glanceable surface (§D6 "one pipeline"). Fire-and-forget from
