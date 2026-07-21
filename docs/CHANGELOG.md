@@ -2,6 +2,8 @@
 
 All notable changes to Tripto are documented here. Format: [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
 ## [1.2] — 2026-07-22
 
 ### Siri & Shortcuts: ask and add by voice (2026-07-22)
@@ -64,8 +66,6 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 - All new suites green: `AttachmentServiceTests` (15), `AttachmentStorageTests` (10), `AttachmentStoreTests` (11), `ItemAttachmentSyncTests` (10), `PDFTextExtractorTests` (1 hostile render), `IngestTextResponseDecodingTests` (2), `PasteImportSheetReviewTests` (4), extended `DTORoundTripTests` (+2), extended `ShareSummaryTests` (+1).
 - Share-link sentinel tests confirm attachments never expose through public payload (structural: `ShareSummary.text(for:)` has no attachment parameter).
 - Backend PRs: [navbytes/backend#17](https://github.com/navbytes/backend/pull/17) (schema + private `item-attachments` bucket, RLS membership-gated); [navbytes/backend#18](https://github.com/navbytes/backend/pull/18) (`ingest-text` returns `createdItemIds` for auto-attach).
-
-## [Unreleased]
 
 ## [1.1] — 2026-07-17
 
