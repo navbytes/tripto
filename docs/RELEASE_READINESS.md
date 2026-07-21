@@ -1,5 +1,15 @@
 # Tripto — Release checklist
 
+---
+
+## 1.2 Submission (2026-07-22)
+
+**Status: READY FOR SUBMISSION.** Build 1.2 is feature-complete and tested (see [CHANGELOG.md](CHANGELOG.md)). App Privacy labels unchanged (on-device AI paths add no tracking; attachments use existing Supabase disclosure; consent dialogs now name OpenAI as required). No backend schema changes required for submission — all infrastructure shipped during 1.2 development in the backend repo. Submission steps and owner checklist in [RELEASE_NOTES_1.2.md](RELEASE_NOTES_1.2.md).
+
+---
+
+## 1.0 Launch — archived for reference
+
 **Status: PUBLISHED to App Store 2026-07-17 — v1.0 (1.0-build6).** Build 6
 (commit `5ff10d2`, tag `v1.0-build6`, submitted 2026-07-12) was approved and
 released. Build 4 (the original submission) was developer-rejected before App

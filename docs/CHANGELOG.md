@@ -2,7 +2,7 @@
 
 All notable changes to Tripto are documented here. Format: [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.2] — 2026-07-22
 
 ### Siri & Shortcuts: ask and add by voice (2026-07-22)
 
@@ -42,8 +42,6 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 - **Booking-detail scroll no longer stutters:** the boarding-pass tilt and header sheen moved off a per-frame state channel onto SwiftUI's render-path `visualEffect` — the rubber-band bounce no longer re-renders the whole screen every frame (it had gotten heavier with 1.2's attachment strip). Same motion, Reduce Motion/accessibility behavior unchanged.
 - **Suggest mode hides paste/email import entries:** a suggesting viewer could reach the paste flow whose packing branch the server rejects — the entries are hidden in suggest mode (mirrors the main screen), pinned by tests.
 
-## [1.2] — 2026-07-21
-
 ### Attachments & scan-to-add (2026-07-21)
 
 #### Added
@@ -66,6 +64,8 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 - All new suites green: `AttachmentServiceTests` (15), `AttachmentStorageTests` (10), `AttachmentStoreTests` (11), `ItemAttachmentSyncTests` (10), `PDFTextExtractorTests` (1 hostile render), `IngestTextResponseDecodingTests` (2), `PasteImportSheetReviewTests` (4), extended `DTORoundTripTests` (+2), extended `ShareSummaryTests` (+1).
 - Share-link sentinel tests confirm attachments never expose through public payload (structural: `ShareSummary.text(for:)` has no attachment parameter).
 - Backend PRs: [navbytes/backend#17](https://github.com/navbytes/backend/pull/17) (schema + private `item-attachments` bucket, RLS membership-gated); [navbytes/backend#18](https://github.com/navbytes/backend/pull/18) (`ingest-text` returns `createdItemIds` for auto-attach).
+
+## [Unreleased]
 
 ## [1.1] — 2026-07-17
 
