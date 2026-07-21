@@ -31,6 +31,14 @@ struct AddItemSheet: View {
     /// (`BookingDetailView`) that never need it — `save()`'s create branch
     /// is the only place this is read.
     var tripCreatedBy: UUID?
+    /// Suggest-tray (BRIEF.md): true only for a viewer's own "Suggest a
+    /// plan" entry (`TripView`'s FAB, `ItemPermissions.canSuggest`).
+    /// `save()`'s create branch below writes `status = .suggested` instead
+    /// of `.confirmed` when set; always paired with `editing == nil` — the
+    /// FAB always opens this sheet in add mode, never edit. Reviewing an
+    /// existing suggestion is a different, unrelated mode
+    /// (`isReviewingSuggestion` below).
+    let isSuggesting: Bool
 
     @Query var tripProfiles: [TripProfile]
     @Query private var members: [TripMember]
@@ -283,7 +291,7 @@ struct AddItemSheet: View {
 
     init(
         tripId: UUID, tripTitle: String, editing: ItineraryItem?, defaultZone: TimeZone = .current,
-        tripStartDate: Date = .now, tripCreatedBy: UUID? = nil,
+        tripStartDate: Date = .now, tripCreatedBy: UUID? = nil, isSuggesting: Bool = false,
         onToast: @escaping (String) -> Void
     ) {
         self.tripId = tripId
@@ -291,6 +299,7 @@ struct AddItemSheet: View {
         self.editing = editing
         self.onToast = onToast
         self.defaultZone = defaultZone
+        self.isSuggesting = isSuggesting
         self.tripCreatedBy = tripCreatedBy
 
         _tripProfiles = Query(filter: #Predicate<TripProfile> { $0.tripId == tripId })
@@ -466,6 +475,30 @@ struct AddItemSheet: View {
         isReviewingSuggestion && editing?.isFromUnverifiedSender == true
     }
 
+    /// Suggest-tray (BRIEF.md): a viewer (or anyone whose role hasn't
+    /// resolved yet, same conservative default `TripView.canAddItems`
+    /// uses) can open a suggestion from the review inbox — RLS SELECT is
+    /// unrestricted, so `SuggestedItemsSheet` lists every member's
+    /// suggestions, not just the reviewer's own — but has no confirm/
+    /// dismiss rights over any of it (`ItemPermissions.canReviewSuggestion`).
+    /// Collapses `footerBar` to a read-only "Waiting for review" pill and
+    /// disables the form fields below, rather than merely hiding the
+    /// buttons — no interactive control is left that reads as "do
+    /// something" with nowhere for that something to go.
+    ///
+    /// Signed-out is excluded exactly like `TripView.canAddItems`: a
+    /// signed-out session IS the local trip creator (`myRole` only ever
+    /// resolves a *remote* membership row, so it reads `nil` here too),
+    /// and can legitimately review/confirm their own on-device paste-
+    /// import suggestions with no backend account at all — treating that
+    /// `nil` as "no rights" the way `ItemPermissions.canReviewSuggestion`
+    /// does for an unresolved signed-in role would wrongly lock them out
+    /// of their own local trip.
+    private var isReadOnlyReview: Bool {
+        guard isReviewingSuggestion, authManager.userId != nil else { return false }
+        return !ItemPermissions.canReviewSuggestion(role: myRole)
+    }
+
     /// P3.6: "Save & add the return leg" is add-mode only — `editing` is an
     /// immutable `let`, so the only way a second `save()` call from THIS
     /// sheet is guaranteed to create a new item (never re-save over the
@@ -520,13 +553,18 @@ struct AddItemSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 SheetHeader(
-                    title: isEditing ? "Edit \(category.displayName.lowercased())" : "Add to \(tripTitle)",
+                    title: isEditing
+                        ? "Edit \(category.displayName.lowercased())"
+                        : (isSuggesting ? "Suggest to \(tripTitle)" : "Add to \(tripTitle)"),
                     onCancel: cancelTapped
                 )
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
                         if isReviewingUnverifiedSuggestion {
                             unverifiedSenderCallout
+                        }
+                        if isSuggesting {
+                            suggestingCaption
                         }
 
                         // Phase 3 (P3.5)/Phase 4 (P4.2): paste-first, then
@@ -539,8 +577,16 @@ struct AddItemSheet: View {
                         // `ShareTripView` — getting data in \u{2260} getting
                         // people in).
                         if !isEditing {
-                            pasteFirstBanner
-                            importAddressCard
+                            // Suggest mode hides the import entries: the
+                            // paste flow's PACKING branch inserts rows the
+                            // viewer RLS denies (42501 → permanent sync
+                            // banner) — reviewer HIGH, 2026-07-21. Mirrors
+                            // the main screen's paste pill, already hidden
+                            // from viewers via `canAddItems`.
+                            if Self.showsImportEntries(isEditing: isEditing, isSuggesting: isSuggesting) {
+                                pasteFirstBanner
+                                importAddressCard
+                            }
                             categorySelector
                         }
 
@@ -553,6 +599,14 @@ struct AddItemSheet: View {
                             case .transport: transportSection
                             }
                         }
+                        // Suggest-tray: a viewer opening someone else's (or
+                        // their own) pending suggestion can look but not
+                        // touch — see `isReadOnlyReview`'s doc comment.
+                        // `familySection` needs no matching `.disabled`:
+                        // it's already `EmptyView` here (`canManageAssignees`
+                        // is `false` for every role `isReadOnlyReview` is
+                        // `true` for).
+                        .disabled(isReadOnlyReview)
 
                         familySection
                     }
@@ -715,6 +769,17 @@ struct AddItemSheet: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Suggest-tray (BRIEF.md, §6.6 voice — sentence case): the one caption
+    /// line the brief calls for, so a viewer knows why this sheet says
+    /// "Suggest" instead of "Add" before they start filling anything in.
+    /// Same caption font/tone `missingNameHint` already uses for advisory
+    /// (non-error) text in this sheet.
+    private var suggestingCaption: some View {
+        Text("The organizer will review your suggestion.")
+            .font(Typo.body(Typo.Size.caption))
+            .foregroundStyle(Palette.slate)
+    }
+
     /// Phase 3 (P3.5): the fast path — the data's already in the booking
     /// email, typing it twice is the actual pain. Opens the exact same
     /// `PasteImportSheet` every other entry point uses
@@ -866,87 +931,101 @@ struct AddItemSheet: View {
     /// secondary "Save & add the return leg" action alongside Save.
     private var footerBar: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            if let saveError {
-                Text(saveError.message)
-                    .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(Palette.rose)
-            } else if let dismissError {
-                Text(dismissError)
-                    .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(Palette.rose)
-            } else if let hint = missingNameHint {
-                Text(hint)
-                    .font(Typo.body(Typo.Size.caption))
-                    .foregroundStyle(Palette.slate)
-            }
-            Button {
-                save()
-            } label: {
-                Text(saveButtonTitle)
-                    .font(Typo.body(weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .foregroundStyle(isValid ? Palette.onAmber : Palette.slate)
-                    .padding(.vertical, Spacing.md)
-                    .background(
-                        isValid ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
-                    )
-                    .shadow(color: isValid ? Palette.amberGlow.opacity(0.45) : .clear, radius: 10, y: 5)
-            }
-            .buttonStyle(.plain)
-            .disabled(!isValid || isDismissingSuggestion || isSaving)
-
-            // P3.6: flights come in pairs — saves the leg on screen, then
-            // resets the form in place for the reversed return leg (see
-            // `saveAndAddReturnLeg`'s doc comment). Same validation gate as
-            // Save itself; it runs the identical save path.
-            if showsReturnLegAction {
+            // Suggest-tray: a read-only reviewer (`isReadOnlyReview`) gets
+            // no Confirm/Dismiss — RLS grants them neither — just the pill
+            // explaining why. The `else` branch below is the pre-existing
+            // add/edit/review footer, untouched.
+            if isReadOnlyReview {
+                // `.amber`, not `.neutral`: `PillLabel`'s `.neutral` tint
+                // (`Palette.slate` on `Palette.mist`) measures ~4.25:1 in
+                // light mode at this caption size — under the 4.5:1 AA
+                // floor. `.amber` (`Palette.ink` on `Palette.amberSoft`) is
+                // the ~14.4:1/~10.9:1 pairing Fix-round D3 already vetted
+                // for this exact footer, on the exact same background.
+                PillLabel(text: "Waiting for review", tint: .amber)
+            } else {
+                if let saveError {
+                    Text(saveError.message)
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.rose)
+                } else if let dismissError {
+                    Text(dismissError)
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.rose)
+                } else if let hint = missingNameHint {
+                    Text(hint)
+                        .font(Typo.body(Typo.Size.caption))
+                        .foregroundStyle(Palette.slate)
+                }
                 Button {
-                    saveAndAddReturnLeg()
+                    save()
                 } label: {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.system(size: returnLegIconSize, weight: .semibold))
-                            // Decorative — the label says the same thing.
-                            .accessibilityHidden(true)
-                        Text("Save & add the return leg")
-                            .font(Typo.body(weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    // Fix-round D3: `Palette.ink` (~14.4:1 light, ~10.9:1
-                    // dark on this fill), not `amberInk` — that pairing on
-                    // `amberSoft` measures ~4.45:1 in light mode, under the
-                    // 4.5:1 AA bar (the exact pairing `BoardingPassCard
-                    // .swift`'s own day-badge comment already flags/avoids).
-                    .foregroundStyle(isValid ? Palette.ink : Palette.slate)
-                    .padding(.vertical, Spacing.md)
-                    .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                    Text(saveButtonTitle)
+                        .font(Typo.body(weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .foregroundStyle(isValid ? Palette.onAmber : Palette.slate)
+                        .padding(.vertical, Spacing.md)
+                        .background(
+                            isValid ? Palette.amber : Palette.mist, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous)
+                        )
+                        .shadow(color: isValid ? Palette.amberGlow.opacity(0.45) : .clear, radius: 10, y: 5)
                 }
                 .buttonStyle(.plain)
                 .disabled(!isValid || isDismissingSuggestion || isSaving)
-            }
 
-            // EI-2: a shared triage queue (`docs/EMAIL_IMPORT_PLAN.md`
-            // decisions: "any companion or organizer" can dismiss, not just
-            // whoever forwarded the email) — visible only while reviewing an
-            // unconfirmed suggestion, never for a normal add/edit.
-            if isReviewingSuggestion {
-                Button(role: .destructive) {
-                    Task { await dismissSuggestion() }
-                } label: {
-                    HStack {
-                        if isDismissingSuggestion {
-                            ProgressView().tint(Palette.rose)
+                // P3.6: flights come in pairs — saves the leg on screen, then
+                // resets the form in place for the reversed return leg (see
+                // `saveAndAddReturnLeg`'s doc comment). Same validation gate as
+                // Save itself; it runs the identical save path.
+                if showsReturnLegAction {
+                    Button {
+                        saveAndAddReturnLeg()
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.system(size: returnLegIconSize, weight: .semibold))
+                                // Decorative — the label says the same thing.
+                                .accessibilityHidden(true)
+                            Text("Save & add the return leg")
+                                .font(Typo.body(weight: .semibold))
                         }
-                        Text("Dismiss")
-                            .font(Typo.body(weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        // Fix-round D3: `Palette.ink` (~14.4:1 light, ~10.9:1
+                        // dark on this fill), not `amberInk` — that pairing on
+                        // `amberSoft` measures ~4.45:1 in light mode, under the
+                        // 4.5:1 AA bar (the exact pairing `BoardingPassCard
+                        // .swift`'s own day-badge comment already flags/avoids).
+                        .foregroundStyle(isValid ? Palette.ink : Palette.slate)
+                        .padding(.vertical, Spacing.md)
+                        .background(Palette.amberSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
                     }
-                    .frame(maxWidth: .infinity)
-                    .foregroundStyle(Palette.rose)
-                    .padding(.vertical, Spacing.md)
-                    .background(Palette.roseSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                    .buttonStyle(.plain)
+                    .disabled(!isValid || isDismissingSuggestion || isSaving)
                 }
-                .buttonStyle(.plain)
-                .disabled(isDismissingSuggestion)
+
+                // EI-2: a shared triage queue (`docs/EMAIL_IMPORT_PLAN.md`
+                // decisions: "any companion or organizer" can dismiss, not just
+                // whoever forwarded the email) — visible only while reviewing an
+                // unconfirmed suggestion, never for a normal add/edit.
+                if isReviewingSuggestion {
+                    Button(role: .destructive) {
+                        Task { await dismissSuggestion() }
+                    } label: {
+                        HStack {
+                            if isDismissingSuggestion {
+                                ProgressView().tint(Palette.rose)
+                            }
+                            Text("Dismiss")
+                                .font(Typo.body(weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .foregroundStyle(Palette.rose)
+                        .padding(.vertical, Spacing.md)
+                        .background(Palette.roseSoft, in: RoundedRectangle(cornerRadius: Radii.card, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDismissingSuggestion)
+                }
             }
         }
         .padding(.horizontal, Spacing.xl)
@@ -958,8 +1037,15 @@ struct AddItemSheet: View {
         }
     }
 
+    /// Pure gate for the paste-first/email-import entries so the exposure
+    /// is unit-testable (reviewer: no coverage caught the viewer leak).
+    static func showsImportEntries(isEditing: Bool, isSuggesting: Bool) -> Bool {
+        !isEditing && !isSuggesting
+    }
+
     private var saveButtonTitle: String {
         if isReviewingSuggestion { return "Confirm booking" }
+        if isSuggesting { return "Suggest \(category.displayName.lowercased()) to itinerary" }
         return isEditing ? "Save changes" : "Add \(category.displayName.lowercased()) to itinerary"
     }
 
@@ -1083,12 +1169,21 @@ struct AddItemSheet: View {
                 isSaving = false
                 return
             }
+            // Suggest-tray: `isSuggesting` is the one thing that moves this
+            // create branch off its `.confirmed`/`.manual` manual-add
+            // defaults — `sourceRaw` stays at its designated-initializer
+            // default (`.manual`, see `ItineraryItem.init`'s doc comment)
+            // either way, since a viewer typing their own plan is exactly
+            // as "manual" a source as an organizer's; only `.textImport`
+            // (`PasteImportSheet.insertValidatedItineraryItems`) differs
+            // on that axis. `createdBy: creatorId` above is already "self"
+            // for both branches.
             let item = ItineraryItem(
                 id: UUID(), tripId: tripId, categoryRaw: category.rawValue, title: fields.title,
                 startsAt: fields.startsAt, endsAt: fields.endsAt, tz: fields.tz,
                 locationName: fields.locationName, locationLat: fields.locationLat, locationLng: fields.locationLng,
                 confirmation: fields.confirmation, notes: nil, detailsJSON: "{}",
-                statusRaw: ItemStatus.confirmed.rawValue, createdBy: creatorId,
+                statusRaw: (isSuggesting ? ItemStatus.suggested : ItemStatus.confirmed).rawValue, createdBy: creatorId,
                 createdAt: now, updatedAt: now, updatedBy: nil
             )
             item.details = fields.details
@@ -1104,7 +1199,7 @@ struct AddItemSheet: View {
             let rowId = item.id
             Task { await syncEngine?.enqueueUpsert(table: .itineraryItems, rowId: rowId, tripId: tripId, payload: dto) }
             reconcileAssignees(itemId: rowId)
-            onToast(toastMessage("added"))
+            onToast(toastMessage(isSuggesting ? "suggested \u{2014} the organizer will review it" : "added"))
         }
 
         // Haptics: both the add and edit branches above only reach this

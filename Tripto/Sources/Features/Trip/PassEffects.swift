@@ -37,12 +37,23 @@ enum PassEffects {
         scrollProgress(minY: minY) * maxTiltDegrees
     }
 
-    /// Where the specular sheen's highlight originates, sliding gently with
-    /// scroll progress. Gradient headers only (flight/hotel/transport) —
-    /// `simpleHeader`'s light background has no sheen.
-    static func sheenStart(progress: Double) -> UnitPoint {
+    /// The sheen's rest-position origin (the old `sheenStart(progress: 0)`).
+    /// Gradient headers only (flight/hotel/transport) — `simpleHeader`'s
+    /// light background has no sheen.
+    static let sheenRestStart = UnitPoint(x: 0.2, y: -0.05)
+
+    /// How much the sheen layer is oversized so its `sheenOffset` slide
+    /// never reveals an edge inside the header's clip (max |offset| is
+    /// 0.35 × width / 0.2 × height — 1.75× covers both with margin).
+    static let sheenOverscan: CGFloat = 1.75
+
+    /// Render-path replacement for the old sliding `UnitPoint` start: the
+    /// same ±0.35-width / ±0.2-height travel as a layer translation, driven
+    /// by `scrollProgress` inside a `.visualEffect`. Pure — see
+    /// PassEffectsTests.
+    static func sheenOffset(progress: Double, size: CGSize) -> CGSize {
         let clamped = max(-1, min(1, progress))
-        return UnitPoint(x: CGFloat(0.2 - clamped * 0.35), y: CGFloat(-0.05 - clamped * 0.2))
+        return CGSize(width: -clamped * 0.35 * size.width, height: -clamped * 0.2 * size.height)
     }
 
     // MARK: - Travel-day trigger
@@ -131,30 +142,6 @@ enum PassEffects {
     }
 }
 
-extension View {
-    /// Writes this view's own `minY` in the named coordinate space `space`
-    /// into `minY` on every layout pass — the tilt effect's one plumbing
-    /// need. Same dual iOS 17/18 recipe as
-    /// `HeroCollapse.heroScrollTracking(tab:model:)`: `onGeometryChange`
-    /// where available, a `.background(GeometryReader{...})` + `onChange`
-    /// fallback on iOS 17 (this app's deployment target).
-    @ViewBuilder
-    func measuringMinY(in space: String, into minY: Binding<CGFloat>) -> some View {
-        if #available(iOS 18, *) {
-            background {
-                Color.clear.onGeometryChange(for: CGFloat.self) { geo in
-                    geo.frame(in: .named(space)).minY
-                } action: { minY.wrappedValue = $0 }
-            }
-        } else {
-            background {
-                GeometryReader { geo in
-                    Color.clear
-                        .onChange(of: geo.frame(in: .named(space)).minY, initial: true) { _, newValue in
-                            minY.wrappedValue = newValue
-                        }
-                }
-            }
-        }
-    }
-}
+// (measuringMinY View helper deleted 2026-07-21: the tilt/sheen moved onto
+// `.visualEffect` — render-path geometry, no per-frame @State writes. See
+// BookingDetailView.passEffectsEnabled's doc comment for the jank story.)

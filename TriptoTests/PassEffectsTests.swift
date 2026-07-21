@@ -192,3 +192,21 @@ final class PassEffectsTests: XCTestCase {
         XCTAssertFalse(PassEffects.isTornStub(itemId: UUID(), day: day, defaults: defaults))
     }
 }
+
+// Sheen slide moved to a render-path layer offset (2026-07-21 jank fix) —
+// same clamp + travel semantics as the old sliding UnitPoint start.
+extension PassEffectsTests {
+    func testSheenOffsetAtRestIsZero() {
+        XCTAssertEqual(PassEffects.sheenOffset(progress: 0, size: CGSize(width: 300, height: 120)), .zero)
+    }
+
+    func testSheenOffsetClampsAndSlidesOppositeToProgress() {
+        let size = CGSize(width: 300, height: 120)
+        let atMax = PassEffects.sheenOffset(progress: 5, size: size)
+        XCTAssertEqual(atMax.width, -0.35 * 300, accuracy: 0.001)
+        XCTAssertEqual(atMax.height, -0.2 * 120, accuracy: 0.001)
+        let atMin = PassEffects.sheenOffset(progress: -5, size: size)
+        XCTAssertEqual(atMin.width, 0.35 * 300, accuracy: 0.001)
+        XCTAssertEqual(atMin.height, 0.2 * 120, accuracy: 0.001)
+    }
+}

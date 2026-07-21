@@ -110,10 +110,16 @@ struct AttachmentStrip: View {
                 handleFileImport(result)
             }
             .sheet(item: $previewTarget) { target in
-                // No .ignoresSafeArea(): the wrap now carries its own nav
-                // bar (Done button) which must sit inside the sheet's safe
-                // area — see QuickLookPreview's doc comment.
+                // Escape is OURS, not QuickLook's: embedded QL doesn't
+                // reliably install a Done button even nav-wrapped (owner hit
+                // this on device twice, 2026-07-21), and a zoomed photo eats
+                // swipe-down. The overlay close works no matter what QL does
+                // with its bar; the grabber covers the swipe-from-top habit.
                 QuickLookPreview(item: target)
+                    .overlay(alignment: .topLeading) {
+                        PreviewCloseButton { previewTarget = nil }
+                    }
+                    .presentationDragIndicator(.visible)
             }
             .confirmationDialog(
                 "Delete this attachment?",
@@ -407,5 +413,23 @@ private enum AttachmentThumbnailGenerator {
                 continuation.resume(returning: thumbnail?.uiImage)
             }
         }
+    }
+}
+
+/// The preview sheet's guaranteed escape hatch — a plain SwiftUI control the
+/// QuickLook wrap can't interfere with. 44pt target, named for VoiceOver.
+private struct PreviewCloseButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .padding(Spacing.md)
+        .accessibilityLabel("Close preview")
     }
 }

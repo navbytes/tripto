@@ -4,6 +4,16 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Suggest a plan + on-device polish (2026-07-21)
+
+#### Added
+- **Viewers can suggest plans:** the add button becomes "Suggest a plan" for view-only members — the same add form, saving into the organizer's existing review inbox instead of straight onto the itinerary. Confirm/dismiss stays with organizers and companions; a viewer sees their own pending idea marked "Waiting for review". Enforced server-side (viewers can only ever insert suggestions attributed to themselves). Suggestions never appear on the public share link until confirmed.
+
+#### Fixed
+- **Attachment preview always closable:** the photo/PDF preview now carries Tripto's own floating close button (plus a drag indicator) — escape no longer depends on QuickLook's embedded chrome, which failed to show a Done button on device.
+- **Booking-detail scroll no longer stutters:** the boarding-pass tilt and header sheen moved off a per-frame state channel onto SwiftUI's render-path `visualEffect` — the rubber-band bounce no longer re-renders the whole screen every frame (it had gotten heavier with 1.2's attachment strip). Same motion, Reduce Motion/accessibility behavior unchanged.
+- **Suggest mode hides paste/email import entries:** a suggesting viewer could reach the paste flow whose packing branch the server rejects — the entries are hidden in suggest mode (mirrors the main screen), pinned by tests.
+
 ## [1.2] — 2026-07-21
 
 ### Attachments & scan-to-add (2026-07-21)
