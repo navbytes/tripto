@@ -1,11 +1,33 @@
 # tripto-share
 
 The no-app, read-only web view for Tripto share links (BUILD_PLAN.md §5.2 /
-§7.5): a Cloudflare Worker, no framework, hand-rolled HTML strings only. Lets
-anyone with a link see an itinerary in a browser with no account and no app
-— `tripto.navbytes.io/t/<token>`.
+§7.5) **plus the public marketing site**: a Cloudflare Worker, no framework,
+hand-rolled HTML strings only. Lets anyone with a link see an itinerary in a
+browser with no account and no app — `tripto.navbytes.io/t/<token>` — and
+gives the product a loud, gradient-heavy landing page at the root.
 
 ## What it serves
+
+Public, indexable pages (the App Store Marketing / Support / Privacy URLs):
+
+- `GET /` — the landing page: "unicorn mode" brand (night-violet hero,
+  pink→purple→cyan gradients, sticker pills, a pure-CSS phone mockup),
+  feature grid, how-it-works, FAQ. Carries the SEO surface: canonical,
+  Open Graph/Twitter cards, and a JSON-LD `@graph` (Organization, WebSite,
+  WebPage, MobileApplication, FAQPage — the FAQ markup mirrors the visible
+  FAQ content, per Google's guidelines). Zero JavaScript; the JSON-LD
+  `<script type="application/ld+json">` block is an inert data block, so the
+  strict CSP stays.
+- `GET /privacy` — the privacy policy, same brand hero.
+- SEO/brand infrastructure: `/robots.txt` (allows `/`, disallows `/t/` +
+  `/join/`), `/sitemap.xml`, `/llms.txt` (AI-crawler courtesy summary),
+  `/favicon.svg` (+ `/favicon.ico` fallback), `/og.jpg` (1200×630 social
+  card), `/apple-touch-icon.png`. The two raster images are bundled as
+  wrangler `Data` modules from `src/assets/`; regenerate them with
+  `scripts/generate-assets.mjs` (needs `playwright-core` + a Chromium).
+
+Private, tokened pages (unchanged product surfaces — calm dusk palette,
+tuned for a non-technical audience):
 
 - `GET /t/:token` — calls the `get_public_trip` RPC (SECURITY DEFINER,
   defined in `~/repos/backend/projects/tripto`) and renders the sanitized,
@@ -20,11 +42,12 @@ anyone with a link see an itinerary in a browser with no account and no app
   `APPLE_TEAM_ID` is configured (see below); 404 until then.
 - Anything else — a 404 page in the same visual style.
 
-Every page: `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow`,
-`Referrer-Policy: no-referrer`, a strict CSP (`default-src 'none';
-style-src 'unsafe-inline'`), zero JavaScript. All payload strings are
-HTML-escaped (`src/format.ts` → `esc()`) — a trip titled with `<script>` in
-it renders as inert text.
+Every tokened page: `Cache-Control: no-store`, `X-Robots-Tag: noindex,
+nofollow`, `Referrer-Policy: no-referrer`, a strict CSP (`default-src
+'none'; style-src 'unsafe-inline'; img-src 'self'`), zero JavaScript. All
+payload strings are HTML-escaped (`src/format.ts` → `esc()`) — a trip titled
+with `<script>` in it renders as inert text. Public pages get the same CSP
+with normal caching (`public, max-age=3600`) and no `noindex`.
 
 ## Deploy
 
