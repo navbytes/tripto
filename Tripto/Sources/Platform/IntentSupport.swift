@@ -14,6 +14,7 @@ enum AddToPackingDialog {
     static let emptyLabelMessage = "Tell me what to add to your packing list."
     static let signedOutMessage = "You\u{2019}re signed out of Tripto \u{2014} sign in, then try again."
     static let noTripMessage = "Add a trip in Tripto first, then ask again."
+    static let viewerMessage = "You\u{2019}re viewing this trip \u{2014} ask the organizer to add items."
 
     /// The same trim-then-empty-check `PackingItem.insert` itself applies
     /// (`Models/PackingItem.swift`) — reimplemented here (not called
@@ -51,6 +52,25 @@ enum FocusTripSelection {
 
     private static func bucket(_ trip: SnapshotTrip, now: Date, calendar: Calendar) -> TripBucket {
         TripDateBucketing.bucket(startDate: trip.startDate, endDate: trip.endDate, today: now, calendar: calendar)
+    }
+}
+
+/// Reviewer (app-intents deepening, verify wave): an intent must never claim
+/// success on a write RLS is about to reject — same invariant as the
+/// suggest-mode paste gate (#60). `AddToPackingIntent` gates on this before
+/// inserting, same source (`trip_members` mirror) and same predicate
+/// (`PackingPermissions.canManage`) `TripView.myRole`/`PackingListView.
+/// myRole`/`.canManage` already use for the identical manual-add gate.
+/// `nil` covers both "no membership row yet" (mid-first-pull) and
+/// "genuinely never joined" identically — `PackingPermissions.canManage(role:
+/// nil)` already reads that as denied, so there's nothing extra to special-case
+/// here. Unlike those views' own `canManage`, there's no signed-out escape
+/// hatch to reproduce: `AddToPackingIntent.perform()` never reaches this
+/// lookup without a real signed-in `userId` already in hand.
+enum TripMemberRoleLookup {
+    static func role(forUserId userId: UUID, tripId: UUID, in context: ModelContext) -> TripRole? {
+        let descriptor = FetchDescriptor<TripMember>(predicate: #Predicate { $0.userId == userId && $0.tripId == tripId })
+        return try? context.fetch(descriptor).first?.role
     }
 }
 

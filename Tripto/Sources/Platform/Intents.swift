@@ -73,6 +73,14 @@ struct AddToPackingIntent: AppIntent {
         guard let target, let services = AppServices.shared else {
             return .result(dialog: IntentDialog(stringLiteral: AddToPackingDialog.noTripMessage))
         }
+        // An intent must never claim success on a write RLS is about to
+        // reject (verify-wave reviewer finding) — same source (`trip_members`
+        // mirror) and same predicate `PackingListView.canManage`'s signed-in
+        // branch already gates manual add with.
+        let role = TripMemberRoleLookup.role(forUserId: userId, tripId: target.id, in: services.modelContainer.mainContext)
+        guard PackingPermissions.canManage(role: role) else {
+            return .result(dialog: IntentDialog(stringLiteral: AddToPackingDialog.viewerMessage))
+        }
         PackingItem.insert(
             label: label, groupKey: .shared, assigneeProfileId: nil,
             tripId: target.id, createdBy: userId,
