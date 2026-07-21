@@ -95,6 +95,10 @@ struct TripView: View {
 
     @State private var selectedTab: Tab = .itinerary
     @State private var isPresentingAdd = false
+    /// PLAN.md (ai-garnish): drives `CatchMeUpSheet` — set from the hero's
+    /// overflow menu (`TripHeroView`'s "Catch me up" entry, `HeroCollapse
+    /// .swift`), same shape as `isEditingTrip` right below.
+    @State private var isPresentingCatchUp = false
     /// TI-3: the ONE "Paste to import" entry point, same trigger/label/
     /// placement regardless of which tab is showing — replaces three
     /// previously-inconsistent doors (a disguised tile in `AddItemSheet`'s
@@ -467,6 +471,7 @@ struct TripView: View {
                 canEditTrip: canEditTrip,
                 isEditingTrip: $isEditingTrip,
                 onAddToCalendar: addTripToCalendar,
+                isPresentingCatchUp: $isPresentingCatchUp,
                 model: heroScrollModel
             )
 
@@ -574,6 +579,8 @@ struct TripView: View {
                         PackingListView(
                             tripId: trip.id,
                             tripCreatedBy: trip.createdBy,
+                            trip: trip,
+                            items: items,
                             heroScrollModel: heroScrollModel,
                             isAwaitingFirstSync: awaitingFirstTripPull,
                             // UX audit finding 3 (cross-screen): Packing was
@@ -674,6 +681,13 @@ struct TripView: View {
                 // a screen for a trip that no longer exists.
                 dismiss()
             }
+        }
+        // PLAN.md (ai-garnish): triggered by the hero's overflow menu
+        // ("Catch me up", `HeroCollapse.swift`) — that entry only exists
+        // when `OnDeviceExtractor.isAvailable`, so this sheet is never
+        // reachable at all on a device without Apple Intelligence.
+        .sheet(isPresented: $isPresentingCatchUp) {
+            CatchMeUpSheet(trip: trip, memberNames: tripProfiles.map(\.displayName), items: items)
         }
     }
 

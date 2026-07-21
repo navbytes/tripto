@@ -16,6 +16,17 @@ struct PackingListView: View {
     /// satisfy RLS once they sign back in, same story as
     /// `AddItemSheet.tripCreatedBy`.
     let tripCreatedBy: UUID
+    /// PLAN.md (ai-garnish): full trip context for "Suggest a starting
+    /// list"'s AI prompt (`Models/TripPromptContext.swift`) — this tab
+    /// doesn't otherwise need the parent `Trip`/its itinerary, so these
+    /// arrive from `TripView` (same shape `ItineraryTabView` already takes)
+    /// rather than a second local `@Query` duplicating what `TripView`
+    /// already fetched once.
+    let trip: Trip
+    /// The trip's confirmed itinerary items — `TripView.items`, unfiltered
+    /// by "Just mine" (same reasoning as `ItineraryTabView.allTripItems`:
+    /// the AI summary a person filter has nothing to do with).
+    let items: [ItineraryItem]
     /// Backs the hero's scroll-driven collapse — this tab writes its own
     /// scroll offset directly into it via `.heroScrollTracking(tab:model:)`.
     /// See that modifier's doc comment (HeroCollapse.swift) for why it's a
@@ -76,6 +87,10 @@ struct PackingListView: View {
     /// doors; see that view's doc comment). The FAB goes back to a single
     /// action, so it opens the add-item form directly again, no menu.
     @State private var isPresentingAdd = false
+    /// PLAN.md (ai-garnish): drives `PackingSuggestionsSheet` — set from
+    /// either the header affordance (list already has items) or the
+    /// empty-state CTA (`emptyState`'s "Suggest a starting list").
+    @State private var isPresentingSuggestions = false
     @State private var toast: String?
     @State private var reassigningItem: PackingItem?
     /// Finding 3: drives `PackingItemFormSheet` in edit mode — set from the
@@ -102,12 +117,15 @@ struct PackingListView: View {
     @State private var didDeleteItem = false
 
     init(
-        tripId: UUID, tripCreatedBy: UUID, heroScrollModel: HeroScrollModel, isAwaitingFirstSync: Bool = false,
+        tripId: UUID, tripCreatedBy: UUID, trip: Trip, items: [ItineraryItem], heroScrollModel: HeroScrollModel,
+        isAwaitingFirstSync: Bool = false,
         pendingRowIds: Set<UUID> = [], isOffline: Bool = false, didLoadFail: Bool = false,
         onRetryLoad: (() -> Void)? = nil, onRefresh: (() async -> Void)? = nil
     ) {
         self.tripId = tripId
         self.tripCreatedBy = tripCreatedBy
+        self.trip = trip
+        self.items = items
         self.heroScrollModel = heroScrollModel
         self.isAwaitingFirstSync = isAwaitingFirstSync
         self.pendingRowIds = pendingRowIds
@@ -140,6 +158,21 @@ struct PackingListView: View {
     private var canManage: Bool {
         guard authManager.userId != nil else { return true }
         return PackingPermissions.canManage(role: myRole)
+    }
+
+    /// The runtime capability check (R4 §6 belt-and-suspenders) gating both
+    /// AI packing-suggestion affordances below — mirrors `PasteImportSheet
+    /// .isOnDeviceAvailable` exactly (house rule: every call site into
+    /// `OnDeviceExtractor`-backed functionality repeats this same
+    /// two-guard combo, `Platform/OnDeviceExtractor.swift`'s own doc
+    /// comment).
+    private var isOnDeviceAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            return OnDeviceExtractor.isAvailable
+        }
+        #endif
+        return false
     }
 
     // Finding 2: the header's counts stay over the *full* list even when
@@ -209,6 +242,18 @@ struct PackingListView: View {
         .sheet(item: $editingItem) { item in
             PackingItemFormSheet(tripProfiles: tripProfiles, editing: item) { label, groupKey, assigneeProfileId in
                 updateItem(item, label: label, groupKey: groupKey, assigneeProfileId: assigneeProfileId)
+            }
+        }
+        // PLAN.md (ai-garnish): triggered by either `progressHeader`'s
+        // "Suggest more items" pill or `emptyState`'s "Suggest a starting
+        // list" CTA — both gated on `isOnDeviceAvailable`, so this sheet is
+        // never reachable at all on a device without Apple Intelligence.
+        .sheet(isPresented: $isPresentingSuggestions) {
+            PackingSuggestionsSheet(
+                trip: trip, memberNames: tripProfiles.map(\.displayName), items: items,
+                existingLabels: packingItems.map(\.label)
+            ) { candidates in
+                addSuggestedItems(candidates)
             }
         }
         .confirmationDialog(
@@ -339,6 +384,14 @@ struct PackingListView: View {
             }
             .frame(height: 8)
 
+            // PLAN.md (ai-garnish): only once there's a real list to add
+            // to — an empty list gets the same affordance as its own CTA
+            // instead (`emptyState`'s "Suggest a starting list").
+            if canManage && isOnDeviceAvailable {
+                suggestPackingButton
+                    .padding(.top, Spacing.xs)
+            }
+
             // Finding 1: mirrors `BookingDetailView`'s read-only notice —
             // a plain-language signal (not just disabled-looking controls)
             // that this list can't be changed from this account/role.
@@ -358,6 +411,39 @@ struct PackingListView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.lg)
+    }
+
+    /// PLAN.md (ai-garnish): same outlined-pill recipe as `TripView
+    /// .pasteImportPill` (icon + label, `Palette.ink` on a `Palette.mist`
+    /// stroke) — both are "AI-assisted" affordances, so this borrows that
+    /// established visual family instead of inventing a second one.
+    private var suggestPackingButton: some View {
+        Button {
+            isPresentingSuggestions = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .medium))
+                    // Decorative — the label right next to it says the same thing.
+                    .accessibilityHidden(true)
+                Text("Suggest more items")
+                    .font(Typo.body(11, weight: .semibold))
+            }
+            .foregroundStyle(Palette.ink)
+            .padding(.horizontal, Spacing.sm + 1)
+            .padding(.vertical, 5)
+            .frame(minHeight: 32)
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Palette.mist, lineWidth: 1)
+            }
+            // BUILD_PLAN §6.5's 44pt floor, grown around the compact visual
+            // pill exactly like `TripView.pasteImportPill` does.
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Suggest more packing items")
     }
 
     // MARK: - Grouped list
@@ -480,6 +566,23 @@ struct PackingListView: View {
                         // item count, which is what this fallback used to exist
                         // to work around (the FAB itself only rendered once the
                         // list was non-empty).
+
+                        // PLAN.md (ai-garnish): the empty-state twin of
+                        // `progressHeader`'s "Suggest more items" pill —
+                        // same on-device-only gate, a secondary text CTA
+                        // under the primary "Add an item" rather than a
+                        // second capsule competing with it.
+                        if isOnDeviceAvailable {
+                            Button("Suggest a starting list") {
+                                isPresentingSuggestions = true
+                            }
+                            .buttonStyle(.plain)
+                            .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                            .foregroundStyle(Palette.slate)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                            .padding(.top, Spacing.xs)
+                        }
                     }
                 }
             }
@@ -602,6 +705,21 @@ struct PackingListView: View {
         toast = authManager.userId == nil
             ? "Added to packing list \u{2014} you\u{2019}re signed out, so it won\u{2019}t sync until you sign back in."
             : "Added to packing list"
+    }
+
+    /// PLAN.md (ai-garnish): `PackingSuggestionsSheet.onConfirm` — the same
+    /// bulk-insert shape `TripView`'s own `onPackingConfirmed` (for
+    /// `PasteImportSheet`) uses (quiet per-item `addItem` calls, one counted
+    /// toast/haptic once the whole batch lands), just routed through THIS
+    /// view's own `addItem` instead of a second, parallel `PackingItem
+    /// .insert` loop.
+    private func addSuggestedItems(_ candidates: [(label: String, groupKey: PackingGroupKey)]) {
+        guard !candidates.isEmpty else { return }
+        for candidate in candidates {
+            addItem(label: candidate.label, groupKey: candidate.groupKey, assigneeProfileId: nil, announceIndividually: false)
+        }
+        didSaveItem.toggle()
+        toast = "\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list"
     }
 
     private func delete(_ item: PackingItem) {
