@@ -317,7 +317,10 @@ chat, AI trip generation, social feed.
   targets, motion/haptics via `Design/Motion.swift`, tokens only (no raw hex).
 - **Build discipline:** `project.yml` is truth → `scripts/bootstrap.sh` after
   file adds; own `-derivedDataPath` per CLI build; SwiftLint `--strict` gates
-  CI; every push runs Tripto-CI unit tests in Xcode Cloud.
+  CI. Xcode Cloud (changed 2026-07-22, owner directive): NO builds on
+  branch pushes — the CI workflow is Manual-Start-only and the Default
+  (test+archive) workflow triggers on v* tags; local full-suite runs gate
+  every merge.
 - **Definition of done:** built + unit-tested + reviewed; security-auditor on
   anything touching auth/input/secrets/network; qa-verifier evidence for
   user-visible flows; docs (CHANGELOG/BACKLOG/TESTING) updated in the same PR.
