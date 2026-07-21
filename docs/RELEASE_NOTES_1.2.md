@@ -40,7 +40,7 @@ Steps to submit Tripto 1.2 to App Review and release:
 ### Pre-submission (tech)
 
 - [ ] Verify `MARKETING_VERSION` is set to `1.2` in `project.yml`
-- [ ] Build the Release archive in Xcode Cloud (committed to commit hash; tag optional)
+- [ ] Start the Xcode Cloud release workflow against the `v1.2` tag (tag is created by the team once the final 1.2 merge lands — do NOT archive locally; the local Mac runs beta Xcode whose SDK the App Store build must not use)
 - [ ] Verify App Privacy labels in App Store Connect:
   - [ ] No new data types added in 1.2 (attachments use existing Supabase storage disclosure; on-device AI paths add no tracking)
   - [ ] Consent dialogs still name OpenAI (checked: paste-import, scan-to-add cloud path, email-import — all updated in CHANGELOG)
@@ -49,7 +49,7 @@ Steps to submit Tripto 1.2 to App Review and release:
 
 ### Submission (App Store Connect)
 
-- [ ] Upload Build (Xcode Cloud → App Store Connect auto-delivery, or manual upload)
+- [ ] Wait for the Xcode Cloud build to deliver to App Store Connect automatically, then select that build for the 1.2 version
 - [ ] Paste "What's New in Version 1.2" text (see above; plain text, no markdown; 4000 char limit — our version is ~2000)
 - [ ] Consider refreshing promotional text (use "Proposed 1.2" above or own wording; 170 char limit)
 - [ ] Screenshots: can reuse 1.0 set (they show the feature set, not the 1.2 specifics); if desired, regenerate per `RELEASE_READINESS.md` §7
@@ -80,6 +80,6 @@ Steps to submit Tripto 1.2 to App Review and release:
 ## Decision log
 
 **Release version:** 1.2 subsumes both Attachments (original 1.2) + Siri + On-device AI + Suggest + Website (originally Unreleased), dated 2026-07-22.  
-**Build infrastructure:** Xcode Cloud builds remain the norm; manual archive upload also supported if needed.  
+**Build infrastructure:** Xcode Cloud ONLY for store binaries — the owner's local Xcode is beta-toolchain and must never produce the submission archive.  
 **Privacy stance:** On-device-by-default messaging (iOS 26+ Apple Intelligence paths carry zero consent and zero cloud), with cloud paths explicitly disclosed and named.  
 **Marketing angle:** privacy + functionality (scan-to-add, attachments) over "more features." Positioning is "your data, your device, only shared by you" vs. competitors' server-first models.
