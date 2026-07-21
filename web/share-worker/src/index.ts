@@ -1,16 +1,41 @@
 import type { Env } from "./types";
 import { SHARE_TOKEN_PATTERN, INVITE_TOKEN_PATTERN } from "./format";
-import { renderItineraryPage, renderMessagePage, renderPrivacyPage, renderLandingPage } from "./templates";
+import {
+  renderItineraryPage,
+  renderMessagePage,
+  renderPrivacyPage,
+  renderLandingPage,
+  SITE_ORIGIN,
+  FAVICON_SVG,
+} from "./templates";
 import { fetchPublicTrip } from "./supabase";
+// Binary brand assets (wrangler "Data" rules in wrangler.jsonc). Regenerate
+// with web/share-worker/scripts/generate-assets.mjs.
+import OG_IMAGE from "./assets/og.jpg";
+import TOUCH_ICON from "./assets/apple-touch-icon.png";
 
 // Token URLs must never be edge/browser cached, indexed, or leaked via
 // referrer -- every page this worker serves carries these. (Zero-JS pages,
-// so a tight CSP costs nothing.)
+// so a tight CSP costs nothing; img-src 'self' only allows the favicon.)
 const SECURITY_HEADERS: Record<string, string> = {
   "Cache-Control": "no-store",
   "X-Robots-Tag": "noindex, nofollow",
   "Referrer-Policy": "no-referrer",
-  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'",
+};
+
+// Public, indexable, cacheable pages (root landing + privacy) — they are the
+// App Store Marketing / Support / Privacy URLs, so they must resolve and get
+// their own headers, not SECURITY_HEADERS' no-store/noindex. The JSON-LD
+// <script type="application/ld+json"> blocks are data (never executed), so
+// they don't need a script-src carve-out.
+const PUBLIC_HTML_HEADERS: Record<string, string> = {
+  "Content-Type": "text/html; charset=utf-8",
+  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'",
+  "Cache-Control": "public, max-age=3600",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
 };
 
 function html(body: string, status = 200): Response {
@@ -22,6 +47,70 @@ function html(body: string, status = 200): Response {
     },
   });
 }
+
+/** Static public asset (favicon, og image, robots, sitemap…): long-ish cache, nosniff. */
+function asset(body: BodyInit, contentType: string, maxAge = 86400): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": `public, max-age=${maxAge}`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
+// ── SEO infrastructure ─────────────────────────────────────────────────────
+// Only the landing page and /privacy are meant to be crawled; token pages
+// (/t/, /join/) are unlisted and additionally carry X-Robots-Tag: noindex.
+
+const ROBOTS_TXT = `User-agent: *
+Allow: /
+Disallow: /t/
+Disallow: /join/
+
+Sitemap: ${SITE_ORIGIN}/sitemap.xml
+`;
+
+// lastmod dates: bump the "/" entry when the landing page changes materially,
+// and "/privacy" when the policy's "Last updated" date changes.
+const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${SITE_ORIGIN}/</loc>
+    <lastmod>2026-07-21</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>${SITE_ORIGIN}/privacy</loc>
+    <lastmod>2026-07-11</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.5</priority>
+  </url>
+</urlset>
+`;
+
+// Optional AI-crawler courtesy file (llmstxt.org convention): a compact,
+// factual summary so LLM agents cite real facts instead of guessing.
+const LLMS_TXT = `# Tripto
+
+> Tripto is a group trip planner for iPhone, built for families and friend
+> groups: everyone's flights, stays and plans on one shared day-by-day
+> itinerary, each shown in its own local time zone. It works offline, has
+> shared per-person packing lists, and can share a read-only web itinerary
+> link that needs no app and no account. No ads, no tracking, no data
+> selling. Status: in TestFlight, App Store launch upcoming. Contact:
+> tripto@navbytes.io.
+
+## Pages
+
+- [Home](${SITE_ORIGIN}/): what Tripto does, features, FAQ
+- [Privacy policy](${SITE_ORIGIN}/privacy): full privacy policy
+
+Note: URLs under /t/ and /join/ are private share/invite links — do not
+crawl, index, or cite them.
+`;
 
 function notFoundPage(): Response {
   return html(
@@ -143,19 +232,29 @@ export default {
         return handleAasa(env);
       }
 
-      // Public, indexable, cacheable pages (root landing + privacy) — they are
-      // the App Store Marketing / Support / Privacy URLs, so they must resolve
-      // and get their own headers, not SECURITY_HEADERS' no-store/noindex.
-      const publicHeaders = {
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
-        "Cache-Control": "public, max-age=3600",
-      };
       if (path === "/" || path === "") {
-        return new Response(renderLandingPage(), { status: 200, headers: publicHeaders });
+        return new Response(renderLandingPage(), { status: 200, headers: PUBLIC_HTML_HEADERS });
       }
       if (path === "/privacy" || path === "/privacy/") {
-        return new Response(renderPrivacyPage(), { status: 200, headers: publicHeaders });
+        return new Response(renderPrivacyPage(), { status: 200, headers: PUBLIC_HTML_HEADERS });
+      }
+
+      // Crawler + brand asset routes (all public, all static).
+      switch (path) {
+        case "/robots.txt":
+          return asset(ROBOTS_TXT, "text/plain; charset=utf-8");
+        case "/sitemap.xml":
+          return asset(SITEMAP_XML, "application/xml; charset=utf-8");
+        case "/llms.txt":
+          return asset(LLMS_TXT, "text/plain; charset=utf-8");
+        case "/favicon.svg":
+          return asset(FAVICON_SVG, "image/svg+xml", 604800);
+        case "/favicon.ico": // legacy UA fallback — serve the SVG, browsers sniff-tolerate it via type header
+          return asset(FAVICON_SVG, "image/svg+xml", 604800);
+        case "/og.jpg":
+          return asset(OG_IMAGE, "image/jpeg", 604800);
+        case "/apple-touch-icon.png":
+          return asset(TOUCH_ICON, "image/png", 604800);
       }
 
       const shareMatch = path.match(/^\/t\/([^/]+)\/?$/);
