@@ -1,5 +1,7 @@
 import AppIntents
 import Foundation
+import Supabase
+import SwiftData
 
 /// PLAN-signature-layer.md §D7: "when's my next flight/trip" answered via
 /// Siri/Shortcuts WITHOUT foregrounding the app. Reads the same app-group
@@ -17,13 +19,120 @@ struct NextUpIntent: AppIntent {
     }
 }
 
-/// One intent, one shortcut, fixed (non-parameterized) phrases — research §3:
-/// a phrase built around an `AppEntity` parameter stays invisible in
-/// Shortcuts/Siri until the app has launched once and registered its
-/// entities via `updateAppShortcutParameters()`; these fixed phrases are
-/// discoverable the moment the app is installed (spot-checked live for
-/// W2-C — see the handoff for the verdict). Deliberately no `AppEntity`/
-/// per-trip phrase — out of scope per §D7 and research §3.
+/// App-intents deepening: "Add <item> to my packing list", writing through
+/// the exact offline-first outbox path every in-app add already uses
+/// (`PackingItem.insert`) — offline-safe by construction, no intent-specific
+/// plumbing needed. `openAppWhenRun = false` for the same reason as
+/// `NextUpIntent` above: this acts in place, no need to foreground the app —
+/// `AppServices` (`Platform/AppServices.swift`) is what makes that possible
+/// without SwiftUI's environment.
+struct AddToPackingIntent: AppIntent {
+    static let title: LocalizedStringResource = "Add to packing list"
+    static let description = IntentDescription("Add an item to a trip\u{2019}s packing list.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Item")
+    var item: String
+
+    /// `nil` resolves to the focus trip (`FocusTripSelection`, BRIEF
+    /// decision: in-progress else next upcoming) — the same trip
+    /// `NextUpIntent`/the Today widget already treat as "the" trip.
+    @Parameter(title: "Trip")
+    var trip: TripEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Add \(\.$item) to my packing list") {
+            \.$trip
+        }
+    }
+
+    /// `@MainActor`: `ModelContainer.mainContext` (SwiftData) is
+    /// main-actor-isolated — the same context every in-app write already
+    /// goes through via `@Environment(\.modelContext)`, so an item Siri adds
+    /// is visible immediately if the app happens to already be foregrounded.
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let label = AddToPackingDialog.validatedLabel(item) else {
+            return .result(dialog: IntentDialog(stringLiteral: AddToPackingDialog.emptyLabelMessage))
+        }
+        // `SnapshotTrip` carries no `createdBy` (§D6's deliberately minimal
+        // field list), so unlike `PackingListView.addItem`'s signed-out
+        // local-creator allowance, this path has no fallback identity to
+        // write with and must require a real session.
+        guard let userId = Supa.client.auth.currentSession?.user.id else {
+            return .result(dialog: IntentDialog(stringLiteral: AddToPackingDialog.signedOutMessage))
+        }
+        let target: (id: UUID, title: String)?
+        if let trip {
+            target = (trip.id, trip.title)
+        } else if let focusTrip = FocusTripSelection.focusTrip(in: TripSnapshot.load()?.trips ?? []) {
+            target = (focusTrip.id, focusTrip.title)
+        } else {
+            target = nil
+        }
+        guard let target, let services = AppServices.shared else {
+            return .result(dialog: IntentDialog(stringLiteral: AddToPackingDialog.noTripMessage))
+        }
+        // An intent must never claim success on a write RLS is about to
+        // reject (verify-wave reviewer finding) — same source (`trip_members`
+        // mirror) and same predicate `PackingListView.canManage`'s signed-in
+        // branch already gates manual add with.
+        let role = TripMemberRoleLookup.role(forUserId: userId, tripId: target.id, in: services.modelContainer.mainContext)
+        guard PackingPermissions.canManage(role: role) else {
+            return .result(dialog: IntentDialog(stringLiteral: AddToPackingDialog.viewerMessage))
+        }
+        PackingItem.insert(
+            label: label, groupKey: .shared, assigneeProfileId: nil,
+            tripId: target.id, createdBy: userId,
+            modelContext: services.modelContainer.mainContext, syncEngine: services.syncEngine
+        )
+        return .result(dialog: IntentDialog(stringLiteral: AddToPackingDialog.confirmation(item: label, tripTitle: target.title)))
+    }
+}
+
+/// App-intents deepening: "What's my confirmation code for <booking>?" — the
+/// code itself is read from SwiftData at perform-time only (never the
+/// snapshot, a donation, or a Spotlight attribute; see `ConfirmationCodeLookup`'s
+/// doc comment) and the intent requires the device to be unlocked before it
+/// runs at all, since a locked-screen Siri answer would otherwise read a
+/// booking reference aloud to anyone nearby.
+struct ConfirmationCodeIntent: AppIntent {
+    static let title: LocalizedStringResource = "Confirmation code"
+    static let description = IntentDescription("Hear the confirmation code saved for a flight, hotel, or transport booking.")
+    static let openAppWhenRun = false
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresLocalDeviceAuthentication }
+
+    @Parameter(title: "Booking")
+    var booking: BookingEntity
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("What\u{2019}s my confirmation code for \(\.$booking)?")
+    }
+
+    /// `@MainActor`: see `AddToPackingIntent.perform()`'s doc comment — same
+    /// `ModelContainer.mainContext` reasoning, read-only here.
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let code = AppServices.shared.flatMap { ConfirmationCodeLookup.code(forItemId: booking.id, in: $0.modelContainer.mainContext) }
+        return .result(dialog: IntentDialog(stringLiteral: ConfirmationCodeDialog.build(title: booking.title, code: code)))
+    }
+}
+
+/// `NextUpIntent` keeps its original fixed (non-parameterized) phrases —
+/// research §3: a phrase built around an `AppEntity` parameter stays
+/// invisible in Shortcuts/Siri until the app has launched once and
+/// registered its entities via `updateAppShortcutParameters()`, so a fixed
+/// phrase is discoverable the moment the app is installed (spot-checked
+/// live for W2-C — see the handoff for the verdict). `ConfirmationCodeIntent`
+/// IS entity-parameterized (`BookingEntity` below) and embeds it in its own
+/// phrases; that first-launch discoverability gap is an accepted platform
+/// norm for it (BRIEF decision, matches the 1.1 posture this comment
+/// originally described), not a defect to work around. `AddToPackingIntent`'s
+/// `item` is a plain `String`, not an `AppEntity`/`AppEnum` — the App
+/// Intents metadata compiler rejects a phrase that tries to embed one (only
+/// entity/enum parameters are speakable-in-phrase; a required
+/// non-embeddable parameter still gets asked for conversationally once the
+/// phrase itself matches), so its phrases stay fixed like `NextUpIntent`'s.
 struct TriptoShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -36,6 +145,80 @@ struct TriptoShortcuts: AppShortcutsProvider {
             shortTitle: "Next trip",
             systemImageName: "airplane.departure"
         )
+        AppShortcut(
+            intent: AddToPackingIntent(),
+            phrases: [
+                "Add to my packing list in \(.applicationName)",
+                "Add a packing item in \(.applicationName)"
+            ],
+            shortTitle: "Add to packing list",
+            systemImageName: "bag.badge.plus"
+        )
+        AppShortcut(
+            intent: ConfirmationCodeIntent(),
+            phrases: [
+                "What\u{2019}s my confirmation code for \(\.$booking) in \(.applicationName)?",
+                "Get my confirmation code for \(\.$booking) in \(.applicationName)"
+            ],
+            shortTitle: "Confirmation code",
+            systemImageName: "checkmark.seal"
+        )
+    }
+}
+
+// MARK: - Entities
+
+/// Options sourced from the same app-group `TripSnapshot` every glanceable
+/// surface reads (§D6) — no `ModelContainer` spin-up just to list trips for
+/// Siri/Shortcuts to disambiguate. See `TripEntityOptions` (`IntentSupport
+/// .swift`) for the actual (testable) snapshot -> options mapping; this type
+/// stays thin wiring over it, matching `EntityQuery`'s own examples.
+struct TripEntity: AppEntity {
+    let id: UUID
+    let title: String
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Trip"
+    static let defaultQuery = TripEntityQuery()
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(title)")
+    }
+}
+
+struct TripEntityQuery: EntityQuery {
+    func entities(for identifiers: [TripEntity.ID]) async throws -> [TripEntity] {
+        TripEntityOptions.options(from: TripSnapshot.load()).filter { identifiers.contains($0.id) }
+    }
+
+    func suggestedEntities() async throws -> [TripEntity] {
+        TripEntityOptions.options(from: TripSnapshot.load())
+    }
+}
+
+/// A flight/hotel/transport item from the focus trip (`BookingEntityOptions`,
+/// `IntentSupport.swift`) — id + display title only. Never carries a
+/// confirmation code (BRIEF decision: codes never leave SwiftData except at
+/// `ConfirmationCodeIntent.perform()`'s own point-of-use read), so this type
+/// is safe to donate/persist in a shortcut with no exposure risk.
+struct BookingEntity: AppEntity {
+    let id: UUID
+    let title: String
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Booking"
+    static let defaultQuery = BookingEntityQuery()
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(title)")
+    }
+}
+
+struct BookingEntityQuery: EntityQuery {
+    func entities(for identifiers: [BookingEntity.ID]) async throws -> [BookingEntity] {
+        BookingEntityOptions.options(from: TripSnapshot.load()).filter { identifiers.contains($0.id) }
+    }
+
+    func suggestedEntities() async throws -> [BookingEntity] {
+        BookingEntityOptions.options(from: TripSnapshot.load())
     }
 }
 
