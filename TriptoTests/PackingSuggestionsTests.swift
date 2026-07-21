@@ -61,3 +61,15 @@ final class PackingSuggestionsTests: XCTestCase {
         XCTAssertEqual(PackingSuggestions.dedupe(candidates, existingLabels: []).count, 1)
     }
 }
+
+extension PackingSuggestionsTests {
+    // Review nit: the model can repeat itself despite the instruction —
+    // dedupe must fold candidates against each other, not just existing.
+    func testDedupeFoldsCandidatesAgainstEachOther() {
+        let twice = [
+            PackingCandidate(label: "Socks", groupKey: .clothing),
+            PackingCandidate(label: " socks ", groupKey: .clothing)
+        ]
+        XCTAssertEqual(PackingSuggestions.dedupe(twice, existingLabels: []).count, 1)
+    }
+}

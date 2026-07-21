@@ -24,8 +24,11 @@ enum PackingSuggestions {
     /// Case/whitespace-insensitive so "passports " and "Passports" both
     /// count as the same existing item.
     static func dedupe(_ candidates: [PackingCandidate], existingLabels: [String]) -> [PackingCandidate] {
-        let existing = Set(existingLabels.map(Self.normalized))
-        return candidates.filter { !existing.contains(Self.normalized($0.label)) }
+        // `seen` starts as the existing labels and grows with each kept
+        // candidate — also folds the model's own output against itself
+        // (review nit: it can emit "Socks" twice despite the instruction).
+        var seen = Set(existingLabels.map(Self.normalized))
+        return candidates.filter { seen.insert(Self.normalized($0.label)).inserted }
     }
 
     private static func normalized(_ label: String) -> String {

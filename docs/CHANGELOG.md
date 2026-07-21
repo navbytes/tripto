@@ -4,6 +4,15 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### On-device AI: catch me up + packing suggestions (2026-07-22)
+
+#### Added
+- **"Catch me up" trip summary:** a menu action on the trip screen generates a short plain-language summary of the trip's saved plans — entirely on this iPhone (iOS 26+ with Apple Intelligence; the action simply doesn't appear elsewhere). Carries an explicit "summarized from your saved plans — check the itinerary for exact times" disclosure so generated prose is never mistaken for verified itinerary fact.
+- **Packing suggestions:** "Suggest a starting list" on the packing tab (header + empty state) proposes practical items for the trip, on-device only. Nothing is ever added automatically — suggestions arrive as a pre-checked vetting checklist (same row UI as paste-import, now shared), deduplicated against the existing list and against themselves, inserted only via an explicit counted "Add N items".
+
+#### Changed
+- **Packing checklist checkboxes now meet the 44pt tap floor** (shared component — paste-import inherits the fix); generation failures offer an in-place "Try again" instead of a dead end.
+
 ### Suggest a plan + on-device polish (2026-07-21)
 
 #### Added

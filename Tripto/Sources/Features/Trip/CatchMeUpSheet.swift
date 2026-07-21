@@ -26,6 +26,13 @@ struct CatchMeUpSheet: View {
         case failure
     }
 
+    /// UX audit: the summary is a model's read of the trip, not a re-check
+    /// of it — this caption is what keeps it from reading as verified
+    /// itinerary fact (§6.6 voice). Shared by the visible caption and the
+    /// VoiceOver completion announcement below so the two can't drift.
+    private static let disclosureCaption =
+        "Summarized on this iPhone from your saved plans. Check the itinerary for exact times."
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -61,23 +68,40 @@ struct CatchMeUpSheet: View {
             // `PasteImportSheet`'s own batch-progress row.
             .accessibilityElement(children: .combine)
         case .success(let text):
-            Text(text)
-                .font(Typo.body())
-                .foregroundStyle(Palette.ink)
-                .textSelection(.enabled)
-                .opacity(hasAppeared ? 1 : 0)
-                .offset(y: hasAppeared ? 0 : 8)
-                .onAppear {
-                    withAnimation(Motion.m(Motion.gentle, reduceMotion: reduceMotion)) { hasAppeared = true }
-                }
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text(text)
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.ink)
+                    .textSelection(.enabled)
+                // UX audit: on-brand disclosure caption — the summary must
+                // never read as verified itinerary fact.
+                Text(Self.disclosureCaption)
+                    .font(Typo.body(Typo.Size.caption))
+                    .foregroundStyle(Palette.slate)
+            }
+            .opacity(hasAppeared ? 1 : 0)
+            .offset(y: hasAppeared ? 0 : 8)
+            .onAppear {
+                withAnimation(Motion.m(Motion.gentle, reduceMotion: reduceMotion)) { hasAppeared = true }
+            }
         case .failure:
-            Text("Couldn\u{2019}t summarize this trip right now.")
-                .font(Typo.body())
-                .foregroundStyle(Palette.slate)
+            // UX audit: no dead-end failure (§6.6) — "Try again" re-runs
+            // the same `generate()` the sheet already calls on appear.
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                Text("Couldn\u{2019}t summarize this trip right now.")
+                    .font(Typo.body())
+                    .foregroundStyle(Palette.slate)
+                Button("Try again") { Task { await generate() } }
+                    .buttonStyle(.primaryCapsule)
+            }
         }
     }
 
     private func generate() async {
+        // Re-entrant: also the "Try again" tap on a prior failure, which
+        // needs the loading state (and its own spinner/announcement) back
+        // rather than jumping straight from failure copy to success.
+        state = .loading
         AccessibilityNotification.Announcement("Summarizing your trip\u{2026}").post()
         let context = TripPromptContext.render(trip: trip, memberNames: memberNames, items: items)
         #if canImport(FoundationModels)
@@ -85,7 +109,9 @@ struct CatchMeUpSheet: View {
             switch await OnDeviceExtractor.summarizeTrip(context: context) {
             case .success(let text):
                 state = .success(text)
-                AccessibilityNotification.Announcement(text).post()
+                // Folds the disclosure caption into the same announcement
+                // so a VoiceOver user hears it without swiping further.
+                AccessibilityNotification.Announcement("\(text) \(Self.disclosureCaption)").post()
             case .failure:
                 state = .failure
                 AccessibilityNotification.Announcement("Couldn\u{2019}t summarize this trip right now.").post()

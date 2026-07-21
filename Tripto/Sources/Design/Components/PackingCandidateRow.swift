@@ -44,6 +44,15 @@ struct PackingCandidateRow: View {
                                 .foregroundStyle(.white)
                         }
                     }
+                    // UX audit: this is the row's only deselect affordance,
+                    // so it needs its own 44pt floor (BUILD_PLAN §6.5), not
+                    // just a share of the row's wider tap band — grows only
+                    // the invisible tappable area around the checkbox (same
+                    // "frame after the visual size" recipe as `TripView
+                    // .pasteImportPill`); the visible box stays pinned to
+                    // `checkboxSide`.
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             // This checkbox had no accessible label at all — VoiceOver read

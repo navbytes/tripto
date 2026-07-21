@@ -71,11 +71,22 @@ struct PackingSuggestionsSheet: View {
         case .loading:
             loadingView
         case .failure:
+            failureView
+        case .ready:
+            readyView
+        }
+    }
+
+    /// UX audit: no dead-end failure (§6.6, `PackingListView.unavailableState`
+    /// precedent) — "Try again" re-runs the same `generate()` the sheet
+    /// already calls on appear.
+    private var failureView: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Couldn\u{2019}t suggest packing items right now.")
                 .font(Typo.body())
                 .foregroundStyle(Palette.slate)
-        case .ready:
-            readyView
+            Button("Try again") { Task { await generate() } }
+                .buttonStyle(.primaryCapsule)
         }
     }
 
@@ -132,6 +143,10 @@ struct PackingSuggestionsSheet: View {
     }
 
     private func generate() async {
+        // Re-entrant: also the "Try again" tap on a prior failure — reset
+        // rather than jump straight from failure copy to a stale checklist.
+        state = .loading
+        candidates = []
         AccessibilityNotification.Announcement("Suggesting packing items\u{2026}").post()
         let context = TripPromptContext.render(
             trip: trip, memberNames: memberNames, items: items, existingPackingLabels: existingLabels
