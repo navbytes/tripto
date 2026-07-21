@@ -58,4 +58,21 @@ final class ItemPermissionsTests: XCTestCase {
         XCTAssertFalse(ItemPermissions.canAdd(role: .viewer))
         XCTAssertFalse(ItemPermissions.canAdd(role: nil))
     }
+
+    func testCanSuggestIsViewerOnly() {
+        XCTAssertFalse(ItemPermissions.canSuggest(role: .organizer))
+        XCTAssertFalse(ItemPermissions.canSuggest(role: .companion))
+        XCTAssertTrue(ItemPermissions.canSuggest(role: .viewer))
+        XCTAssertFalse(ItemPermissions.canSuggest(role: nil))
+    }
+
+    func testCanReviewSuggestionIsOrganizerOrCompanionOnly() {
+        XCTAssertTrue(ItemPermissions.canReviewSuggestion(role: .organizer))
+        XCTAssertTrue(ItemPermissions.canReviewSuggestion(role: .companion))
+        XCTAssertFalse(
+            ItemPermissions.canReviewSuggestion(role: .viewer),
+            "a viewer must never see confirm/dismiss on a suggestion, including their own"
+        )
+        XCTAssertFalse(ItemPermissions.canReviewSuggestion(role: nil))
+    }
 }

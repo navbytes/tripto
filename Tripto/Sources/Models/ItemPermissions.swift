@@ -14,6 +14,27 @@ enum ItemPermissions {
         role == .organizer || role == .companion
     }
 
+    /// Propose a plan without edit rights (BRIEF.md "suggest tray," BUILD_PLAN
+    /// §5.6, repurposed for viewers not companions per the engagement's
+    /// logged decision) — the mirror image of `canAdd`: viewer only.
+    /// Backend RLS grants a matching viewer-only INSERT (status='suggested',
+    /// created_by=self); this just gates the client affordance
+    /// (`TripView`'s FAB, `AddItemSheet`'s `isSuggesting` mode).
+    static func canSuggest(role: TripRole?) -> Bool {
+        role == .viewer
+    }
+
+    /// Confirm or dismiss a `status == .suggested` item in the review inbox
+    /// — organizer or companion, the same shape `canAdd` already grants
+    /// (whoever can add an item directly is trusted to review one someone
+    /// else proposed). A viewer's own suggestion stays visible to them
+    /// (RLS SELECT is unrestricted) but never actionable — `AddItemSheet`
+    /// renders a read-only "Waiting for review" state instead, since RLS
+    /// grants a viewer no UPDATE/DELETE at all.
+    static func canReviewSuggestion(role: TripRole?) -> Bool {
+        canAdd(role: role)
+    }
+
     /// Edit/delete a specific item: organizer may touch any item; a
     /// companion only one they created themselves; a viewer never.
     ///

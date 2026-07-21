@@ -187,6 +187,31 @@ struct TripView: View {
         return myRole != .viewer
     }
 
+    /// Suggest-tray (BRIEF.md): a viewer can't add directly (`canAddItems`
+    /// above rightly excludes them from every edit affordance), but can
+    /// propose one into the review inbox — `ItemPermissions.canSuggest`'s
+    /// mirror image of `canAddItems`'s "not viewer." Signed-out is never
+    /// a viewer (always the local creator, see `canAddItems`'s doc
+    /// comment), so `myRole` reading `nil` there is already correct here
+    /// too — no separate signed-out branch needed.
+    private var canSuggestItems: Bool {
+        ItemPermissions.canSuggest(role: myRole)
+    }
+
+    /// The FAB's role gate widens ONLY here — every other affordance
+    /// `canAddItems` gates (itinerary/booking row edits, the Bookings
+    /// empty-state Add, paste-import) stays organizer/companion-only,
+    /// untouched. A viewer sees the identical FAB, just doing "Suggest a
+    /// plan" instead of "Add" (`fabAccessibilityLabel`, `AddItemSheet`'s
+    /// `isSuggesting` mode below).
+    private var canShowFab: Bool {
+        canAddItems || canSuggestItems
+    }
+
+    private var fabAccessibilityLabel: String {
+        canAddItems ? "Add to itinerary" : "Suggest a plan"
+    }
+
     /// Finding 2: the hero pencil's own gate was `myRole == .organizer`
     /// only — that reads `nil` for a signed-out local creator (whose
     /// `TripMember` row is always locally resolved, never fetched), so it
@@ -569,8 +594,8 @@ struct TripView: View {
                 // UX audit finding 5: FAB shows on Itinerary and Bookings —
                 // Packing owns its own FAB (see `PackingListView`), so it's
                 // excluded here rather than allow-listing just `.itinerary`.
-                if canAddItems && selectedTab != .packing {
-                    Fab { isPresentingAdd = true }
+                if canShowFab && selectedTab != .packing {
+                    Fab(action: { isPresentingAdd = true }, accessibilityLabel: fabAccessibilityLabel)
                         .padding(.trailing, Spacing.xl)
                         .padding(.bottom, Spacing.xxl)
                 }
@@ -581,7 +606,8 @@ struct TripView: View {
             AddItemSheet(
                 tripId: trip.id, tripTitle: trip.title, editing: nil,
                 defaultZone: NewItemZoneDefault.zone(forExistingItemTzIdentifiers: items.map(\.tz)),
-                tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy
+                tripStartDate: trip.startDate, tripCreatedBy: trip.createdBy,
+                isSuggesting: canSuggestItems
             ) { message in
                 toast = message
             }
