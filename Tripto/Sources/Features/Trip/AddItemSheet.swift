@@ -604,7 +604,11 @@ struct AddItemSheet: View {
                     }
                     onToast("\(candidates.count) item\(candidates.count == 1 ? "" : "s") added to packing list")
                 },
-                tripCreatedBy: tripCreatedBy
+                tripCreatedBy: tripCreatedBy,
+                attachmentAttacher: AttachmentService(
+                    modelContext: modelContext, syncEngine: syncEngine,
+                    uploaderUserId: authManager.userId
+                )
             )
         }
         .background(

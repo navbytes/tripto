@@ -149,6 +149,14 @@ extension SyncStore {
         where !validTripIds.contains(row.tripId) && !pending.contains(row.id) {
             modelContext.delete(row)
         }
+        // `ItemAttachment` carries its own `tripId` (C1's composite FK
+        // guarantees `itemId` belongs to it), so — unlike `ItemAssignee`
+        // below — this is a plain direct-`tripId` prune, same shape as
+        // every other row in this loop.
+        for row in try modelContext.fetch(FetchDescriptor<ItemAttachment>())
+        where !validTripIds.contains(row.tripId) && !pending.contains(row.id) {
+            modelContext.delete(row)
+        }
         for row in try modelContext.fetch(FetchDescriptor<TripShareLink>())
         where !validTripIds.contains(row.tripId) && !pending.contains(row.id) {
             modelContext.delete(row)
@@ -336,5 +344,76 @@ extension SyncStore {
             if let model = existingById[id] { modelContext.delete(model) }
         }
         try modelContext.save()
+    }
+
+    /// `item_attachments` carries its own `trip_id` (C1: the composite FK
+    /// guarantees `item_id` belongs to it), so — unlike `applyItemAssignees`
+    /// above (no `trip_id`, scoped indirectly via this trip's item ids) —
+    /// this follows the exact same direct-`tripId`-filtered upsert +
+    /// delete-if-absent shape as `applyItineraryItems`/`applyPackingItems`,
+    /// guarded by this pull's OWN `skippedCount` the same way every table in
+    /// this file is (D1: a malformed row must never look like a server-side
+    /// delete).
+    func applyItemAttachments(_ dtos: [ItemAttachmentDTO], tripId: UUID, skippedCount: Int = 0) throws {
+        let pending = try allPendingRowIds()
+        let existing = try modelContext.fetch(
+            FetchDescriptor<ItemAttachment>(predicate: #Predicate { $0.tripId == tripId })
+        )
+        let existingById = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let pulledIds = Set(dtos.map(\.id))
+
+        for dto in dtos where !pending.contains(dto.id) {
+            if let model = existingById[dto.id] {
+                model.apply(dto)
+            } else {
+                modelContext.insert(ItemAttachment(dto: dto))
+            }
+        }
+
+        if skippedCount > 0 {
+            logDebug("applyItemAttachments: skipping delete phase — \(skippedCount) malformed row(s) this pull")
+        }
+        let toDelete = SyncReconcile.idsToDelete(
+            existingIds: Set(existingById.keys), pulledIds: pulledIds, pendingIds: pending, skippedCount: skippedCount
+        )
+        for id in toDelete {
+            if let model = existingById[id] { modelContext.delete(model) }
+        }
+        try modelContext.save()
+    }
+}
+
+// MARK: - Attachment prefetch (PRODUCT_PLAN.md §2.1 "airport-basement case")
+
+/// A `Sendable` snapshot of an `ItemAttachment` row — `@Model` instances are
+/// reference types tied to their originating `ModelContext` and must never
+/// cross an actor boundary (`OutboxOpSnapshot`'s own doc comment states the
+/// same rule), so `SyncStore` hands these out instead.
+struct AttachmentPrefetchCandidate: Sendable, Equatable {
+    var id: UUID
+    var storagePath: String
+    var contentType: AttachmentContentType
+}
+
+extension SyncStore {
+    /// Every attachment belonging to an item starting within `days` of `now`
+    /// — `SyncEngine.pullTrip`'s post-pull hook downloads+caches whichever of
+    /// these aren't already on disk, so a previously-unopened attachment for
+    /// this week's flight is already viewable before airplane mode hits.
+    func attachmentsStartingSoon(tripId: UUID, within days: Int, now: Date) throws -> [AttachmentPrefetchCandidate] {
+        guard let horizon = Calendar(identifier: .gregorian).date(byAdding: .day, value: days, to: now) else {
+            return []
+        }
+        let itemIds = Set(
+            try modelContext.fetch(
+                FetchDescriptor<ItineraryItem>(
+                    predicate: #Predicate { $0.tripId == tripId && $0.startsAt >= now && $0.startsAt <= horizon }
+                )
+            ).map(\.id)
+        )
+        guard !itemIds.isEmpty else { return [] }
+        return try modelContext.fetch(
+            FetchDescriptor<ItemAttachment>(predicate: #Predicate { itemIds.contains($0.itemId) })
+        ).map { AttachmentPrefetchCandidate(id: $0.id, storagePath: $0.storagePath, contentType: $0.contentType) }
     }
 }

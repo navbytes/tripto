@@ -106,10 +106,13 @@ struct PrivacySummaryView: View {
             id: "import",
             symbolName: "sparkles",
             title: "AI helps only when you paste to import",
+            // Guideline 5.1.2(i): the cloud provider is NAMED here — this
+            // string must change if the backend's LLM_MODEL secret moves off
+            // OpenAI (same rule as the consent dialogs it summarizes).
             body: "On supported iPhones you choose where processing happens \u{2014} on-device by default "
-                + "(never leaves), or cloud AI (via Cloudflare) if you prefer; other iPhones always use "
-                + "the cloud. It isn\u{2019}t stored in your account afterward, and we ask permission "
-                + "before the first cloud send."
+                + "(never leaves), or cloud AI (sent to OpenAI through our Cloudflare gateway) if you "
+                + "prefer; other iPhones always use the cloud. It isn\u{2019}t stored in your account "
+                + "afterward, and we ask permission before the first cloud send."
         ),
         PrivacyPoint(
             id: "delete",

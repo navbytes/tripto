@@ -307,6 +307,7 @@ struct BookingDetailView: View {
                 tagsBlock(for: item)
                 editedByLabel(for: item)
                 actionRow(for: item)
+                AttachmentStrip(item: item, myRole: myRole, myUserId: authManager.userId, toast: $toast)
                 notesBlock(for: item)
 
                 if !canEdit {

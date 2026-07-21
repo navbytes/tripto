@@ -31,6 +31,14 @@ enum ImageProcessing {
     /// own doc comment, which anticipated exactly this reuse).
     static let coverMaxPixelSize: CGFloat = 1600
 
+    /// Release 1.2 attachment bound (`.claude/company/release-1.2/PLAN.md`
+    /// §2.1: "long edge ≈2400px / quality 0.85 — higher than covers so
+    /// barcodes stay crisp"). `AttachmentService.attach` passes both
+    /// explicitly to the same `downsampledJPEG` pipeline avatars/covers
+    /// already share.
+    static let attachmentMaxPixelSize: CGFloat = 2400
+    static let attachmentCompressionQuality: CGFloat = 0.85
+
     /// Decode -> downsample -> re-encode as JPEG, via
     /// `CGImageSourceCreateThumbnailAtIndex` (P8a brief's exact option set):
     /// `kCGImageSourceThumbnailMaxPixelSize` bounds the longest side;

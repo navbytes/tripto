@@ -608,7 +608,11 @@ struct TripView: View {
                 // outbox path `AddItemSheet` uses above — same
                 // signed-out-local-creator fallback as `onPackingConfirmed`
                 // just above needs for the exact same reason.
-                tripCreatedBy: trip.createdBy
+                tripCreatedBy: trip.createdBy,
+                attachmentAttacher: AttachmentService(
+                    modelContext: modelContext, syncEngine: syncEngine,
+                    uploaderUserId: authManager.userId
+                )
             )
         }
         .sheet(isPresented: $isPresentingImportReview) {

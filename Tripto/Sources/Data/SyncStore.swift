@@ -260,6 +260,13 @@ extension SyncStore {
         case .tripProfiles:
             guard let model = try fetchOne(TripProfile.self, predicate: #Predicate { $0.id == rowId }) else { return false }
             try enqueueDTOUpsert(model.toDTO(), table: table, rowId: rowId, tripId: model.tripId)
+        case .itemAttachments:
+            // Single `id`-keyed like the four cases above (unlike
+            // `.itemAssignees`'s composite key) — the file itself already
+            // landed in storage during `AttachmentService.attach`, so a
+            // retry here only needs to resend the metadata row.
+            guard let model = try fetchOne(ItemAttachment.self, predicate: #Predicate { $0.id == rowId }) else { return false }
+            try enqueueDTOUpsert(model.toDTO(), table: table, rowId: rowId, tripId: model.tripId)
         case .profiles, .tripMembers, .shareLinks, .invites, .itemAssignees:
             return false
         }
@@ -308,6 +315,7 @@ extension SyncStore {
         try modelContext.delete(model: ItineraryItem.self)
         try modelContext.delete(model: PackingItem.self)
         try modelContext.delete(model: ItemAssignee.self)
+        try modelContext.delete(model: ItemAttachment.self)
         try modelContext.delete(model: TripShareLink.self)
         try modelContext.delete(model: Invite.self)
         try modelContext.delete(model: OutboxOp.self)

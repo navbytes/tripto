@@ -109,14 +109,23 @@ extension SyncEngine {
                 .select().eq("trip_id", value: tripId).execute().value
             async let invites: LossyCodableList<InviteDTO> = Supa.client.from(SyncTable.invites.rawValue)
                 .select().eq("trip_id", value: tripId).execute().value
+            // Release 1.2: `item_attachments` carries its own `trip_id`
+            // (`ItemAttachment`'s doc comment), so — unlike `item_assignees`
+            // below — it joins this concurrent batch directly rather than
+            // depending on `itemsResult`'s decoded ids.
+            async let attachments: LossyCodableList<ItemAttachmentDTO> = Supa.client
+                .from(SyncTable.itemAttachments.rawValue)
+                .select().eq("trip_id", value: tripId).execute().value
 
-            let (itemsResult, packingResult, shareLinksResult, invitesResult) =
-                try await (items, packing, shareLinks, invites)
+            let (itemsResult, packingResult, shareLinksResult, invitesResult, attachmentsResult) =
+                try await (items, packing, shareLinks, invites, attachments)
 
             try await store.applyItineraryItems(itemsResult.elements, tripId: tripId, skippedCount: itemsResult.skippedCount)
             try await store.applyPackingItems(packingResult.elements, tripId: tripId, skippedCount: packingResult.skippedCount)
             try await store.applyShareLinks(shareLinksResult.elements, tripId: tripId, skippedCount: shareLinksResult.skippedCount)
             try await store.applyInvites(invitesResult.elements, tripId: tripId, skippedCount: invitesResult.skippedCount)
+            try await store.applyItemAttachments(
+                attachmentsResult.elements, tripId: tripId, skippedCount: attachmentsResult.skippedCount)
 
             // `item_assignees` has no `trip_id` column (composite PK
             // item_id+profile_id — `ItemAssignee`'s doc comment), so it
@@ -146,6 +155,11 @@ extension SyncEngine {
             // `itinerary_items` — a remote edit/add/delete on the focus
             // trip's items belongs in the next snapshot.
             await snapshotWriter.notifyDataChanged()
+            // Release 1.2 §2.1 "airport-basement case": fire-and-forget, off
+            // the pull's own success/failure path — a slow or failed
+            // prefetch must never hold up `pullTrip` returning or flip it to
+            // the failed state.
+            Task { await self.prefetchUpcomingAttachments(tripId: tripId) }
         } catch {
             logDebug("pullTrip(\(tripId)) failed: \(error)")
             await status.setTripPullFailed(tripId, true)
@@ -160,5 +174,26 @@ extension SyncEngine {
         // `!syncStatus.isOffline` check instead.
         await status.markInitialTripPullCompleted(tripId)
         await refreshStatusCounts()
+    }
+
+    /// PRODUCT_PLAN.md §2.1: "items inside the next-7-days window prefetch
+    /// on trip open." Best-effort and silent — a failed download here just
+    /// means `AttachmentStrip`'s existing offline-placeholder path shows
+    /// instead of a warmed thumbnail, never a crash/toast for a background
+    /// hook the user didn't trigger. Sequential, not a `TaskGroup`: this is a
+    /// handful of files for the one trip just opened, not worth the added
+    /// complexity for what's already a background nicety.
+    private func prefetchUpcomingAttachments(tripId: UUID) async {
+        guard !isEffectivelyOffline else { return }
+        guard let candidates = try? await store.attachmentsStartingSoon(tripId: tripId, within: 7, now: .now) else {
+            return
+        }
+        for candidate in candidates {
+            guard AttachmentStore.cachedFileURL(id: candidate.id, contentType: candidate.contentType) == nil else {
+                continue
+            }
+            guard let data = try? await AttachmentStorage.download(path: candidate.storagePath) else { continue }
+            try? AttachmentStore.write(data, id: candidate.id, contentType: candidate.contentType)
+        }
     }
 }
