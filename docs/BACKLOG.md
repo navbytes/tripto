@@ -116,6 +116,33 @@ ranked — pick up by demand, same as section E.
 - **F6 — Home-timezone setting.** A user-set "home" zone (for a "was I home
   or away" framing) — out of the redesign program; unchanged by Phase 6.
 
+## G. Release 1.2 deferrals (2026-07-21)
+
+Items deliberately deferred from the 1.2 scope (attachments & scan-to-add) per
+PRODUCT_PLAN §2.3; pick up on demand or as part of adjacent releases.
+
+- **G1 — Camera capture in the attach flow.** Deliberate cut. PRODUCT_PLAN §2.1
+  listed it; needs `NSCameraUsageDescription` + App Review surface (inline
+  camera picker vs. forwarding to system Camera app is a guidance question).
+  In-app photo pickers already work (Photos/Files); camera demand can be
+  validated after v1.2 ships. Pick up on demand.
+- **G2 — Server-side per-item attachment COUNT cap.** Client-only 10/item today
+  (friendly error above cap). DB advisory-lock trigger precedent exists if
+  abuse surfaces (reviewer M1 accepted; no enforcement implemented). Leave
+  until production abuse data warrants it.
+- **G3 — Live smoke of ingest-text `createdItemIds`.** Blocked by prod anon-
+  sign-in setting: Supabase Auth "anonymous sign-ins" is OFF on the project
+  (prerequisite for `scripts/smoke-ingest.sh`). Self-verifies via first real
+  cloud scan-import once users exercise it; owner can alternatively toggle
+  `anonymous_provider_enabled` in Dashboard Auth + run the backend repo's
+  `scripts/smoke-ingest.sh` if immediate verification is needed. Backend PR
+  #18 is typed and deployed; no risk to deferring live check.
+- **G4 — iOS 27 image-native extraction + share extension.** Tier 3 scan path
+  (`LanguageModelSession` direct image input; iOS 27 GA ~Sept 2026, device
+  floor 55–60% of active iPhones) and share-extension target remain 1.4
+  candidates per PRODUCT_PLAN §4 (provisioning + new target; in-app pickers
+  prove demand first).
+
 ---
 
 **Note on cross-references:** owner-gated *launch* items (App Group +

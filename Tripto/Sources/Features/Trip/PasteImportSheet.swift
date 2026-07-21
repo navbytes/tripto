@@ -204,12 +204,11 @@ struct PasteImportSheet: View {
         let contentType: AttachmentContentType
     }
 
-    /// On-device path: the actual local object — no pull needed, it's
-    /// already on this device. Cloud path (UX-1, `ingest-text`'s
-    /// `createdItemIds`): the row exists only server-side until a
-    /// `pullTrip` lands it locally, so only its id is known up front —
-    /// resolved to a live `ItineraryItem` lazily, at confirm time
-    /// (`resolveAttachTarget`).
+    /// On-device path: the actual local object — already on this device.
+    /// Cloud path (UX-1, `ingest-text`'s `createdItemIds`): the row exists
+    /// only server-side at capture time, so only its id is known up front —
+    /// resolved to a live local `ItineraryItem` lazily, at confirm time
+    /// (`resolveAttachTarget`'s direct point-read).
     private enum PendingAttachmentTarget {
         case local(ItineraryItem)
         case remoteId(UUID)
@@ -1310,11 +1309,15 @@ struct PasteImportSheet: View {
             // UX-1: `createdItemIds` is insertion order, first = primary
             // (navbytes/backend#18) — the same "first row actually
             // persisted" convention `insertValidatedItineraryItems` already
-            // uses for the on-device side.
+            // uses for the on-device side. `?.first` (not `.first`): the
+            // field is optional (contract discipline — see its own doc
+            // comment), so an older/rolled-back function response with no
+            // `createdItemIds` key at all just means no attach offer this
+            // time, not a decode failure for the whole response.
             return BatchTextOutcome(
                 created: response.created, packingCandidates: candidates,
                 itineraryFailed: response.itineraryFailed, packingFailed: response.packingFailed,
-                firstCreatedItem: nil, firstCreatedItemId: response.createdItemIds.first
+                firstCreatedItem: nil, firstCreatedItemId: response.createdItemIds?.first
             )
         } catch {
             // One item's send failing doesn't sink the batch (same "log and
@@ -1350,10 +1353,10 @@ struct PasteImportSheet: View {
     /// synchronous/unconditional (unchanged), then, only when there's a real
     /// attach to attempt (toggle ON, a pending target, an attacher
     /// injected), AWAITS it before dismissing: UX-1/UX-2 need this sheet to
-    /// still be alive (for `toast`/`resolveAttachTarget`'s pull) when an
-    /// attach fails, which a fire-and-forget `Task` racing an immediate
-    /// `dismiss()` can't guarantee. Every other case (no attach to make)
-    /// dismisses immediately, byte-identical to before.
+    /// still be alive (for `toast`/`resolveAttachTarget`'s network read)
+    /// when an attach fails, which a fire-and-forget `Task` racing an
+    /// immediate `dismiss()` can't guarantee. Every other case (no attach to
+    /// make) dismisses immediately, byte-identical to before.
     private func confirmReview() async {
         if !packingCandidates.isEmpty {
             onPackingConfirmed?(toAddCandidates)
@@ -1387,27 +1390,43 @@ struct PasteImportSheet: View {
         }
     }
 
-    private enum AttachResolveError: LocalizedError {
-        case itemNotFoundAfterPull
-        var errorDescription: String? { "Couldn\u{2019}t find the new item to attach to." }
-    }
-
-    /// UX-1: on-device targets resolve instantly (already local, no network).
-    /// Cloud targets (`ingest-text`'s `createdItemIds.first`) need the row to
-    /// land locally first — `pullTrip` via the existing sync engine seam,
-    /// then a local fetch by id; if it's still not there, one retry pull
-    /// (e.g. a slow write-then-read on the backend), then give up rather
-    /// than pulling forever.
+    /// UX-1 fix round (MED reentrancy): on-device targets resolve instantly
+    /// (already local, no network). Cloud targets (`ingest-text`'s
+    /// `createdItemIds.first`) used to go through `syncEngine.pullTrip`, but
+    /// that method no-ops against an already-in-flight pull for the same
+    /// trip (`SyncEngine`'s own `pullingTrips` self-guard) — both the
+    /// original call AND its retry could land during someone else's
+    /// unrelated in-flight pull and miss the just-created row entirely,
+    /// producing a spurious "couldn't attach" toast for an item that lands
+    /// moments later anyway. A direct point-read of this ONE row instead —
+    /// the exact `select().eq("id", value:).single()` shape
+    /// `SyncEngine+ShareLinks.insertAndReadBack` already uses for the same
+    /// "read the row this device's own write just created" need (RLS scopes
+    /// it identically to `pullTrip`'s own `itinerary_items` query) — has no
+    /// dependency on any pull's timing: `ingest-text` already committed the
+    /// insert before this method is ever reached, so the row is always
+    /// there to read. No retry needed, and per this fix round: no sleeps.
     private func resolveAttachTarget(_ target: PendingAttachmentTarget) async throws -> ItineraryItem {
         switch target {
         case .local(let item):
             return item
         case .remoteId(let id):
-            await syncEngine?.pullTrip(tripId)
-            if let found = try fetchLocalItineraryItem(id: id) { return found }
-            await syncEngine?.pullTrip(tripId) // retry once
-            if let found = try fetchLocalItineraryItem(id: id) { return found }
-            throw AttachResolveError.itemNotFoundAfterPull
+            let dto: ItineraryItemDTO = try await Supa.client.from(SyncTable.itineraryItems.rawValue)
+                .select().eq("id", value: id).single().execute().value
+            if let existing = try fetchLocalItineraryItem(id: id) {
+                existing.apply(dto)
+                try modelContext.save()
+                return existing
+            }
+            // Mirrors a pull's own apply-only behavior (`SyncStore
+            // .applyItineraryItems`) — never `syncEngine.enqueueUpsert` this:
+            // the row already exists server-side (this IS that row), so
+            // re-enqueueing it would just push an unmodified duplicate
+            // upsert of a write this device never actually authored.
+            let item = ItineraryItem(dto: dto)
+            modelContext.insert(item)
+            try modelContext.save()
+            return item
         }
     }
 
@@ -1572,7 +1591,13 @@ struct IngestTextResponse: Decodable {
     /// primary itinerary item — lets a cloud-routed scan-to-add batch offer
     /// auto-attach too (`sendToRemote`/`resolveAttachTarget`), which used to
     /// be impossible with no created-row id at all in this response.
-    let createdItemIds: [UUID]
+    ///
+    /// Optional, NOT required (§3.6 contract discipline: additive-field
+    /// tolerance) — a rollback/redeploy of `ingest-text` from a pre-#18 ref
+    /// must not fail `Decodable` with `keyNotFound` and break cloud
+    /// text-import entirely; a missing key here just means the attach offer
+    /// doesn't fire for that response (`sendToRemote` reads `?.first`).
+    let createdItemIds: [UUID]?
 }
 
 // No `#Preview` here (like every other `@Environment(AuthManager.self)`

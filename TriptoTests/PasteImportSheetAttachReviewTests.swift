@@ -4,8 +4,8 @@ import XCTest
 /// UX-1 fix-round: `ingest-text`'s response now carries `createdItemIds`
 /// (navbytes/backend#18, additive) — the piece that makes cloud-routed
 /// auto-attach possible at all (`PasteImportSheet.sendToRemote` reads
-/// `response.createdItemIds.first`). `IngestTextResponse` is `internal` (not
-/// `private`, see its own doc comment) specifically so this decode is
+/// `response.createdItemIds?.first`). `IngestTextResponse` is `internal`
+/// (not `private`, see its own doc comment) specifically so this decode is
 /// directly testable — plain camelCase, no `JSONCoding` snake_case
 /// conversion (matches `IngestTextRequest`'s own doc comment on why).
 final class IngestTextResponseDecodingTests: XCTestCase {
@@ -27,7 +27,22 @@ final class IngestTextResponseDecodingTests: XCTestCase {
         {"created":0,"packingItems":[],"itineraryFailed":false,"packingFailed":false,"createdItemIds":[]}
         """
         let decoded = try JSONDecoder().decode(IngestTextResponse.self, from: Data(json.utf8))
-        XCTAssertTrue(decoded.createdItemIds.isEmpty)
+        XCTAssertEqual(decoded.createdItemIds, [])
+    }
+
+    /// CRITICAL fix (re-review): §3.6 contract discipline — a rollback/
+    /// redeploy of `ingest-text` from a ref older than #18 returns a
+    /// response with NO `createdItemIds` key at all. The field must be
+    /// optional so this still decodes (`keyNotFound` would otherwise fail
+    /// the ENTIRE response — breaking cloud text-import outright, not just
+    /// the attach offer).
+    func testDecodesSuccessfullyWhenCreatedItemIdsKeyIsAbsentEntirely() throws {
+        let json = """
+        {"created":1,"packingItems":[],"itineraryFailed":false,"packingFailed":false}
+        """
+        let decoded = try JSONDecoder().decode(IngestTextResponse.self, from: Data(json.utf8))
+        XCTAssertNil(decoded.createdItemIds)
+        XCTAssertEqual(decoded.created, 1, "the rest of the response must still decode fine")
     }
 }
 

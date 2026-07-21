@@ -110,7 +110,10 @@ struct AttachmentStrip: View {
                 handleFileImport(result)
             }
             .sheet(item: $previewTarget) { target in
-                QuickLookPreview(item: target).ignoresSafeArea()
+                // No .ignoresSafeArea(): the wrap now carries its own nav
+                // bar (Done button) which must sit inside the sheet's safe
+                // area — see QuickLookPreview's doc comment.
+                QuickLookPreview(item: target)
             }
             .confirmationDialog(
                 "Delete this attachment?",

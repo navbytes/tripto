@@ -74,6 +74,8 @@ those land.
 
 ## 2. Release 1.2 — "Every booking carries its paper"
 
+**Status:** built 2026-07-21 (feature/1.2-attachments-import; backend #17/#18) — see [CHANGELOG.md](CHANGELOG.md).
+
 Theme: attach anything to a booking; turn anything into a booking. One
 coherent story for the listing: *add a booking from a screenshot, keep the
 ticket with it, all without your data leaving the phone.*

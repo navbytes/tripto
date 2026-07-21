@@ -89,7 +89,9 @@ extension ItemAttachment {
             id: dto.id,
             tripId: dto.tripId,
             itemId: dto.itemId,
-            fileName: dto.fileName,
+            // Security closure residual: a row inserted via the raw API can
+            // carry any string — sanitize on decode too, same rule as attach().
+            fileName: AttachmentService.sanitizedFileName(dto.fileName),
             contentTypeRaw: dto.contentType,
             byteSize: dto.byteSize,
             storagePath: dto.storagePath,

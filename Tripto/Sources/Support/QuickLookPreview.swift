@@ -30,15 +30,27 @@ final class AttachmentPreviewItem: NSObject, QLPreviewItem, Identifiable {
 struct QuickLookPreview: UIViewControllerRepresentable {
     let item: AttachmentPreviewItem
 
-    func makeUIViewController(context: Context) -> QLPreviewController {
+    // The QL controller MUST be the root of its own UINavigationController:
+    // embedded bare in a SwiftUI sheet it never installs its nav bar, so
+    // there is no Done button — and a zoomed photo swallows the sheet's
+    // swipe-down, leaving no way back at all (owner-reported on device,
+    // 2026-07-21). Inside a nav controller QL treats itself as modally
+    // presented and installs its standard Done + share/markup chrome.
+    /// Seam for the shape-pinning unit test (Representable `Context` has no
+    /// public init, so the test builds the controller through here).
+    static func wrappedController(dataSource: QLPreviewControllerDataSource) -> UINavigationController {
         let controller = QLPreviewController()
-        controller.dataSource = context.coordinator
-        return controller
+        controller.dataSource = dataSource
+        return UINavigationController(rootViewController: controller)
     }
 
-    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {
+    func makeUIViewController(context: Context) -> UINavigationController {
+        Self.wrappedController(dataSource: context.coordinator)
+    }
+
+    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {
         context.coordinator.item = item
-        uiViewController.reloadData()
+        (uiViewController.viewControllers.first as? QLPreviewController)?.reloadData()
     }
 
     func makeCoordinator() -> Coordinator {
