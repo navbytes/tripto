@@ -4,6 +4,8 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+## [1.2] — 2026-07-22
+
 ### Siri & Shortcuts: ask and add by voice (2026-07-22)
 
 #### Added
@@ -41,8 +43,6 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 - **Attachment preview always closable:** the photo/PDF preview now carries Tripto's own floating close button (plus a drag indicator) — escape no longer depends on QuickLook's embedded chrome, which failed to show a Done button on device.
 - **Booking-detail scroll no longer stutters:** the boarding-pass tilt and header sheen moved off a per-frame state channel onto SwiftUI's render-path `visualEffect` — the rubber-band bounce no longer re-renders the whole screen every frame (it had gotten heavier with 1.2's attachment strip). Same motion, Reduce Motion/accessibility behavior unchanged.
 - **Suggest mode hides paste/email import entries:** a suggesting viewer could reach the paste flow whose packing branch the server rejects — the entries are hidden in suggest mode (mirrors the main screen), pinned by tests.
-
-## [1.2] — 2026-07-21
 
 ### Attachments & scan-to-add (2026-07-21)
 
