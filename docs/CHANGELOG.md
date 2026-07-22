@@ -4,6 +4,14 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Suggestion alerts, built dark (2026-07-22)
+
+#### Added
+- **Push-notification plumbing for suggestion alerts (inert until activated):** a "Suggestion alerts" toggle in Settings registers this device for pushes when someone suggests a plan for your trip (organizers and companions are notified; the suggester never is). The entire pipeline — device registration, server trigger, and sender — ships dark: it does nothing and contacts no one until the app gains the push entitlement and the server is armed with Apple credentials. Sign-out removes only this device's registration.
+
+#### Changed
+- Universal-link housekeeping: stale associated-domains TODO removed; share-worker README's AASA example corrected.
+
 ## [1.2] — 2026-07-22
 
 ### Siri & Shortcuts: ask and add by voice (2026-07-22)
