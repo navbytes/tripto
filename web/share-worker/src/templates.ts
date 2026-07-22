@@ -46,9 +46,16 @@ const UNICORN_GRADIENT_DEEP = "linear-gradient(115deg, #E11D8F 0%, #7C3AED 55%, 
 const PINK_DEEP = "#D6157F";
 const PURPLE_DEEP = "#6D28D9";
 
-/** Served at /favicon.svg (and reused as the inline page icon). Emoji glyph
- * renders with the viewer's system emoji font — no webfont, CSP-safe. */
-export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#FF3E9E"/><stop offset=".55" stop-color="#8B5CF6"/><stop offset="1" stop-color="#2DD9C8"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#g)"/><text x="32" y="44" font-size="34" text-anchor="middle">🦄</text></svg>`;
+/** The Tripto logo mark — the paper-plane dart with a contrail, traced from
+ * the app icon (Tripto/Resources/…/AppIcon-1024.png). Inline SVG, tinted via
+ * currentColor so it works on any background. */
+function logoMark(size: number): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21.6 2.4 3.2 9.9l7.3 2.5 2.5 8.2z" fill="currentColor"/><path d="M21.6 2.4 10.5 12.4" stroke="currentColor" stroke-width="1.1" opacity=".45"/><path d="M9.4 14.3c-2.2 2.7-4.6 4.8-7 6.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg>`;
+}
+
+/** Served at /favicon.svg (and reused as the inline page icon): the dart on
+ * the brand gradient tile. Pure shapes — no font dependency. */
+export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#FF3E9E"/><stop offset=".55" stop-color="#8B5CF6"/><stop offset="1" stop-color="#2DD9C8"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#g)"/><g transform="translate(9.5,9.5) scale(1.87)"><path d="M21.6 2.4 3.2 9.9l7.3 2.5 2.5 8.2z" fill="#fff"/><path d="M21.6 2.4 10.5 12.4" stroke="#fff" stroke-width="1.1" opacity=".45" fill="none"/><path d="M9.4 14.3c-2.2 2.7-4.6 4.8-7 6.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity=".65" fill="none"/></g></svg>`;
 
 /** Shared icon/meta links for public (indexable) pages. */
 const PUBLIC_HEAD_ICONS = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -259,6 +266,7 @@ ${SHARED_STYLES}
 .article a{color:${PINK_DEEP};font-weight:600}
 .hero{background:${BRAND.dark};background-image:radial-gradient(420px 260px at 12% -10%,rgba(255,62,158,.35),transparent 60%),radial-gradient(420px 280px at 88% 10%,rgba(45,217,200,.28),transparent 60%),radial-gradient(520px 340px at 55% 120%,rgba(139,92,246,.4),transparent 60%)}
 .hero .trip-title{font-family:inherit;font-weight:800}
+.hero .trip-title svg{vertical-align:-2px;margin-right:4px}
 .hero .pill{display:inline-block;margin-top:10px;background:${BRAND.sun};color:${BRAND.ink};border:2px solid ${BRAND.ink};border-radius:999px;padding:6px 14px;font-size:12.5px;font-weight:800;box-shadow:3px 3px 0 rgba(0,0,0,.35);transform:rotate(-1.5deg)}
 .site-footer a{color:${PINK_DEEP}}`;
   return `<!doctype html>
@@ -283,7 +291,7 @@ ${PUBLIC_HEAD_ICONS}
 <body>
 <div class="wrap">
   <div class="hero">
-    <p class="trip-title">Tripto 🦄</p>
+    <p class="trip-title">${logoMark(22)} Tripto</p>
     <p class="trip-meta">Privacy Policy</p>
     <span class="pill">🔒 no ads · no tracking · fr</span>
   </div>
@@ -501,8 +509,11 @@ function landingJsonLd(): string {
 
 const LANDING_STYLES = `
 *{box-sizing:border-box}
-html{font-size:100%;scroll-behavior:smooth}
-html,body{margin:0;padding:0}
+html{font-size:100%;scroll-behavior:smooth;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* overflow-x on BOTH html and body: iOS Safari ignores it on body alone, and
+   the rotated phone mockup's transform box would otherwise create sideways
+   scroll. clip > hidden (no scroll container), with hidden as the fallback. */
+html,body{margin:0;padding:0;overflow-x:hidden;overflow-x:clip}
 body{
   background:${BRAND.paper};
   color:${BRAND.ink};
@@ -510,7 +521,7 @@ body{
   -webkit-font-smoothing:antialiased;
   text-rendering:optimizeLegibility;
   line-height:1.5;
-  overflow-x:hidden;
+  min-width:0;
 }
 a{color:${PURPLE_DEEP}}
 :focus-visible{outline:3px solid ${BRAND.purple};outline-offset:3px;border-radius:6px}
@@ -529,7 +540,8 @@ a{color:${PURPLE_DEEP}}
   position:relative;
 }
 .nav{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:20px 0 6px}
-.wordmark{font-size:24px;font-weight:900;letter-spacing:-.5px;color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:8px;padding:6px 2px}
+.wordmark{font-size:24px;font-weight:900;letter-spacing:-.5px;color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:9px;padding:6px 2px}
+.wordmark svg{flex-shrink:0}
 .nav-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .nav-links a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:11px 16px;border-radius:999px}
 .nav-links a:hover{background:rgba(255,255,255,.1)}
@@ -537,6 +549,7 @@ a{color:${PURPLE_DEEP}}
 @media(max-width:620px){.nav-links a.anchor{display:none}}
 
 .hero-grid{display:grid;gap:48px;align-items:center;padding:44px 0 74px}
+.hero-grid>*{min-width:0}
 @media(min-width:940px){.hero-grid{grid-template-columns:1.08fr .92fr;padding:60px 0 92px}}
 
 .sticker{
@@ -550,10 +563,7 @@ h1{
   font-weight:900;letter-spacing:-.03em;line-height:1.04;
   margin:22px 0 0;color:#fff;
 }
-h1 .grad{
-  background:${UNICORN_GRADIENT_LIGHT};
-  -webkit-background-clip:text;background-clip:text;color:transparent;
-}
+h1 .grad{color:#E9C4FF}
 .hero-sub{font-size:clamp(16.5px,2.2vw,19px);line-height:1.6;max-width:56ch;margin:20px 0 0;color:#EDE6FF}
 .hero-sub b{color:#fff}
 .cta-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:30px;align-items:center}
@@ -569,7 +579,6 @@ h1 .grad{
 /* floating doodads */
 .floaty{position:absolute;font-size:30px;opacity:.9;pointer-events:none;user-select:none}
 .f1{top:14%;left:3%;--r:-12deg}
-.f2{top:8%;right:6%;--r:14deg;font-size:36px}
 .f3{bottom:12%;left:6%;--r:8deg;font-size:26px}
 @media(max-width:939px){.floaty{display:none}}
 
@@ -598,17 +607,18 @@ h1 .grad{
 }
 
 /* ── marquee ── */
-.marquee{background:linear-gradient(90deg,${BRAND.sun},${BRAND.pink} 34%,${BRAND.purple} 66%,${BRAND.cyan});border-top:3px solid ${BRAND.ink};border-bottom:3px solid ${BRAND.ink};overflow:hidden;display:flex}
-.marquee-track{display:flex;flex-shrink:0;min-width:100%;justify-content:space-around;gap:34px;padding:13px 17px;font-size:15px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:${BRAND.ink};white-space:nowrap}
+.marquee{background:linear-gradient(90deg,${BRAND.sun},${BRAND.pink} 34%,${BRAND.purple} 66%,${BRAND.cyan});border-top:3px solid ${BRAND.ink};border-bottom:3px solid ${BRAND.ink};overflow:hidden;display:flex;max-width:100%}
+.marquee-track{--mgap:34px;display:flex;flex-shrink:0;min-width:100%;justify-content:space-around;gap:var(--mgap);padding:13px 17px;font-size:15px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:${BRAND.ink};white-space:nowrap}
 
 /* ── sections ── */
 section{padding:72px 0}
 .kicker{display:inline-block;font-size:13px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:${PINK_DEEP};background:#FFE9F4;border:2px solid ${BRAND.ink};border-radius:999px;padding:7px 14px;transform:rotate(-1.2deg)}
 h2{font-size:clamp(28px,4.6vw,42px);font-weight:900;letter-spacing:-.025em;line-height:1.08;margin:18px 0 12px}
-h2 .grad{background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent}
+h2 .grad{color:#7C3AED}
 .section-sub{font-size:17px;color:#4A3B63;max-width:60ch;margin:0}
 
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:20px;margin-top:38px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:20px;margin-top:38px}
+.cards>*{min-width:0}
 .card{
   background:#fff;border:2.5px solid ${BRAND.ink};border-radius:22px;
   padding:24px 22px;box-shadow:6px 6px 0 ${BRAND.ink};
@@ -620,11 +630,17 @@ h2 .grad{background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;backgr
 
 /* how it works */
 .steps-band{background:#F3EDFF;border-top:3px solid ${BRAND.ink};border-bottom:3px solid ${BRAND.ink}}
-.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:22px;margin-top:38px;counter-reset:step}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:22px;margin-top:38px;counter-reset:step}
+.steps>*{min-width:0}
 .step{background:#fff;border:2.5px solid ${BRAND.ink};border-radius:22px;padding:26px 22px;box-shadow:6px 6px 0 ${BRAND.ink};position:relative}
-.step .num{
-  font-size:52px;font-weight:900;line-height:1;letter-spacing:-.04em;
-  background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent;
+.step .num{font-size:52px;font-weight:900;line-height:1;letter-spacing:-.04em;color:#E11D8F}
+/* Gradient-clipped display text only where supported — otherwise the solid
+   fallback colors above keep the words visible (transparent text on an
+   unsupported browser would vanish). */
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+  h1 .grad{background:${UNICORN_GRADIENT_LIGHT};-webkit-background-clip:text;background-clip:text;color:transparent}
+  h2 .grad{background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent}
+  .step .num{background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent}
 }
 .step h3{font-size:19.5px;font-weight:900;margin:10px 0 8px}
 .step p{font-size:15px;line-height:1.6;color:#4A3B63;margin:0}
@@ -667,19 +683,39 @@ h2 .grad{background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;backgr
 /* footer */
 .footer{background:${BRAND.dark};color:#C9BCE8;margin-top:84px;border-top:3px solid ${BRAND.ink}}
 .footer-inner{display:flex;justify-content:space-between;gap:26px;flex-wrap:wrap;padding:44px 0 20px}
-.footer .fm{font-size:22px;font-weight:900;color:#fff}
+.footer .fm{font-size:22px;font-weight:900;color:#fff;display:flex;align-items:center;gap:8px}
 .footer .tag{margin:8px 0 0;font-size:14px;max-width:34ch;line-height:1.55}
 .footer nav{display:flex;flex-direction:column;gap:4px}
 .footer nav a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:8px 0}
 .footer nav a:hover{color:${BRAND.cyan}}
 .footer .legal{border-top:1px solid rgba(255,255,255,.14);padding:18px 0 26px;font-size:12.5px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
+/* small screens: tighter rhythm, stacked CTAs, gentler phone tilt */
+@media (max-width:520px){
+  .shell{padding:0 16px}
+  section{padding:52px 0}
+  .hero-grid{gap:36px;padding:34px 0 56px}
+  .sticker{font-size:12.5px;padding:8px 13px;border-radius:16px}
+  .cta-row{flex-direction:column;align-items:stretch}
+  .cta-row .btn{text-align:center}
+  .phone{transform:rotate(1.5deg);box-shadow:8px 8px 0 rgba(0,0,0,.45),0 0 60px rgba(139,92,246,.5)}
+  .phone-sticker{top:-14px;right:0;font-size:12px}
+  .marquee-track{--mgap:24px;font-size:13px;padding:11px 14px}
+  .card{padding:20px 18px}
+  .cta-banner{border-radius:22px;box-shadow:7px 7px 0 ${BRAND.ink}}
+  .footer-inner{padding:36px 0 16px}
+}
+@media (max-width:400px){
+  .wordmark{font-size:20px}
+  .nav-links a{padding:10px 12px;font-size:13.5px}
+}
+
 /* motion: everything opt-in, nothing moves for reduced-motion users */
 @media (prefers-reduced-motion: no-preference){
   .marquee-track{animation:marquee 30s linear infinite}
-  @keyframes marquee{to{transform:translateX(calc(-100% - 34px))}}
+  @keyframes marquee{to{transform:translateX(calc(-100% - var(--mgap)))}}
   .floaty{animation:floaty 6s ease-in-out infinite}
-  .f2{animation-delay:-2s}.f3{animation-delay:-4s}
+  .f3{animation-delay:-3s}
   @keyframes floaty{0%,100%{transform:rotate(var(--r,0deg)) translateY(0)}50%{transform:rotate(var(--r,0deg)) translateY(-13px)}}
   .card,.step,.btn{transition:transform .18s ease,box-shadow .18s ease}
   .card:hover,.step:hover{transform:translate(-3px,-3px);box-shadow:9px 9px 0 ${BRAND.ink}}
@@ -743,7 +779,7 @@ ${PUBLIC_HEAD_ICONS}
 <div class="top">
   <header class="shell">
     <nav class="nav" aria-label="Main">
-      <a class="wordmark" href="/">Tripto <span aria-hidden="true">🦄</span></a>
+      <a class="wordmark" href="/">${logoMark(26)} Tripto</a>
       <div class="nav-links">
         <a class="anchor" href="#features">The good stuff</a>
         <a class="anchor" href="#faq">FAQ</a>
@@ -754,8 +790,7 @@ ${PUBLIC_HEAD_ICONS}
   </header>
 
   <span class="floaty f1" aria-hidden="true">✨</span>
-  <span class="floaty f2" aria-hidden="true">🌈</span>
-  <span class="floaty f3" aria-hidden="true">🛼</span>
+  <span class="floaty f3" aria-hidden="true">🧳</span>
 
   <div class="shell hero-grid">
     <div>
@@ -775,7 +810,7 @@ ${PUBLIC_HEAD_ICONS}
 
     <div class="phone-wrap">
       <div class="phone" role="img" aria-label="Preview of the Tripto app: a trip called “algarve with the fam”, with a day timeline showing a flight landing in Lisbon at 9:40 AM local time, a castle visit, dinner plans, and a shared packing list that is nearly done.">
-        <div class="statusbar" aria-hidden="true"><span>9:41</span><span>🦄⚡🔋</span></div>
+        <div class="statusbar" aria-hidden="true"><span>9:41</span><span>⚡🔋</span></div>
         <div class="mini-hero" aria-hidden="true">
           <div class="t">algarve with the fam 🍊</div>
           <div class="d">Aug 12 – 19 · 7 days · 6 legends</div>
@@ -902,7 +937,7 @@ ${PUBLIC_HEAD_ICONS}
   <div class="shell">
     <div class="footer-inner">
       <div>
-        <div class="fm">Tripto <span aria-hidden="true">🦄</span></div>
+        <div class="fm">${logoMark(22)} Tripto</div>
         <p class="tag">One shared itinerary for the whole group — every plan, every
           time zone, everybody on the same page.</p>
       </div>
