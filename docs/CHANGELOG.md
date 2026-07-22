@@ -4,6 +4,14 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Website: logo mark + responsive fixes (2026-07-22)
+
+#### Changed
+- **Landing brand iconography:** the 🦄/🌈 emoji are gone — header, footer, privacy hero, favicon, touch icon, and the og.jpg social card now carry the real Tripto paper-plane logo (inline SVG traced from the app icon). The gradient color theme is unchanged.
+
+#### Fixed
+- **Mobile rendering:** `overflow-x` clamped on both `html` and `body` (iOS Safari ignores body alone; the rotated phone mockup could create sideways scroll), `-webkit-text-size-adjust:100%` stops iOS font inflation, grid children get `min-width` guards and `minmax(min(100%,…))` columns so cards can't force horizontal scroll on narrow phones, gradient-clipped headlines gain solid-color fallbacks behind `@supports` (no more invisible text on older browsers), the marquee's gap moved to a CSS var so its loop stays seamless at mobile sizes, and a ≤520px polish pass (tighter spacing, stacked full-width CTAs, gentler phone tilt). Verified at 320/390/768/1440px.
+
 ### Suggestion alerts, built dark (2026-07-22)
 
 #### Added

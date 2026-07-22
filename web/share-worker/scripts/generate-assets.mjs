@@ -29,6 +29,11 @@ const GRAD_LIGHT = "linear-gradient(100deg,#FF9AD3 0%,#C4A8FF 55%,#6FE8DA 100%)"
 const sparkle = (size, color, opacity = 1) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="opacity:${opacity}"><path d="M12 0l2.6 9.4L24 12l-9.4 2.6L12 24l-2.6-9.4L0 12l9.4-2.6z" fill="${color}"/></svg>`;
 
+// The Tripto logo mark: paper-plane dart + contrail (traced from the app
+// icon). Keep in sync with logoMark() in src/templates.ts.
+const dart = (size, color = "#fff", opacity = 1) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" style="opacity:${opacity}"><path d="M21.6 2.4 3.2 9.9l7.3 2.5 2.5 8.2z" fill="${color}"/><path d="M21.6 2.4 10.5 12.4" stroke="${color}" stroke-width="1.1" opacity=".45"/><path d="M9.4 14.3c-2.2 2.7-4.6 4.8-7 6.4" stroke="${color}" stroke-width="1.5" stroke-linecap="round" opacity=".65"/></svg>`;
+
 const OG_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{width:1200px;height:630px;background:${GRAD};font-family:"Liberation Sans","DejaVu Sans",sans-serif;overflow:hidden}
@@ -45,21 +50,17 @@ body{width:1200px;height:630px;background:${GRAD};font-family:"Liberation Sans",
 .pill{border:3px solid rgba(255,255,255,.75);color:#fff;border-radius:999px;padding:14px 26px;font-size:25px;font-weight:bold}
 .pill.solid{background:#FFC93E;color:${INK};border-color:${INK};transform:rotate(-2deg);box-shadow:5px 5px 0 rgba(0,0,0,.4)}
 .spark{position:absolute}
-.rainbow{position:absolute;right:-70px;bottom:-170px;width:420px;height:420px}
+.dartbig{position:absolute;right:36px;bottom:170px;filter:drop-shadow(0 0 46px rgba(139,92,246,.85))}
 </style></head><body>
 <div class="card">
-  <svg class="rainbow" viewBox="0 0 200 200" fill="none">
-    <circle cx="100" cy="100" r="92" stroke="#FF3E9E" stroke-width="13" opacity=".85"/>
-    <circle cx="100" cy="100" r="66" stroke="#8B5CF6" stroke-width="13" opacity=".85"/>
-    <circle cx="100" cy="100" r="40" stroke="#2DD9C8" stroke-width="13" opacity=".85"/>
-  </svg>
+  <span class="dartbig">${dart(230, "#fff", 0.96)}</span>
   <span class="spark" style="top:78px;right:120px">${sparkle(54, "#FFC93E")}</span>
   <span class="spark" style="top:170px;right:66px">${sparkle(30, "#6FE8DA", 0.9)}</span>
   <span class="spark" style="bottom:200px;left:44px">${sparkle(26, "#FF9AD3", 0.8)}</span>
   <div class="inner">
     <div class="wordmark">
+      ${dart(62)}
       <span class="t">tripto</span>
-      ${sparkle(52, "#FF9AD3")}
       <span style="flex:1"></span>
       <span class="pill solid">coming soon · App Store</span>
     </div>
@@ -76,13 +77,11 @@ body{width:1200px;height:630px;background:${GRAD};font-family:"Liberation Sans",
 
 const ICON_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 *{margin:0;padding:0}
-body{width:180px;height:180px;background:${GRAD};font-family:"Liberation Sans","DejaVu Sans",sans-serif;overflow:hidden;position:relative}
-.t{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  font-size:128px;font-weight:bold;color:#fff;letter-spacing:-6px;text-shadow:0 5px 0 rgba(34,21,51,.3)}
-.s{position:absolute;top:18px;right:18px}
+body{width:180px;height:180px;background:${GRAD};overflow:hidden;position:relative}
+.d{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  filter:drop-shadow(0 4px 0 rgba(34,21,51,.28))}
 </style></head><body>
-<div class="t">t</div>
-<span class="s">${sparkle(34, "#FFF3FB", 0.95)}</span>
+<div class="d">${dart(122)}</div>
 </body></html>`;
 
 const { chromium } = await import("playwright-core");
