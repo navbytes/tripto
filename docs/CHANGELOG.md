@@ -4,6 +4,15 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Website: released-status copy + hero padding fix (2026-07-22)
+
+#### Changed
+- **"Coming soon" is over:** the hero and CTA banner now deep-link to the live App Store listing ("Tripto — Trip Organizer", id 6789917838); the FAQ, JSON-LD (`installUrl`/`sameAs`), og.jpg badge, `llms.txt`, and meta description all state released status; the join interstitial's "ask for a TestFlight invite" line became a "Get Tripto on the App Store" secondary button.
+
+#### Fixed
+- **Hero lost its side padding below desktop widths:** `.hero-grid`'s `padding` shorthand overrode `.shell`'s gutters (equal specificity, later in the sheet). Layout paddings are longhand-only now — the same clash was also silently cancelling sections' vertical rhythm, so the whole page breathes as designed.
+- **UX pass:** smooth scrolling gated behind `prefers-reduced-motion`, anchor targets get `scroll-margin-top`, nav/footer links meet the 44pt tap-target floor; zero horizontal overflow verified at 320/390/560/768/960/1440/1920px.
+
 ### Website: logo mark + responsive fixes (2026-07-22)
 
 #### Changed

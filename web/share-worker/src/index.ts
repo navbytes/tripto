@@ -7,6 +7,7 @@ import {
   renderLandingPage,
   SITE_ORIGIN,
   FAVICON_SVG,
+  APP_STORE_URL,
 } from "./templates";
 import { fetchPublicTrip } from "./supabase";
 // Binary brand assets (wrangler "Data" rules in wrangler.jsonc). Regenerate
@@ -78,7 +79,7 @@ const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${SITE_ORIGIN}/</loc>
-    <lastmod>2026-07-21</lastmod>
+    <lastmod>2026-07-22</lastmod>
     <changefreq>monthly</changefreq>
     <priority>1.0</priority>
   </url>
@@ -100,8 +101,8 @@ const LLMS_TXT = `# Tripto
 > itinerary, each shown in its own local time zone. It works offline, has
 > shared per-person packing lists, and can share a read-only web itinerary
 > link that needs no app and no account. No ads, no tracking, no data
-> selling. Status: in TestFlight, App Store launch upcoming. Contact:
-> tripto@navbytes.io.
+> selling. Status: released — "Tripto — Trip Organizer" is on the App Store
+> for iPhone (${APP_STORE_URL}). Contact: tripto@navbytes.io.
 
 ## Pages
 
@@ -154,7 +155,9 @@ function joinInterstitialPage(token: string): Response {
       message: "Tap below to open the invite in the app.",
       actionHref: `tripto://join/${token}`,
       actionLabel: "Open in Tripto",
-      mutedLine: "Have the app? The link opens it. Otherwise ask for a TestFlight invite.",
+      mutedLine: "Have the app? The button opens your invite right inside it.",
+      subActionHref: APP_STORE_URL,
+      subActionLabel: "New here? Get Tripto on the App Store",
     }),
   );
 }

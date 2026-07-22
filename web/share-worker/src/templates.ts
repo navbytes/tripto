@@ -162,6 +162,7 @@ a{color:#E8955A}
   padding:14px 28px;border-radius:999px;
   border:2px solid ${BRAND.ink};box-shadow:4px 4px 0 ${BRAND.ink};
 }
+.button-link.secondary{background:#fff;color:#1A1B2E;box-shadow:none;margin-top:14px;font-size:13.5px;padding:12px 22px}
 .muted-line{font-size:12px;color:#6B6E8F;margin-top:16px;max-width:38ch;line-height:1.5}
 
 @media (max-width:380px){
@@ -412,11 +413,11 @@ const LANDING_FAQS: ReadonlyArray<{ q: string; aHtml: string; aText: string }> =
       "Tripto is a group trip planner for iPhone that turns everyone's scattered bookings into one shared itinerary. Flights, hotels, activities, food — all on one day-by-day timeline the whole group can see, with shared packing lists and read-only share links for family who don't want another app.",
   },
   {
-    q: "When can I get Tripto?",
+    q: "Where can I get Tripto?",
     aHtml:
-      "Tripto is in TestFlight now and <b>coming soon to the App Store</b>. Want early access, or a ping at launch? Email <a href=\"mailto:tripto@navbytes.io\">tripto@navbytes.io</a> and we've got you. 🫶",
+      "It's out! <b>Tripto — Trip Organizer</b> is live on the <a href=\"https://apps.apple.com/app/id6789917838\">App Store</a> for iPhone. Questions, ideas, or a snag? Email <a href=\"mailto:tripto@navbytes.io\">tripto@navbytes.io</a> and we've got you. 🫶",
     aText:
-      "Tripto is in TestFlight now and coming soon to the App Store. Want early access, or a ping at launch? Email tripto@navbytes.io and we've got you.",
+      "Tripto — Trip Organizer is live on the App Store for iPhone: https://apps.apple.com/app/id6789917838. Questions or ideas? Email tripto@navbytes.io.",
   },
   {
     q: "Do grandparents (or anyone) need the app to see the trip?",
@@ -450,7 +451,11 @@ const LANDING_FAQS: ReadonlyArray<{ q: string; aHtml: string; aText: string }> =
 
 const LANDING_TITLE = "Tripto — Group Trip Planner · One Shared Itinerary";
 const LANDING_DESCRIPTION =
-  "Turn your group's scattered bookings into one shared, time-zone-smart itinerary. No ads, no tracking, works offline. Coming soon to iPhone.";
+  "Turn your group's scattered bookings into one shared, time-zone-smart itinerary. No ads, no tracking, works offline. Now on the App Store for iPhone.";
+
+/** The live App Store listing ("Tripto — Trip Organizer", Apple ID
+ * 6789917838). The id-only URL form resolves in every storefront. */
+export const APP_STORE_URL = "https://apps.apple.com/app/id6789917838";
 
 /** Organization + WebSite + WebPage + MobileApplication + FAQPage in one
  * @graph. Kept truthful: no invented ratings, prices, or download links. */
@@ -483,6 +488,8 @@ function landingJsonLd(): string {
     url: `${SITE_ORIGIN}/`,
     image: `${SITE_ORIGIN}/og.jpg`,
     author: { "@id": `${SITE_ORIGIN}/#organization` },
+    installUrl: APP_STORE_URL,
+    sameAs: [APP_STORE_URL],
   };
   const webpage = {
     "@type": "WebPage",
@@ -509,7 +516,9 @@ function landingJsonLd(): string {
 
 const LANDING_STYLES = `
 *{box-sizing:border-box}
-html{font-size:100%;scroll-behavior:smooth;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html{font-size:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+@media (prefers-reduced-motion: no-preference){html{scroll-behavior:smooth}}
+section[id]{scroll-margin-top:24px}
 /* overflow-x on BOTH html and body: iOS Safari ignores it on body alone, and
    the rotated phone mockup's transform box would otherwise create sideways
    scroll. clip > hidden (no scroll container), with hidden as the fallback. */
@@ -527,7 +536,11 @@ a{color:${PURPLE_DEEP}}
 :focus-visible{outline:3px solid ${BRAND.purple};outline-offset:3px;border-radius:6px}
 .skip-link{position:absolute;left:-999px;top:8px;background:${BRAND.sun};color:${BRAND.ink};font-weight:800;padding:10px 16px;border-radius:999px;z-index:99}
 .skip-link:focus{left:8px}
-.shell{max-width:1120px;margin:0 auto;padding:0 22px}
+/* Horizontal longhands only — layout classes (.hero-grid) and section set
+   their own vertical padding, and a padding SHORTHAND on either side of the
+   pairing would zero the other axis (class vs class: source order wins;
+   that's exactly how the hero lost its side padding once). */
+.shell{max-width:1120px;margin:0 auto;padding-left:22px;padding-right:22px}
 
 /* ── header + hero (night violet with neon glows) ── */
 .top{
@@ -543,14 +556,14 @@ a{color:${PURPLE_DEEP}}
 .wordmark{font-size:24px;font-weight:900;letter-spacing:-.5px;color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:9px;padding:6px 2px}
 .wordmark svg{flex-shrink:0}
 .nav-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.nav-links a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:11px 16px;border-radius:999px}
+.nav-links a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:12px 16px;border-radius:999px}
 .nav-links a:hover{background:rgba(255,255,255,.1)}
 .nav-links a.say-hi{background:${BRAND.sun};color:${BRAND.ink};border:2px solid ${BRAND.ink};box-shadow:3px 3px 0 rgba(0,0,0,.4)}
 @media(max-width:620px){.nav-links a.anchor{display:none}}
 
-.hero-grid{display:grid;gap:48px;align-items:center;padding:44px 0 74px}
+.hero-grid{display:grid;gap:48px;align-items:center;padding-top:44px;padding-bottom:74px}
 .hero-grid>*{min-width:0}
-@media(min-width:940px){.hero-grid{grid-template-columns:1.08fr .92fr;padding:60px 0 92px}}
+@media(min-width:940px){.hero-grid{grid-template-columns:1.08fr .92fr;padding-top:60px;padding-bottom:92px}}
 
 .sticker{
   display:inline-block;background:${BRAND.sun};color:${BRAND.ink};
@@ -686,15 +699,15 @@ h2 .grad{color:#7C3AED}
 .footer .fm{font-size:22px;font-weight:900;color:#fff;display:flex;align-items:center;gap:8px}
 .footer .tag{margin:8px 0 0;font-size:14px;max-width:34ch;line-height:1.55}
 .footer nav{display:flex;flex-direction:column;gap:4px}
-.footer nav a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:8px 0}
+.footer nav a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:10px 0;min-height:44px;display:inline-flex;align-items:center}
 .footer nav a:hover{color:${BRAND.cyan}}
 .footer .legal{border-top:1px solid rgba(255,255,255,.14);padding:18px 0 26px;font-size:12.5px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
 /* small screens: tighter rhythm, stacked CTAs, gentler phone tilt */
 @media (max-width:520px){
-  .shell{padding:0 16px}
+  .shell{padding-left:16px;padding-right:16px}
   section{padding:52px 0}
-  .hero-grid{gap:36px;padding:34px 0 56px}
+  .hero-grid{gap:36px;padding-top:34px;padding-bottom:56px}
   .sticker{font-size:12.5px;padding:8px 13px;border-radius:16px}
   .cta-row{flex-direction:column;align-items:stretch}
   .cta-row .btn{text-align:center}
@@ -801,11 +814,11 @@ ${PUBLIC_HEAD_ICONS}
         time</b>. Works offline, shares to a link grandma can open, and keeps the
         whole squad hyped. 💖</p>
       <div class="cta-row">
-        <a class="btn btn-hot" href="mailto:tripto@navbytes.io?subject=Ping%20me%20when%20Tripto%20launches%20%F0%9F%94%94">🔔 Get pinged at launch</a>
+        <a class="btn btn-hot" href="${APP_STORE_URL}">📲 Get it on the App Store</a>
         <a class="btn btn-ghost" href="/privacy">Our privacy promise 🔒</a>
       </div>
-      <p class="truth-line">🚀 In TestFlight now — App Store launch soon. Trusted by exactly one
-        very organized family (so far). 🫡</p>
+      <p class="truth-line">🛫 Out now for iPhone — built by one very organized family,
+        shipped for yours. 🫶</p>
     </div>
 
     <div class="phone-wrap">
@@ -927,8 +940,8 @@ ${PUBLIC_HEAD_ICONS}
       <h2 id="cta-h">Be the organized friend ✨</h2>
       <p>The one with the plan, the packing list, and the peace of mind.
         Main-character behavior, honestly.</p>
-      <a class="btn btn-hot" href="mailto:tripto@navbytes.io?subject=Ping%20me%20when%20Tripto%20launches%20%F0%9F%94%94">🔔 Get pinged at launch</a>
-      <p class="store-line">🍎 Coming soon to the App Store</p>
+      <a class="btn btn-hot" href="${APP_STORE_URL}">📲 Get it on the App Store</a>
+      <p class="store-line">✈️ out now for iPhone · no ads, no tracking</p>
     </div>
   </section>
 </main>
@@ -966,6 +979,10 @@ export interface MessagePageOptions {
   actionHref?: string;
   actionLabel?: string;
   mutedLine?: string;
+  /** Optional low-emphasis second action (e.g. the App Store listing on the
+   * join interstitial for people who don't have the app yet). */
+  subActionHref?: string;
+  subActionLabel?: string;
 }
 
 /** Shared shell for every non-itinerary page: 404, invalid/revoked link, bad invite token, join interstitial. */
@@ -974,6 +991,10 @@ export function renderMessagePage(opts: MessagePageOptions): string {
     ? `<a class="button-link" href="${esc(opts.actionHref)}">${esc(opts.actionLabel ?? "Open")}</a>`
     : "";
   const muted = opts.mutedLine ? `<p class="muted-line">${esc(opts.mutedLine)}</p>` : "";
+  const subAction =
+    opts.subActionHref && opts.subActionLabel
+      ? `<a class="button-link secondary" href="${esc(opts.subActionHref)}">${esc(opts.subActionLabel)}</a>`
+      : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -988,6 +1009,7 @@ ${headTags(opts.pageTitle)}
     <p>${esc(opts.message)}</p>
     ${action}
     ${muted}
+    ${subAction}
   </div>
 </div>
 </body>
