@@ -219,7 +219,7 @@ prerequisite and the RELEASE_READINESS warning both get deleted.
 Fallback if supabase-swift session injection fights back: a `debugger`-led
 spike before committing to the seam design.
 
-### 3.2 ⏳/🔑 Universal links — S (mostly owner console)
+### 3.2 ✅ Universal links — DONE 2026-07-22 (entitlement + AASA live since 07-11/07-15; the two doc cleanups landed with push-dark; remaining: one on-device /join tap check, in the 1.2 owner checklist)
 
 Per EMAIL_IMPORT_PLAN Feature 2: 🔑 enable **Associated Domains** on App ID
 `io.navbytes.tripto` → ⏳ add the `applinks:tripto.navbytes.io` entitlement to
