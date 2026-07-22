@@ -27,7 +27,9 @@ Throughout: your booking data stays on your phone unless you choose otherwise. S
 Turn scattered bookings into one shared, at-a-glance itinerary — built for families and groups, not just solo business trips.
 
 **Proposed 1.2 refresh:**  
-Turn scattered bookings into one shared itinerary, with your boarding pass photos and vouchers attached — everything stays private on your phone unless you share.
+Turn scattered bookings into one shared itinerary — tickets and vouchers attached, visible only to people you invite. Scans are read on your phone, not in the cloud.
+
+**Correction 2026-07-22 (owner-caught, post-submission):** the earlier draft claimed "everything stays private on your phone" — false for a cloud-synced app (trips/attachments live in the backend; consented cloud AI sends extracted text). Replaced in ASC with the version above: access-scoped claim ("visible only to people you invite") + the on-device claim that is unconditionally true (scans read on-device). Rule: every marketing sentence must be validated against actual data flows, like code.
 
 **Rationale:** Lead with the privacy angle (the structural differentiator vs. TripIt/Wanderlog) and the attachments feature (the table-stakes gap Tripto just closed). Keep it scan-line length (~170 chars), same tone.
 
