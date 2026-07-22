@@ -27,6 +27,12 @@ struct SettingsView: View {
     /// local (see the section's own doc comment below), read/written
     /// through the shared key so the two views can't drift apart.
     @AppStorage(HomePastTripsVisibility.appStorageKey) private var showPastTrips = true
+    /// T2 (ROADMAP 3.3): device-local, same reasoning as `showPastTrips`
+    /// above — every device registers (or doesn't) its own push token.
+    /// Bound through `suggestionAlertsToggleBinding` below rather than
+    /// directly, since flipping it has a real request/register/upload (or
+    /// delete) side effect, unlike `showPastTrips`' plain persisted bool.
+    @AppStorage(SuggestionAlertsPreference.appStorageKey) private var suggestionAlertsEnabled = false
 
     @State private var displayName = ""
     /// UX audit finding 9: the signed-in user's own avatar color, editable
@@ -179,6 +185,12 @@ struct SettingsView: View {
                 Text("Past trips stay on Home when this is on.")
                     .font(Typo.body(Typo.Size.caption))
             }
+
+            // T2 (ROADMAP 3.3, EI-5): pulled into its own explicitly-typed
+            // `some View` property rather than inlined here — this `body`
+            // is already at the type checker's "reasonable time" limit (see
+            // `isPresentingArchiveImportError`'s own doc comment below).
+            notificationsSection
 
             // P4.3 (docs/UX_REDESIGN_ROADMAP.md): "Your data" moves above
             // Account — bring-your-history-in via any LLM is this product's
@@ -442,6 +454,23 @@ struct SettingsView: View {
         }
     }
 
+    /// T2 (ROADMAP 3.3, EI-5): requests notification permission + registers
+    /// for APNs on ON, deletes the `device_tokens` row on OFF (leaving the
+    /// system permission itself alone — an app can't revoke that).
+    /// `suggestionAlertsToggleBinding` owns the whole request/register/
+    /// upload-or-delete flow; this is just the row.
+    private var notificationsSection: some View {
+        Section {
+            Toggle("Suggestion alerts", isOn: suggestionAlertsToggleBinding)
+                .disabled(isDeletingAccount)
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("Get notified when someone suggests an item to add to a trip.")
+                .font(Typo.body(Typo.Size.caption))
+        }
+    }
+
     /// V1 aligned-rows relayout (client-approved): Row 1 of the Profile
     /// section — the avatar (`AvatarPhotoPicker` with `actionsBelowAvatar:
     /// true`, so "Change photo"/"Remove" render grouped directly under it,
@@ -519,6 +548,39 @@ struct SettingsView: View {
                 exportTempFileURL = nil
             }
         )
+    }
+
+    /// T2: same "explicit `Binding(get:set:)`" shape as `isPresentingArchiveImportError`/
+    /// `exportShareItems` above — intercepts every flip to run the real
+    /// request/register/upload-or-delete flow (`setSuggestionAlerts`)
+    /// instead of just persisting a bool.
+    private var suggestionAlertsToggleBinding: Binding<Bool> {
+        Binding(
+            get: { suggestionAlertsEnabled },
+            set: { newValue in Task { await setSuggestionAlerts(newValue) } }
+        )
+    }
+
+    /// ponytail: no busy-guard against a rapid double-tap while this is in
+    /// flight (unlike `isImportingArchive`/`isExportingArchive`'s explicit
+    /// state) — a second tap just starts a second, independently-correct
+    /// pass (iOS itself de-dupes a concurrent `requestAuthorization`), and
+    /// the toggle's own row already reflects whichever pass lands last. Add
+    /// a busy flag if that's ever observed as a real rough edge.
+    private func setSuggestionAlerts(_ enabled: Bool) async {
+        guard enabled else {
+            suggestionAlertsEnabled = false
+            await SuggestionAlertsToggle.disable(userId: authManager.userId)
+            return
+        }
+        suggestionAlertsEnabled = true
+        let outcome = await SuggestionAlertsToggle.enable(userId: authManager.userId)
+        if SuggestionAlertsToggle.shouldRevertToOff(for: outcome) {
+            suggestionAlertsEnabled = false
+        }
+        if let message = SuggestionAlertsToggle.failureMessage(for: outcome) {
+            toast = message
+        }
     }
 
     private func backTapped() {

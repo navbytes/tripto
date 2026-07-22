@@ -68,25 +68,25 @@ repo.** The service-role key must never be added to this Worker (or
 anywhere in the tripto repo) — it isn't needed; `get_public_trip` is exposed
 to `anon` precisely so this Worker never needs elevated credentials.
 
-## Universal links: adding your Apple Team ID
+## Universal links
 
 The AASA route reads `APPLE_TEAM_ID` from the Worker's environment and
-**404s until it's set** — this repo intentionally does not invent one. Once
-you have your Apple Developer Team ID:
+**404s if it's unset** — this repo intentionally doesn't invent one. Already
+wired end-to-end: `wrangler.jsonc`'s `vars` carries the real team ID, and the
+iOS app's associated-domains entitlement (`applinks:tripto.navbytes.io`) plus
+pinned signing team (`project.yml`) were added alongside it (2026-07-11).
 
-1. Add it to `wrangler.jsonc`'s `vars` block:
-   ```jsonc
-   "vars": {
-     "SUPABASE_URL": "...",
-     "SUPABASE_PUBLISHABLE_KEY": "...",
-     "APPLE_TEAM_ID": "ABCDE12345"
-   }
-   ```
-2. `npm run deploy` again.
-3. Confirm: `curl https://tripto.navbytes.io/.well-known/apple-app-site-association`
-   should return `{"applinks":{"apps":[],"details":[{"appID":"ABCDE12345.io.navbytes.tripto","paths":["/t/*","/join/*"]}]}}`.
-4. Add the matching Associated Domains entitlement
-   (`applinks:tripto.navbytes.io`) to the iOS app target.
+Confirm the AASA is live:
+`curl https://tripto.navbytes.io/.well-known/apple-app-site-association`
+returns `{"applinks":{"apps":[],"details":[{"appID":"59J9RQXYYP.io.navbytes.tripto","paths":["/join/*"]}]}}`
+— `/join/*` only; `/t/*` share links are deliberately excluded from `paths`
+(`handleAasa` in `src/index.ts`) so they always render this Worker's
+sanitized web view, never the app.
+
+Rotating the team ID (e.g. a new Apple Developer account) means updating it
+in both places: `wrangler.jsonc`'s `APPLE_TEAM_ID` here, and `project.yml`'s
+`DEVELOPMENT_TEAM` in the iOS app. Remaining (owner, ROADMAP.md §3.2):
+verify a `/join/<token>` link opens the app on a signed device.
 
 ## Notes for whoever touches this next
 

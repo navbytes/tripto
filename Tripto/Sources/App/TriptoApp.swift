@@ -5,6 +5,12 @@ import SwiftUI
 @main
 struct TriptoApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    /// T2 (ROADMAP 3.3): the one `UIApplicationDelegate` seam this
+    /// otherwise pure-SwiftUI-lifecycle app needs, for APNs registration's
+    /// callback-based result (`PushDelegate`'s own doc comment). SwiftUI
+    /// creates and owns the single instance; no manual wiring needed here
+    /// beyond declaring the property.
+    @UIApplicationDelegateAdaptor private var appDelegate: PushDelegate
 
     private let modelContainer: ModelContainer
     private let syncStatus: SyncStatus
@@ -66,6 +72,17 @@ struct TriptoApp: App {
                         let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String,
                         let url = URL(string: "tripto://trip/\(identifier)")
                     else { return }
+                    appRouter.handleIncoming(url: url, isSignedIn: authManager.isSignedIn)
+                }
+                // T2: a delivered push's tap (`PushDelegate.tappedTripId`,
+                // set by its `UNUserNotificationCenterDelegate` callback) —
+                // reuses the exact `tripto://trip/<uuid>` shape and
+                // signed-in gate the Spotlight continuation above already
+                // does, rather than adding a second route-in entry point to
+                // `AppRouter`.
+                .onChange(of: appDelegate.tappedTripId) { _, tripId in
+                    defer { appDelegate.clearTappedTripId() }
+                    guard let tripId, let url = URL(string: "tripto://trip/\(tripId.uuidString)") else { return }
                     appRouter.handleIncoming(url: url, isSignedIn: authManager.isSignedIn)
                 }
         }

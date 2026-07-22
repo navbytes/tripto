@@ -135,6 +135,12 @@ final class AuthManager {
         if let authorizationCode {
             await linkAppleTokenBestEffort(authorizationCode)
         }
+        // T2: same "must never block or fail sign-in" contract as the Apple
+        // token link above — re-associates this device's already-authorized
+        // push token (if any) with the account that just signed in, so
+        // switching accounts on one device doesn't leave the token pointed
+        // at the previous user.
+        await reuploadPushTokenBestEffort()
     }
 
     private func linkAppleTokenBestEffort(_ authorizationCode: String) async {
@@ -149,16 +155,43 @@ final class AuthManager {
         }
     }
 
+    /// T2: never requests authorization (only the Settings toggle does
+    /// that) — a no-op unless the user already turned Suggestion alerts on
+    /// (`SuggestionAlertsPreference`) and iOS still has this app authorized.
+    private func reuploadPushTokenBestEffort() async {
+        guard SuggestionAlertsPreference.isEnabled, let userId else { return }
+        _ = await SuggestionAlertsToggle.silentlyRefreshToken(userId: userId)
+    }
+
     // MARK: - Sign out
 
-    /// Wipes the local mirror/outbox first (still-authenticated, so this is
-    /// a plain local operation), then signs out of Supabase — the order
-    /// that leaves no stale rows on screen even if the network call itself
-    /// is slow or fails.
+    /// Runs `Self.signOutSequence` in order — the array itself is the
+    /// single source of truth for that order (unit-tested directly,
+    /// `AuthManagerSignOutSequenceTests`), so the tested order and the real
+    /// order can never drift apart.
     func signOut() async {
-        await syncEngine.wipeForSignOut()
-        try? await Supa.client.auth.signOut()
+        let userId = self.userId
+        for step in Self.signOutSequence {
+            switch step {
+            case .deletePushToken:
+                // T2: needs the still-live session (RLS is own-row
+                // `user_id = auth.uid()`) — must run before both the wipe
+                // and the remote sign-out below.
+                await SuggestionAlertsToggle.disable(userId: userId)
+            case .wipeLocalData:
+                // Still-authenticated at this point, so this is a plain
+                // local operation.
+                await syncEngine.wipeForSignOut()
+            case .signOutRemote:
+                // Deliberately last — wipe-then-signout leaves no stale
+                // rows on screen even if this network call itself is slow
+                // or fails.
+                try? await Supa.client.auth.signOut()
+            }
+        }
     }
+
+    static let signOutSequence: [SignOutStep] = [.deletePushToken, .wipeLocalData, .signOutRemote]
 
     // MARK: - Nonce helpers (Apple's documented SiwA + Supabase recipe)
 
@@ -181,4 +214,14 @@ final class AuthManager {
 
 enum AuthManagerError: Error {
     case missingNonce
+}
+
+/// The three steps `AuthManager.signOut()` runs, in order — pulled out as a
+/// pure, order-only value (T2: "token row delete must happen BEFORE
+/// wipe/logout") so that constraint is unit-testable without a real
+/// `Supa.client`/`SyncEngine`.
+enum SignOutStep: Equatable {
+    case deletePushToken
+    case wipeLocalData
+    case signOutRemote
 }
