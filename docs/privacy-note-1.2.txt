@@ -1,0 +1,22 @@
+From:    tripto@navbytes.io
+To:      tripto@navbytes.io
+Subject: Tripto 1.2 — privacy change note (no new data collection)
+
+Recording the privacy posture of Tripto 1.2 (App Store build 50, approved
+2026-07-23) for the file.
+
+1.2 adds scan-to-add, file attachments, on-device AI (trip summaries / packing
+suggestions), viewer suggestions, and Siri actions. None introduces new data
+collection or tracking, and the App Privacy labels are unchanged from 1.1.
+
+- Scan-to-add reads screenshots/PDFs on-device first. Only the extracted text
+  (never the image) is sent, and only if the user chooses cloud processing —
+  which names OpenAI before the first send.
+- Attachments reuse the existing Supabase storage (already disclosed),
+  RLS-gated: visible only to invited trip members; only the owner/organizer
+  can remove them.
+- On-device AI (Apple Intelligence) runs entirely on-device — zero cloud,
+  zero tracking.
+- No new SDKs, no new third parties, no new data types on the privacy labels.
+
+Privacy policy: https://tripto.navbytes.io/privacy
