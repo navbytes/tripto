@@ -62,7 +62,7 @@ body{width:1200px;height:630px;background:${GRAD};font-family:"Liberation Sans",
       ${dart(62)}
       <span class="t">tripto</span>
       <span style="flex:1"></span>
-      <span class="pill solid">coming soon · App Store</span>
+      <span class="pill solid">out now on the App Store</span>
     </div>
     <div class="tag">One shared itinerary.<br><span class="g">Zero group-chat chaos.</span></div>
     <div class="pills">
