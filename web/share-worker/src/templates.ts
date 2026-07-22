@@ -128,7 +128,7 @@ a{color:#E8955A}
   padding:12px 14px;margin-bottom:10px;
 }
 .item-time{width:66px;flex-shrink:0;font-size:.82rem;font-weight:700;color:#55586F;line-height:1.3}
-.item-time .zone{display:block;font-size:.62rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:1;margin-top:2px}
+.item-time .zone{display:block;font-size:.68rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:1;margin-top:2px}
 .item-icon{width:36px;height:36px;border-radius:10px;flex-shrink:0;display:grid;place-items:center}
 .item-body{min-width:0}
 .item-title{font-size:1rem;font-weight:600;color:#1A1B2E;overflow-wrap:anywhere}
@@ -231,7 +231,7 @@ ${headTags(`${trip.title} — Tripto`)}
 ${ICON_DEFS}
 <div class="wrap">
   <div class="hero" style="background:${gradient}">
-    <p class="trip-title">${esc(trip.title)}</p>
+    <h1 class="trip-title">${esc(trip.title)}</h1>
     <p class="trip-meta">${esc(dateRange)}</p>
   </div>
   <div class="content">
@@ -553,10 +553,10 @@ a{color:${PURPLE_DEEP}}
   position:relative;
 }
 .nav{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:20px 0 6px}
-.wordmark{font-size:24px;font-weight:900;letter-spacing:-.5px;color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:9px;padding:6px 2px}
+.wordmark{font-size:24px;font-weight:900;letter-spacing:-.5px;color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:9px;padding:6px 2px;min-height:44px}
 .wordmark svg{flex-shrink:0}
 .nav-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.nav-links a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:12px 16px;border-radius:999px}
+.nav-links a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:12px 16px;border-radius:999px;min-height:44px;display:inline-flex;align-items:center}
 .nav-links a:hover{background:rgba(255,255,255,.1)}
 .nav-links a.say-hi{background:${BRAND.sun};color:${BRAND.ink};border:2px solid ${BRAND.ink};box-shadow:3px 3px 0 rgba(0,0,0,.4)}
 @media(max-width:620px){.nav-links a.anchor{display:none}}

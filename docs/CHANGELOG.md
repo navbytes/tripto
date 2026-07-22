@@ -4,6 +4,11 @@ All notable changes to Tripto are documented here. Format: [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Website: full-matrix UX audit fixes (2026-07-22)
+
+#### Fixed
+- A systematic audit (all 5 page types × 23 viewports from 320px to 1920px incl. landscape phones, plus a keyboard-focus walk and reduced-motion emulation) surfaced three real issues, now fixed: the nav links and wordmark sat under the 44pt touch floor on small screens; the share itinerary's timezone label rendered below a 12px text floor (on the page tuned for older readers, of all places); and the itinerary page had no `<h1>` — the trip title was a `<p>`. All pages now audit clean: zero horizontal overflow everywhere, every focus stop shows a visible ring, zero running animations under Reduce Motion.
+
 ### Website: released-status copy + hero padding fix (2026-07-22)
 
 #### Changed
