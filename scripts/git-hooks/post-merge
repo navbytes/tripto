@@ -1,0 +1,6 @@
+#!/bin/sh
+# Regenerate the gitignored Tripto.xcodeproj after every merge/pull —
+# merges that add source files (esp. from worktree-built PRs) otherwise
+# leave this checkout's generated project stale, and Xcode fails with
+# walls of "cannot find X in scope" (owner hit this 2026-07-22).
+exec "$(dirname "$0")/../bootstrap.sh" --quiet 2>/dev/null || xcodegen generate --quiet

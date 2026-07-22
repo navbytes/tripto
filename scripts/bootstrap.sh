@@ -12,6 +12,16 @@ if ! command -v xcodegen >/dev/null 2>&1; then
     exit 1
 fi
 
+# One-time wiring: pulls/checkouts auto-regenerate the gitignored project
+# (scripts/git-hooks/post-merge + post-checkout) — a checkout that pulls
+# merges from worktree-built PRs otherwise opens a stale .xcodeproj.
+git config core.hooksPath scripts/git-hooks 2>/dev/null || true
+
+if [[ "${1:-}" == "--quiet" ]]; then
+    xcodegen generate --quiet
+    exit 0
+fi
+
 echo "-> xcodegen generate"
 xcodegen generate
 
