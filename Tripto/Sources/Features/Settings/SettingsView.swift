@@ -33,6 +33,13 @@ struct SettingsView: View {
     /// directly, since flipping it has a real request/register/upload (or
     /// delete) side effect, unlike `showPastTrips`' plain persisted bool.
     @AppStorage(SuggestionAlertsPreference.appStorageKey) private var suggestionAlertsEnabled = false
+    /// F6 (1.3): device-local "home zone" override, same reasoning as
+    /// `showPastTrips`/`suggestionAlertsEnabled` above — every device can
+    /// have its own idea of "home". Empty = Automatic (device zone); see
+    /// `HomeTimeZonePreference`'s own doc comment (`Trip+Bucketing.swift`)
+    /// for how this is resolved and threaded into the "today"/bucketing math
+    /// `HomeView`/`ItineraryTabView` already run.
+    @AppStorage(HomeTimeZonePreference.appStorageKey) private var homeTimeZoneID = ""
 
     @State private var displayName = ""
     /// UX audit finding 9: the signed-in user's own avatar color, editable
@@ -183,6 +190,18 @@ struct SettingsView: View {
                 Toggle("Show past trips", isOn: $showPastTrips)
             } footer: {
                 Text("Past trips stay on Home when this is on.")
+                    .font(Typo.body(Typo.Size.caption))
+            }
+
+            // F6 (1.3): "home vs away" framing + the app's own "today"/trip-
+            // liveness math both read this instead of always assuming the
+            // device's current zone (`HomeTimeZonePreference`'s own doc
+            // comment) — useful the moment the device itself travels, since
+            // the device's own zone otherwise silently becomes "home".
+            Section {
+                HomeZonePicker(selectionID: $homeTimeZoneID)
+            } footer: {
+                Text("Used to tell whether you\u{2019}re home or away, and for \u{201C}today\u{201D} on your trips. Automatic follows this device\u{2019}s own time zone.")
                     .font(Typo.body(Typo.Size.caption))
             }
 

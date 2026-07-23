@@ -40,6 +40,15 @@ struct HomeView: View {
     /// `true` so a fresh install/existing user sees today's unchanged
     /// behavior until they explicitly opt to hide.
     @AppStorage(HomePastTripsVisibility.appStorageKey) private var showPastTrips = true
+    /// F6 (1.3): device-local "home zone" override — read side. `resolvedHomeTimeZone`
+    /// below is what actually feeds every `liveTimeZone(...)` call in this
+    /// file (`HomeTimeZonePreference`'s own doc comment).
+    @AppStorage(HomeTimeZonePreference.appStorageKey) private var homeTimeZoneID = ""
+
+    /// The single resolved reference zone this screen judges "today"/trip
+    /// liveness against — empty preference falls back to the device's own
+    /// zone (`HomeTimeZonePreference.resolve`).
+    private var resolvedHomeTimeZone: TimeZone { HomeTimeZonePreference.resolve(id: homeTimeZoneID) }
 
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
@@ -701,7 +710,12 @@ struct HomeView: View {
     private var tripList: some View {
         let itemsByTripId = itemsByTripId
         let bucketsByTripId = Dictionary(uniqueKeysWithValues: trips.map { trip in
-            (trip.id, HomeTripDayLabels.bucket(trip: trip, liveTimeZone: TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])))
+            (trip.id, HomeTripDayLabels.bucket(
+                trip: trip,
+                liveTimeZone: TripDateBucketing.liveTimeZone(
+                    items: itemsByTripId[trip.id] ?? [], deviceTimeZone: resolvedHomeTimeZone
+                )
+            ))
         })
         let bucketLookup: (Trip) -> TripBucket = { bucketsByTripId[$0.id] ?? .upcoming }
         let aheadTrips = HomeTripOrdering.ahead(trips, bucket: bucketLookup)
@@ -867,7 +881,7 @@ struct HomeView: View {
             let firstUp = HomeFirstUp.pick(from: itemsByTripId[trip.id] ?? [])
             return .next(firstUp: firstUp.map(HomeFirstUp.init))
         case .now:
-            let tz = TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])
+            let tz = TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [], deviceTimeZone: resolvedHomeTimeZone)
             let todayRows = HomeTodayPlan.items(
                 in: itemsByTripId[trip.id] ?? [], tripStart: HomeTripDayLabels.tripStart(trip), liveTimeZone: tz
             )
