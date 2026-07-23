@@ -64,7 +64,16 @@ final class HeroFlightModel {
         /// (`.plain`/`.next`/`.now`) so `HeroFlightClone` can render the
         /// SAME shape the real card had — see that type's own doc comment
         /// for why the mismatch mattered.
-        case flying(trip: Trip, people: [AvatarStack.Person], isPending: Bool, register: HomeCardRegister, sourceFrame: CGRect)
+        /// F6 review should-fix (1.3): carries `HomeView.homeAdjustedToday`
+        /// — the SAME "today" the tapped card's own pill/countdown used
+        /// (see that property's own doc comment for why this is a shifted
+        /// `Date`, not a swapped `Calendar`), so the mid-flight clone can't
+        /// flash a different "in progress"/"in N days" than the card just
+        /// showed.
+        case flying(
+            trip: Trip, people: [AvatarStack.Person], isPending: Bool, register: HomeCardRegister,
+            today: Date, sourceFrame: CGRect
+        )
     }
 
     var state: State = .idle
@@ -143,9 +152,9 @@ struct HeroFlightOverlay: View {
     var body: some View {
         ZStack {
             Color.clear
-            if case let .flying(trip, people, isPending, register, sourceFrame) = model.state {
+            if case let .flying(trip, people, isPending, register, today, sourceFrame) = model.state {
                 HeroFlightClone(
-                    trip: trip, people: people, isPending: isPending, register: register,
+                    trip: trip, people: people, isPending: isPending, register: register, today: today,
                     sourceFrame: sourceFrame, model: model
                 )
             }
@@ -190,6 +199,10 @@ private struct HeroFlightClone: View {
     let people: [AvatarStack.Person]
     let isPending: Bool
     let register: HomeCardRegister
+    /// F6 review should-fix (1.3): mirrors `TripCard.today` — see the
+    /// `.flying` case's own doc comment for why this rides along instead of
+    /// each defaulting to `.now` independently.
+    let today: Date
     let sourceFrame: CGRect
     let model: HeroFlightModel
 
@@ -201,13 +214,14 @@ private struct HeroFlightClone: View {
     @State private var didLand = false
 
     init(
-        trip: Trip, people: [AvatarStack.Person], isPending: Bool, register: HomeCardRegister,
+        trip: Trip, people: [AvatarStack.Person], isPending: Bool, register: HomeCardRegister, today: Date,
         sourceFrame: CGRect, model: HeroFlightModel
     ) {
         self.trip = trip
         self.people = people
         self.isPending = isPending
         self.register = register
+        self.today = today
         self.sourceFrame = sourceFrame
         self.model = model
         _frame = State(initialValue: sourceFrame)
@@ -318,7 +332,7 @@ private struct HeroFlightClone: View {
         case .next:
             glassPill(text: "in \(daysUntilStartText)", leading: .ring(fraction: countdownRingFraction))
         case .plain:
-            switch trip.bucket() {
+            switch trip.bucket(asOf: today) {
             case .inProgress:
                 glassPill(text: "In progress")
             case .upcoming:
@@ -330,14 +344,14 @@ private struct HeroFlightClone: View {
     }
 
     private var daysUntilStartText: String {
-        let days = trip.daysUntilStart()
+        let days = trip.daysUntilStart(asOf: today)
         return "\(days) day\(days == 1 ? "" : "s")"
     }
 
     /// Same formula as `TripCard.countdownRingFraction` — see that
     /// property's own doc comment.
     private var countdownRingFraction: Double {
-        min(max(Double(trip.daysUntilStart()), 0), 60) / 60
+        min(max(Double(trip.daysUntilStart(asOf: today)), 0), 60) / 60
     }
 
     private enum PillLeading {
@@ -423,7 +437,7 @@ private struct HeroFlightClone: View {
     }
 
     private var startDateText: String {
-        TripCard.startDateText(for: trip.startDate, asOf: .now)
+        TripCard.startDateText(for: trip.startDate, asOf: today)
     }
 
     private var durationText: String {
