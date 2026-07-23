@@ -16,35 +16,44 @@ import {
  * between pages. */
 export const SITE_ORIGIN = "https://tripto.navbytes.io";
 
-// ── Brand: "unicorn mode" (marketing surfaces only) ────────────────────────
-// The landing/privacy pages wear a loud gradient-and-sticker look; the token
-// share pages (/t/, /join/) keep the calm in-app dusk palette because they
-// are product surfaces tuned for a non-technical, older audience.
+// ── Brand: "dusk departure" (marketing surfaces only) ──────────────────────
+// The landing/privacy pages wear a loud gradient-and-sticker look, but the
+// gradient is now rooted in the REAL brand: the app icon's amber→indigo
+// sunset, the same sweep as CoverGradient.dusk (Tokens.swift) / GRADIENTS.dusk
+// (format.ts). The token share pages (/t/, /join/) keep the calm in-app dusk
+// palette because they are product surfaces tuned for a non-technical, older
+// audience.
 const BRAND = {
   ink: "#221533", // deep plum — text & borders
   paper: "#FFF9F4", // warm cream page background
-  pink: "#FF3E9E",
-  purple: "#8B5CF6",
-  cyan: "#2DD9C8",
-  sun: "#FFC93E",
-  dark: "#1B1030", // hero/footer night-violet
+  amber: "#E8955A", // app accent — matches Palette.amber exactly
+  coral: "#C96B5B", // terracotta midpoint — matches CoverGradient.dusk's middle stop
+  indigo: "#2D2F52", // deep dusk indigo — matches Palette.indigo exactly
+  sun: "#FFC93E", // warm gold accent (stickers, CTA) — not part of the old unicorn set, kept
+  dark: "#1B1030", // hero/footer night-plum
 } as const;
 
-/** The signature pink→purple→cyan sweep. */
-const UNICORN_GRADIENT = `linear-gradient(115deg, ${BRAND.pink} 0%, #B44CF0 45%, ${BRAND.purple} 62%, ${BRAND.cyan} 100%)`;
+/** The signature amber→coral→indigo sunset sweep — identical stops/angle to
+ * the app's own CoverGradient.dusk (SwiftUI topLeading→bottomTrailing ≈ 135deg
+ * in CSS terms), so the marketing gradient IS the app's gradient. */
+const SUNSET_GRADIENT = `linear-gradient(135deg, ${BRAND.amber} 0%, ${BRAND.coral} 55%, ${BRAND.indigo} 100%)`;
 
 /** Same sweep in lighter tints — for gradient-clipped text on dark, where the
- * full-strength colors would fail AA contrast. */
-const UNICORN_GRADIENT_LIGHT = "linear-gradient(100deg, #FF9AD3 0%, #C4A8FF 55%, #6FE8DA 100%)";
+ * full-strength colors would fail AA contrast. All three stops clear 10:1+
+ * against the night-plum hero background (${BRAND.dark}), far past the 3:1
+ * AA large-text bar. */
+const SUNSET_GRADIENT_LIGHT = "linear-gradient(100deg, #FFD9A8 0%, #FFB199 55%, #C9BFF0 100%)";
 
 /** And in deeper tones — for gradient-clipped display text on light
- * backgrounds (every stop ≥3:1 on cream, the AA large-text bar). */
-const UNICORN_GRADIENT_DEEP = "linear-gradient(115deg, #E11D8F 0%, #7C3AED 55%, #0D9488 100%)";
+ * backgrounds (every stop ≥3:1 on cream/white, the AA large-text bar). */
+const SUNSET_GRADIENT_DEEP = `linear-gradient(115deg, #A65A1E 0%, #B8593F 55%, ${BRAND.indigo} 100%)`;
 
-// AA-safe accent tones for small text/links on light backgrounds (the raw
-// brand pink/purple sit just under 4.5:1 on white).
-const PINK_DEEP = "#D6157F";
-const PURPLE_DEEP = "#6D28D9";
+// AA-safe accent tones for small text/links on light backgrounds (≥4.5:1 on
+// cream, white, AND the amber-cream tile background used behind the kicker
+// pill — the raw brand amber/indigo sit either under 4.5:1 or are reused
+// as-is when they already clear it).
+const AMBER_DEEP = "#A34A16";
+const INDIGO_DEEP = BRAND.indigo; // already 12:1+ on cream — no darkening needed
 
 /** The Tripto logo mark — the paper-plane dart with a contrail, traced from
  * the app icon (Tripto/Resources/…/AppIcon-1024.png). Inline SVG, tinted via
@@ -55,7 +64,7 @@ function logoMark(size: number): string {
 
 /** Served at /favicon.svg (and reused as the inline page icon): the dart on
  * the brand gradient tile. Pure shapes — no font dependency. */
-export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#FF3E9E"/><stop offset=".55" stop-color="#8B5CF6"/><stop offset="1" stop-color="#2DD9C8"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#g)"/><g transform="translate(9.5,9.5) scale(1.87)"><path d="M21.6 2.4 3.2 9.9l7.3 2.5 2.5 8.2z" fill="#fff"/><path d="M21.6 2.4 10.5 12.4" stroke="#fff" stroke-width="1.1" opacity=".45" fill="none"/><path d="M9.4 14.3c-2.2 2.7-4.6 4.8-7 6.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity=".65" fill="none"/></g></svg>`;
+export const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#E8955A"/><stop offset=".55" stop-color="#C96B5B"/><stop offset="1" stop-color="#2D2F52"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#g)"/><g transform="translate(9.5,9.5) scale(1.87)"><path d="M21.6 2.4 3.2 9.9l7.3 2.5 2.5 8.2z" fill="#fff"/><path d="M21.6 2.4 10.5 12.4" stroke="#fff" stroke-width="1.1" opacity=".45" fill="none"/><path d="M9.4 14.3c-2.2 2.7-4.6 4.8-7 6.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" opacity=".65" fill="none"/></g></svg>`;
 
 /** Shared icon/meta links for public (indexable) pages. */
 const PUBLIC_HEAD_ICONS = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -257,19 +266,19 @@ export function renderPrivacyPage(): string {
   const style = `
 ${SHARED_STYLES}
 .article{max-width:680px;margin:0 auto;padding:8px 22px 48px}
-.article .eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:${PURPLE_DEEP}}
+.article .eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:${INDIGO_DEEP}}
 .article h1{font-weight:800;font-size:clamp(26px,7vw,34px);letter-spacing:-.5px;margin:8px 0 4px;color:${BRAND.ink}}
 .article .updated{font-size:13px;color:#6B6E8F;margin:0 0 26px}
 .article h2{font-weight:800;font-size:19px;margin:28px 0 8px;color:${BRAND.ink}}
 .article p{font-size:15px;line-height:1.62;color:#2D2F52;margin:0 0 12px;overflow-wrap:anywhere}
 .article strong{color:${BRAND.ink}}
 .article .lead{font-size:16px;color:${BRAND.ink}}
-.article a{color:${PINK_DEEP};font-weight:600}
-.hero{background:${BRAND.dark};background-image:radial-gradient(420px 260px at 12% -10%,rgba(255,62,158,.35),transparent 60%),radial-gradient(420px 280px at 88% 10%,rgba(45,217,200,.28),transparent 60%),radial-gradient(520px 340px at 55% 120%,rgba(139,92,246,.4),transparent 60%)}
+.article a{color:${AMBER_DEEP};font-weight:600}
+.hero{background:${BRAND.dark};background-image:radial-gradient(420px 260px at 12% -10%,rgba(232,149,90,.35),transparent 60%),radial-gradient(420px 280px at 88% 10%,rgba(201,107,91,.28),transparent 60%),radial-gradient(520px 340px at 55% 120%,rgba(154,123,174,.4),transparent 60%)}
 .hero .trip-title{font-family:inherit;font-weight:800}
 .hero .trip-title svg{vertical-align:-2px;margin-right:4px}
 .hero .pill{display:inline-block;margin-top:10px;background:${BRAND.sun};color:${BRAND.ink};border:2px solid ${BRAND.ink};border-radius:999px;padding:6px 14px;font-size:12.5px;font-weight:800;box-shadow:3px 3px 0 rgba(0,0,0,.35);transform:rotate(-1.5deg)}
-.site-footer a{color:${PINK_DEEP}}`;
+.site-footer a{color:${AMBER_DEEP}}`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -399,7 +408,7 @@ ${PUBLIC_HEAD_ICONS}
 </html>`;
 }
 
-// ── Landing page ("unicorn mode") ──────────────────────────────────────────
+// ── Landing page ("dusk departure" sunset brand) ───────────────────────────
 
 /** FAQ content rendered on the landing page AND mirrored into FAQPage
  * JSON-LD. Google requires the structured data to match visible content, so
@@ -532,8 +541,8 @@ body{
   line-height:1.5;
   min-width:0;
 }
-a{color:${PURPLE_DEEP}}
-:focus-visible{outline:3px solid ${BRAND.purple};outline-offset:3px;border-radius:6px}
+a{color:${INDIGO_DEEP}}
+:focus-visible{outline:3px solid ${BRAND.coral};outline-offset:3px;border-radius:6px}
 .skip-link{position:absolute;left:-999px;top:8px;background:${BRAND.sun};color:${BRAND.ink};font-weight:800;padding:10px 16px;border-radius:999px;z-index:99}
 .skip-link:focus{left:8px}
 /* Horizontal longhands only — layout classes (.hero-grid) and section set
@@ -542,13 +551,13 @@ a{color:${PURPLE_DEEP}}
    that's exactly how the hero lost its side padding once). */
 .shell{max-width:1120px;margin:0 auto;padding-left:22px;padding-right:22px}
 
-/* ── header + hero (night violet with neon glows) ── */
+/* ── header + hero (night-plum with sunset glows) ── */
 .top{
   background:${BRAND.dark};
   background-image:
-    radial-gradient(640px 420px at 10% -12%, rgba(255,62,158,.34), transparent 60%),
-    radial-gradient(520px 400px at 92% 4%, rgba(45,217,200,.24), transparent 60%),
-    radial-gradient(760px 520px at 55% 118%, rgba(139,92,246,.38), transparent 62%);
+    radial-gradient(640px 420px at 10% -12%, rgba(232,149,90,.34), transparent 60%),
+    radial-gradient(520px 400px at 92% 4%, rgba(201,107,91,.26), transparent 60%),
+    radial-gradient(760px 520px at 55% 118%, rgba(154,123,174,.38), transparent 62%);
   color:#EDE6FF;
   position:relative;
 }
@@ -576,7 +585,7 @@ h1{
   font-weight:900;letter-spacing:-.03em;line-height:1.04;
   margin:22px 0 0;color:#fff;
 }
-h1 .grad{color:#E9C4FF}
+h1 .grad{color:#FFD6C2}
 .hero-sub{font-size:clamp(16.5px,2.2vw,19px);line-height:1.6;max-width:56ch;margin:20px 0 0;color:#EDE6FF}
 .hero-sub b{color:#fff}
 .cta-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:30px;align-items:center}
@@ -604,7 +613,7 @@ h1 .grad{color:#E9C4FF}
   color:${BRAND.ink};
 }
 .phone .statusbar{display:flex;justify-content:space-between;font-size:11.5px;font-weight:700;color:#8A8AA3;padding:2px 10px 8px}
-.phone .mini-hero{background:${UNICORN_GRADIENT};border-radius:22px;color:#fff;padding:16px 16px 14px;border:2px solid ${BRAND.ink}}
+.phone .mini-hero{background:${SUNSET_GRADIENT};border-radius:22px;color:#fff;padding:16px 16px 14px;border:2px solid ${BRAND.ink}}
 .phone .mini-hero .t{font-size:18px;font-weight:900;letter-spacing:-.02em}
 .phone .mini-hero .d{font-size:12px;font-weight:700;opacity:.95;margin-top:3px}
 .phone .day{font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;color:#6B6E8F;margin:14px 4px 8px}
@@ -612,22 +621,25 @@ h1 .grad{color:#E9C4FF}
 .phone .row .emoji{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:19px;flex-shrink:0;border:2px solid ${BRAND.ink}}
 .phone .row .tt{font-size:13.5px;font-weight:800;line-height:1.25}
 .phone .row .ts{font-size:11px;font-weight:700;color:#6B6E8F;margin-top:1px}
-.phone .pack{display:flex;align-items:center;gap:8px;background:#F3EDFF;border:2px dashed ${BRAND.purple};border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800;color:#4C1D95;margin-top:4px;justify-content:center}
+.phone .pack{display:flex;align-items:center;gap:8px;background:#FBEADB;border:2px dashed ${BRAND.amber};border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800;color:${AMBER_DEEP};margin-top:4px;justify-content:center}
 .phone-sticker{
-  position:absolute;top:-16px;right:2%;background:${BRAND.pink};color:${BRAND.ink};
+  position:absolute;top:-16px;right:2%;background:${BRAND.coral};color:${BRAND.ink};
   font-size:13px;font-weight:800;border:2px solid ${BRAND.ink};border-radius:999px;
   padding:8px 14px;transform:rotate(6deg);box-shadow:3px 3px 0 rgba(0,0,0,.4);
 }
 
 /* ── marquee ── */
-.marquee{background:linear-gradient(90deg,${BRAND.sun},${BRAND.pink} 34%,${BRAND.purple} 66%,${BRAND.cyan});border-top:3px solid ${BRAND.ink};border-bottom:3px solid ${BRAND.ink};overflow:hidden;display:flex;max-width:100%}
+/* Own vivid 4-stop sweep (gold lead-in like the original, sunset midtones) —
+   ends in a muted dusk-violet rather than full-dark indigo so the ink-colored
+   text keeps ≥4.5:1 across the whole band (raw indigo would drop to ~1.3:1). */
+.marquee{background:linear-gradient(90deg,${BRAND.sun},${BRAND.amber} 30%,${BRAND.coral} 62%,#9A7BAE);border-top:3px solid ${BRAND.ink};border-bottom:3px solid ${BRAND.ink};overflow:hidden;display:flex;max-width:100%}
 .marquee-track{--mgap:34px;display:flex;flex-shrink:0;min-width:100%;justify-content:space-around;gap:var(--mgap);padding:13px 17px;font-size:15px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:${BRAND.ink};white-space:nowrap}
 
 /* ── sections ── */
 section{padding:72px 0}
-.kicker{display:inline-block;font-size:13px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:${PINK_DEEP};background:#FFE9F4;border:2px solid ${BRAND.ink};border-radius:999px;padding:7px 14px;transform:rotate(-1.2deg)}
+.kicker{display:inline-block;font-size:13px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:${AMBER_DEEP};background:#FBEADB;border:2px solid ${BRAND.ink};border-radius:999px;padding:7px 14px;transform:rotate(-1.2deg)}
 h2{font-size:clamp(28px,4.6vw,42px);font-weight:900;letter-spacing:-.025em;line-height:1.08;margin:18px 0 12px}
-h2 .grad{color:#7C3AED}
+h2 .grad{color:#B8593F}
 .section-sub{font-size:17px;color:#4A3B63;max-width:60ch;margin:0}
 
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:20px;margin-top:38px}
@@ -642,18 +654,18 @@ h2 .grad{color:#7C3AED}
 .card p b{color:${BRAND.ink}}
 
 /* how it works */
-.steps-band{background:#F3EDFF;border-top:3px solid ${BRAND.ink};border-bottom:3px solid ${BRAND.ink}}
+.steps-band{background:#FBEADB;border-top:3px solid ${BRAND.ink};border-bottom:3px solid ${BRAND.ink}}
 .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:22px;margin-top:38px;counter-reset:step}
 .steps>*{min-width:0}
 .step{background:#fff;border:2.5px solid ${BRAND.ink};border-radius:22px;padding:26px 22px;box-shadow:6px 6px 0 ${BRAND.ink};position:relative}
-.step .num{font-size:52px;font-weight:900;line-height:1;letter-spacing:-.04em;color:#E11D8F}
+.step .num{font-size:52px;font-weight:900;line-height:1;letter-spacing:-.04em;color:#A65A1E}
 /* Gradient-clipped display text only where supported — otherwise the solid
    fallback colors above keep the words visible (transparent text on an
    unsupported browser would vanish). */
 @supports ((-webkit-background-clip:text) or (background-clip:text)){
-  h1 .grad{background:${UNICORN_GRADIENT_LIGHT};-webkit-background-clip:text;background-clip:text;color:transparent}
-  h2 .grad{background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent}
-  .step .num{background:${UNICORN_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent}
+  h1 .grad{background:${SUNSET_GRADIENT_LIGHT};-webkit-background-clip:text;background-clip:text;color:transparent}
+  h2 .grad{background:${SUNSET_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent}
+  .step .num{background:${SUNSET_GRADIENT_DEEP};-webkit-background-clip:text;background-clip:text;color:transparent}
 }
 .step h3{font-size:19.5px;font-weight:900;margin:10px 0 8px}
 .step p{font-size:15px;line-height:1.6;color:#4A3B63;margin:0}
@@ -666,7 +678,7 @@ h2 .grad{color:#7C3AED}
   color:${BRAND.ink};margin:0;
 }
 .manifesto blockquote .hl{background:linear-gradient(transparent 58%, ${BRAND.sun} 58%)}
-.manifesto figcaption{margin-top:18px;font-size:14px;font-weight:800;color:${PURPLE_DEEP}}
+.manifesto figcaption{margin-top:18px;font-size:14px;font-weight:800;color:${INDIGO_DEEP}}
 
 /* FAQ */
 .faq-list{margin-top:34px;display:grid;gap:14px;max-width:820px}
@@ -676,14 +688,14 @@ h2 .grad{color:#7C3AED}
   font-size:16.5px;font-weight:800;padding:18px 20px;border-radius:18px;
 }
 .faq summary::-webkit-details-marker{display:none}
-.faq summary::after{content:"+";font-size:24px;font-weight:900;color:${PINK_DEEP};flex-shrink:0;line-height:1}
-.faq[open] summary::after{content:"–";color:${PURPLE_DEEP}}
+.faq summary::after{content:"+";font-size:24px;font-weight:900;color:${AMBER_DEEP};flex-shrink:0;line-height:1}
+.faq[open] summary::after{content:"–";color:${INDIGO_DEEP}}
 .faq .a{padding:0 20px 20px;font-size:15px;line-height:1.65;color:#4A3B63}
 .faq .a b{color:${BRAND.ink}}
 
 /* final CTA */
 .cta-banner{
-  background-image:linear-gradient(rgba(27,16,48,.26),rgba(27,16,48,.26)),${UNICORN_GRADIENT};
+  background-image:linear-gradient(rgba(27,16,48,.26),rgba(27,16,48,.26)),${SUNSET_GRADIENT};
   border:3px solid ${BRAND.ink};border-radius:28px;
   box-shadow:10px 10px 0 ${BRAND.ink};color:#fff;text-align:center;
   padding:clamp(38px,6vw,64px) 26px;position:relative;overflow:hidden;
@@ -700,7 +712,7 @@ h2 .grad{color:#7C3AED}
 .footer .tag{margin:8px 0 0;font-size:14px;max-width:34ch;line-height:1.55}
 .footer nav{display:flex;flex-direction:column;gap:4px}
 .footer nav a{color:#EDE6FF;text-decoration:none;font-weight:700;font-size:14.5px;padding:10px 0;min-height:44px;display:inline-flex;align-items:center}
-.footer nav a:hover{color:${BRAND.cyan}}
+.footer nav a:hover{color:${BRAND.sun}}
 .footer .legal{border-top:1px solid rgba(255,255,255,.14);padding:18px 0 26px;font-size:12.5px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
 /* small screens: tighter rhythm, stacked CTAs, gentler phone tilt */
@@ -753,7 +765,7 @@ export function renderLandingPage(): string {
       <span>every time zone handled ✦</span>
       <span>grandma can see the plan ✦</span>
       <span>works on airplane mode ✦</span>
-      <span>packing lists that slap ✦</span>
+      <span>packing lists that stay in sync ✦</span>
       <span>zero ads, zero tracking ✦</span>
     </div>`;
 
@@ -807,12 +819,12 @@ ${PUBLIC_HEAD_ICONS}
 
   <div class="shell hero-grid">
     <div>
-      <span class="sticker">✨ the trip app your group chat has been begging for</span>
+      <span class="sticker">✨ the trip your group chat keeps trying to plan</span>
       <h1>One shared itinerary.<br><span class="grad">Zero group-chat chaos.</span></h1>
       <p class="hero-sub">Tripto is the <b>group trip planner</b> for families &amp; friends —
         every flight, stay and plan on one timeline, each shown in <b>its own local
-        time</b>. Works offline, shares to a link grandma can open, and keeps the
-        whole squad hyped. 💖</p>
+        time</b>. Works offline, shares to a link grandma can open, so everyone from
+        the group chat to grandma is on the same page. 💛</p>
       <div class="cta-row">
         <a class="btn btn-hot" href="${APP_STORE_URL}">📲 Get it on the App Store</a>
         <a class="btn btn-ghost" href="/privacy">Our privacy promise 🔒</a>
@@ -826,17 +838,17 @@ ${PUBLIC_HEAD_ICONS}
         <div class="statusbar" aria-hidden="true"><span>9:41</span><span>⚡🔋</span></div>
         <div class="mini-hero" aria-hidden="true">
           <div class="t">algarve with the fam 🍊</div>
-          <div class="d">Aug 12 – 19 · 7 days · 6 legends</div>
+          <div class="d">Aug 12 – 19 · 7 days · party of 6</div>
         </div>
         <div aria-hidden="true">
           <div class="day">Day 2 · Tue, Aug 13</div>
-          <div class="row"><span class="emoji" style="background:#E3F2FF">✈️</span><div><div class="tt">TP 353 — the fam lands!</div><div class="ts">9:40 AM · Lisbon time · gate hugs @ arrivals</div></div></div>
-          <div class="row"><span class="emoji" style="background:#FFE9F4">🏰</span><div><div class="tt">Pena Palace w/ everyone</div><div class="ts">1:15 PM · tickets sorted ✔</div></div></div>
+          <div class="row"><span class="emoji" style="background:#E3EAF3">✈️</span><div><div class="tt">TP 353 — the fam lands!</div><div class="ts">9:40 AM · Lisbon time · gate hugs @ arrivals</div></div></div>
+          <div class="row"><span class="emoji" style="background:#E3EEE6">🏰</span><div><div class="tt">Pena Palace w/ everyone</div><div class="ts">1:15 PM · tickets sorted ✔</div></div></div>
           <div class="row"><span class="emoji" style="background:#FFF3D6">🍤</span><div><div class="tt">dinner @ Ramiro 🤤</div><div class="ts">8:00 PM · table for six</div></div></div>
           <div class="pack">🧦 packing list: 12/14 packed — so close</div>
         </div>
       </div>
-      <span class="phone-sticker" aria-hidden="true">grandma's watching live 💜</span>
+      <span class="phone-sticker" aria-hidden="true">grandma's watching live 💛</span>
     </div>
   </div>
 </div>
@@ -849,45 +861,45 @@ ${PUBLIC_HEAD_ICONS}
 <main id="main">
   <section id="features" class="shell" aria-labelledby="features-h">
     <span class="kicker">the good stuff</span>
-    <h2 id="features-h">Why your squad will be <span class="grad">obsessed</span></h2>
+    <h2 id="features-h">Why the whole group's <span class="grad">on board</span></h2>
     <p class="section-sub">Everything a group trip actually needs — nothing it doesn't. Built for
       families &amp; friend groups, not business travelers with 4 apps and a lanyard.</p>
 
     <div class="cards">
       <article class="card">
-        <span class="tile" style="background:#FFE9F4" aria-hidden="true">🕰️</span>
+        <span class="tile" style="background:#E3EAF3" aria-hidden="true">🕰️</span>
         <h3>Time zones? Handled.</h3>
         <p>Every flight, stay and plan shows in <b>its own local time</b> — so a 9:40 PM
           landing in Lisbon never reads as afternoon-nap o'clock. Jet lag is confusing
           enough.</p>
       </article>
       <article class="card">
-        <span class="tile" style="background:#F3EDFF" aria-hidden="true">🎫</span>
+        <span class="tile" style="background:#FBEADB" aria-hidden="true">🎫</span>
         <h3>Boarding-pass energy</h3>
         <p>Tap any plan for the full detail card — confirmation codes, one-tap
           <b>add to Calendar</b>, one-tap directions. Airport mode: activated.</p>
       </article>
       <article class="card">
-        <span class="tile" style="background:#E7FBF4" aria-hidden="true">💌</span>
+        <span class="tile" style="background:#E3EEE6" aria-hidden="true">💌</span>
         <h3>The whole crew's invited</h3>
-        <p>One link invites everyone. Organizers plan, companions add, viewers vibe — and
+        <p>One link invites everyone. Organizers plan, companions add, viewers follow along — and
           <b>grandparents open a read-only web page</b>. No app. No account. No stress.</p>
       </article>
       <article class="card">
         <span class="tile" style="background:#FFF3D6" aria-hidden="true">🧦</span>
-        <h3>Packing lists that slap</h3>
+        <h3>Shared packing, sorted</h3>
         <p>One shared list, assignable per person, with a <b>“Just mine”</b> filter.
           Nobody forgets the sunscreen. Or the charger. Again.</p>
       </article>
       <article class="card">
-        <span class="tile" style="background:#E3F2FF" aria-hidden="true">✈️</span>
+        <span class="tile" style="background:#E0EBEA" aria-hidden="true">✈️</span>
         <h3>Airplane-mode approved</h3>
         <p>Read the whole trip and <b>make edits mid-flight</b> — everything syncs the
           moment you land. Offline is a feature, not a plot twist.</p>
       </article>
       <article class="card">
-        <span class="tile" style="background:#FFE9F4" aria-hidden="true">🔐</span>
-        <h3>Privacy is the vibe</h3>
+        <span class="tile" style="background:#EDE5F1" aria-hidden="true">🔐</span>
+        <h3>Privacy, by default</h3>
         <p><b>No ads. No tracking. No selling data — ever.</b> Share links show where
           &amp; when, never your confirmation codes or notes.</p>
       </article>
@@ -902,7 +914,7 @@ ${PUBLIC_HEAD_ICONS}
         <div class="step">
           <div class="num" aria-hidden="true">1</div>
           <h3>Start the trip</h3>
-          <p>Name it something iconic (<i>“algarve with the fam 🍊”</i>), set the dates,
+          <p>Name it something memorable (<i>“algarve with the fam 🍊”</i>), set the dates,
             pick a vibe. Ten seconds, tops.</p>
         </div>
         <div class="step">
@@ -915,7 +927,7 @@ ${PUBLIC_HEAD_ICONS}
           <div class="num" aria-hidden="true">3</div>
           <h3>Share the link</h3>
           <p>The squad joins in the app; grandma follows along from her browser.
-            Everyone knows where to be. Iconic behavior.</p>
+            Everyone knows where to be.</p>
         </div>
       </div>
     </div>
@@ -924,7 +936,7 @@ ${PUBLIC_HEAD_ICONS}
   <section class="shell" aria-label="Our vibe">
     <figure class="manifesto">
       <blockquote>“Group trips should feel like the group chat at its best —
-        <span class="hl">everybody hyped, nobody lost at baggage claim.</span>” 🫶</blockquote>
+        <span class="hl">everybody in the loop, nobody lost at baggage claim.</span>” 🫶</blockquote>
       <figcaption>— the Tripto manifesto, probably</figcaption>
     </figure>
   </section>
@@ -938,8 +950,7 @@ ${PUBLIC_HEAD_ICONS}
   <section class="shell" aria-labelledby="cta-h">
     <div class="cta-banner">
       <h2 id="cta-h">Be the organized friend ✨</h2>
-      <p>The one with the plan, the packing list, and the peace of mind.
-        Main-character behavior, honestly.</p>
+      <p>The one with the plan, the packing list, and the peace of mind.</p>
       <a class="btn btn-hot" href="${APP_STORE_URL}">📲 Get it on the App Store</a>
       <p class="store-line">✈️ out now for iPhone · no ads, no tracking</p>
     </div>
