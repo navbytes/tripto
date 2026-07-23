@@ -2,6 +2,7 @@ import PhotosUI
 import QuickLookThumbnailing
 import SwiftData
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Thumbnail strip + add/delete for an item's `ItemAttachment`s
@@ -23,6 +24,7 @@ struct AttachmentStrip: View {
     @State private var isPresentingAddDialog = false
     @State private var isPresentingPhotosPicker = false
     @State private var isPresentingFileImporter = false
+    @State private var isPresentingCamera = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var isUploading = false
     @State private var loadingAttachmentId: UUID?
@@ -97,6 +99,13 @@ struct AttachmentStrip: View {
                 }
             }
             .confirmationDialog("Add attachment", isPresented: $isPresentingAddDialog, titleVisibility: .visible) {
+                // G1: hidden rather than disabled when unavailable
+                // (Simulator, camera-less devices) — a visible-but-disabled
+                // row here would still read as "tap to try", which just
+                // dead-ends into nothing.
+                if CameraCapture.isAvailable {
+                    Button("Camera") { isPresentingCamera = true }
+                }
                 Button("Photo") { isPresentingPhotosPicker = true }
                 Button("PDF file") { isPresentingFileImporter = true }
                 Button("Cancel", role: .cancel) {}
@@ -108,6 +117,19 @@ struct AttachmentStrip: View {
             }
             .fileImporter(isPresented: $isPresentingFileImporter, allowedContentTypes: [.pdf]) { result in
                 handleFileImport(result)
+            }
+            // Full-screen, not `.sheet` — matches every other host of the
+            // system camera UI (it owns its own Cancel/Retake/Use Photo
+            // chrome; a card-style sheet would look like a picker bug).
+            .fullScreenCover(isPresented: $isPresentingCamera) {
+                CameraCapture(
+                    onCapture: { image in
+                        isPresentingCamera = false
+                        Task { await attachCameraImage(image) }
+                    },
+                    onCancel: { isPresentingCamera = false }
+                )
+                .ignoresSafeArea()
             }
             .sheet(item: $previewTarget) { target in
                 // Escape is OURS, not QuickLook's: embedded QL doesn't
@@ -252,6 +274,21 @@ struct AttachmentStrip: View {
         // SwiftUI `Image` with no `Data` left to hand `ImageProcessing`
         // (`AvatarPhotoPicker`'s established rule).
         guard let data = try? await pickerItem.loadTransferable(type: Data.self) else {
+            toast = "Couldn\u{2019}t read that photo. Try another."
+            return
+        }
+        await attach(data: data, contentType: .jpeg, fileName: "Photo \(attachments.count + 1).jpg")
+    }
+
+    /// G1: the camera source's own entry into the SAME pipeline
+    /// `attachPhoto` above already uses — `CameraCapture` hands back a
+    /// `UIImage` rather than `Data` (there's no picked file to
+    /// `loadTransferable` from), so this is the one extra step before
+    /// `attach(data:contentType:fileName:)` picks it up identically either
+    /// way: same downsample bound, same 10MB/10-file caps, same toast
+    /// vocabulary.
+    private func attachCameraImage(_ image: UIImage) async {
+        guard let data = image.normalizedForUpload().jpegData(compressionQuality: 0.95) else {
             toast = "Couldn\u{2019}t read that photo. Try another."
             return
         }
