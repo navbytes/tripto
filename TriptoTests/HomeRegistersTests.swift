@@ -265,6 +265,71 @@ final class HomeRegistersTests: XCTestCase {
         XCTAssertEqual(bucket, .inProgress, "the trip's own last night in Honolulu must not be archived a day early")
     }
 
+    // MARK: - F6 review should-fix: TripCard/HeroFlight must agree with the
+    // section they sit in (device ≠ home time zone)
+
+    /// The exact GAP the reviewer named: device in Tokyo, home time zone set
+    /// to New York, right at the boundary where Tokyo has already rolled its
+    /// calendar over to the trip's start day but New York hasn't yet.
+    /// `HomeView.tripList` buckets the SECTION with `HomeTripDayLabels.bucket`
+    /// (home-zone-aware); this pins that `TripCard`/`HeroFlightClone`'s own
+    /// pill/countdown — now fed `HomeView.homeAdjustedToday` instead of raw
+    /// `.now` — computes the exact same bucket, using the exact recipe
+    /// `homeAdjustedToday` uses (`HomeTripDayLabels.todayLabel(...).asDate
+    /// (calendar:)`), so a change to one without the other would be caught
+    /// here even though `homeAdjustedToday` itself (a private `HomeView`
+    /// property) can't be called directly from a test.
+    func testCardBucketAgreesWithSectionBucketWhenDeviceIsTokyoAndHomeIsNewYork() {
+        var tokyoCal = Calendar(identifier: .gregorian)
+        tokyoCal.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let newYork = TimeZone(identifier: "America/New_York")!
+
+        // Device-anchored (Tokyo) start/end — built the same way
+        // `TripFormView.save()` would on a Tokyo device.
+        let tripStartsJuly23 = trip(
+            start: DayDate(year: 2026, month: 7, day: 23).asDate(calendar: tokyoCal),
+            end: DayDate(year: 2026, month: 7, day: 26).asDate(calendar: tokyoCal)
+        )
+
+        // 2026-07-23 00:30 JST == 2026-07-22 11:30 EDT: Tokyo's own calendar
+        // has JUST turned to the trip's start day; New York's hasn't — it's
+        // still the 22nd there.
+        let now = instant(2026, 7, 23, 0, 30, tz: "Asia/Tokyo")
+
+        // Sanity: proves this test isn't accidentally trivial — read
+        // through the raw device "now" with no home-zone shift at all
+        // (`TripCard`/`HeroFlightClone`'s behavior BEFORE this fix), the
+        // card would say the trip has already started.
+        let naiveDeviceBucket = TripDateBucketing.bucket(
+            startDate: tripStartsJuly23.startDate, endDate: tripStartsJuly23.endDate, today: now, calendar: tokyoCal
+        )
+        XCTAssertEqual(naiveDeviceBucket, .inProgress, "sanity: unshifted device ‘now’ reads this as already started")
+
+        // The section's own bucket (`HomeView.tripList`'s `bucketsByTripId`).
+        let sectionBucket = HomeTripDayLabels.bucket(
+            trip: tripStartsJuly23, liveTimeZone: newYork, now: now, deviceCalendar: tokyoCal
+        )
+        XCTAssertEqual(sectionBucket, .upcoming, "New York hasn’t reached the trip's start day yet")
+
+        // The card's own bucket, fed `homeAdjustedToday`'s exact recipe.
+        let homeAdjustedToday = HomeTripDayLabels.todayLabel(
+            liveTimeZone: newYork, now: now, deviceCalendar: tokyoCal
+        ).asDate(calendar: tokyoCal)
+        let cardBucket = TripDateBucketing.bucket(
+            startDate: tripStartsJuly23.startDate, endDate: tripStartsJuly23.endDate,
+            today: homeAdjustedToday, calendar: tokyoCal
+        )
+        XCTAssertEqual(cardBucket, sectionBucket, "the card's own bucket must agree with the section it's sorted into")
+
+        // Countdown text agreement: the section says "not started yet", so
+        // the card's countdown must read "1 day away", not "0" (which would
+        // read as starting today/now, contradicting `.upcoming`).
+        let cardDaysUntilStart = TripDateMath.daysUntilStart(
+            startDate: tripStartsJuly23.startDate, today: homeAdjustedToday, calendar: tokyoCal
+        )
+        XCTAssertEqual(cardDaysUntilStart, 1, "the countdown must also agree it's one day out, not zero")
+    }
+
     func testOrderedIsAheadThenBeen() {
         let ahead1 = trip(start: day(2026, 8, 1), end: day(2026, 8, 5))
         let been1 = trip(start: day(2026, 1, 1), end: day(2026, 1, 5))

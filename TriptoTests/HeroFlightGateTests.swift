@@ -90,10 +90,10 @@ final class HeroFlightGateTests: XCTestCase {
         let sourceFrame = CGRect(x: 0, y: 62, width: 402, height: 151)
 
         let state = HeroFlightModel.State.flying(
-            trip: trip, people: [], isPending: false, register: .plain, sourceFrame: sourceFrame
+            trip: trip, people: [], isPending: false, register: .plain, today: .now, sourceFrame: sourceFrame
         )
 
-        guard case .flying(let flownTrip, _, _, let flownRegister, let flownSourceFrame) = state else {
+        guard case .flying(let flownTrip, _, _, let flownRegister, _, let flownSourceFrame) = state else {
             return XCTFail("expected .flying")
         }
         XCTAssertTrue(flownTrip === trip, "must carry the SAME Trip reference the card rendered, never a copy")
@@ -112,10 +112,11 @@ final class HeroFlightGateTests: XCTestCase {
         XCTAssertNil(trip.coverImagePath, "sanity: a brand-new fixture trip has no photo")
 
         let state = HeroFlightModel.State.flying(
-            trip: trip, people: [], isPending: true, register: .next(firstUp: nil), sourceFrame: .zero
+            trip: trip, people: [], isPending: true, register: .next(firstUp: nil), today: .now,
+            sourceFrame: .zero
         )
 
-        guard case .flying(let flownTrip, _, let flownIsPending, let flownRegister, _) = state else {
+        guard case .flying(let flownTrip, _, let flownIsPending, let flownRegister, _, _) = state else {
             return XCTFail("expected .flying")
         }
         XCTAssertNil(flownTrip.coverImagePath)

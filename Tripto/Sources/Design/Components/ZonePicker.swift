@@ -62,20 +62,25 @@ struct ZonePicker: View {
     }
 }
 
+/// All known IANA identifiers, sorted once — shared by `ZonePickerList` and
+/// F6's `HomeZonePickerList` below so there's exactly one cached list and one
+/// search-match rule for every zone picker in the app.
+private let allTimeZoneIdentifiers: [String] = TimeZone.knownTimeZoneIdentifiers.sorted()
+
+private func zoneIdentifiers(matching query: String) -> [String] {
+    guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return allTimeZoneIdentifiers }
+    return allTimeZoneIdentifiers.filter {
+        $0.localizedCaseInsensitiveContains(query)
+            || ItineraryTimeZone.citySegment(of: $0).localizedCaseInsensitiveContains(query)
+    }
+}
+
 private struct ZonePickerList: View {
     @Binding var selection: TimeZone
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
 
-    private static let allIdentifiers: [String] = TimeZone.knownTimeZoneIdentifiers.sorted()
-
-    private var identifiers: [String] {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return Self.allIdentifiers }
-        return Self.allIdentifiers.filter {
-            $0.localizedCaseInsensitiveContains(query)
-                || ItineraryTimeZone.citySegment(of: $0).localizedCaseInsensitiveContains(query)
-        }
-    }
+    private var identifiers: [String] { zoneIdentifiers(matching: query) }
 
     var body: some View {
         NavigationStack {
@@ -119,4 +124,142 @@ private struct ZonePickerList: View {
     return ZonePicker(title: "Departs", selection: $zone, hint: "Set by departure airport")
         .padding(Spacing.xl)
         .background(Palette.paper)
+}
+
+// MARK: - F6 (1.3): Home time zone
+
+/// `SettingsView`'s "Home time zone" row. Same tap-to-open-sheet shape as
+/// `ZonePicker` above, but the selection is the raw `@AppStorage` STRING
+/// (empty = "Automatic" — follow the device's own zone) rather than a bound
+/// `TimeZone`: unlike every `ZonePicker` call site (a flight/stay/activity
+/// always has some real zone), "unset" is itself this row's valid, default
+/// selection, so it can't reuse `ZonePicker`'s non-optional binding as-is.
+struct HomeZonePicker: View {
+    /// `HomeTimeZonePreference.appStorageKey`'s raw value — the caller owns
+    /// the `@AppStorage` property (same convention `showPastTrips`/
+    /// `suggestionAlertsEnabled` bindings use elsewhere in `SettingsView`).
+    @Binding var selectionID: String
+
+    @State private var isPresented = false
+    @ScaledMetric(relativeTo: .caption) private var chevronSize: CGFloat = 11
+
+    private var resolvedZone: TimeZone { HomeTimeZonePreference.resolve(id: selectionID) }
+
+    /// "Automatic — New York time (EDT)" when unset (naming which zone
+    /// Automatic currently resolves to, per this milestone's brief: "show
+    /// the resolved current offset for clarity"), else just "New York time
+    /// (EDT)" — same caption format `ZonePicker.captionText` uses.
+    private var captionText: String {
+        let city = ItineraryTimeZone.citySegment(of: resolvedZone.identifier).replacingOccurrences(of: "_", with: " ")
+        let abbr = ItineraryTimeZone.zoneLabel(for: resolvedZone)
+        let zoneText = "\(city) time (\(abbr))"
+        return selectionID.isEmpty ? "Automatic \u{2014} \(zoneText)" : zoneText
+    }
+
+    var body: some View {
+        Button {
+            isPresented = true
+        } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Home time zone")
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                Spacer()
+                Text(captionText)
+                    .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                    .foregroundStyle(Palette.ink)
+                    .multilineTextAlignment(.trailing)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: chevronSize, weight: .semibold))
+                    .foregroundStyle(Palette.slate)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // 44pt floor (CLAUDE.md quality bar) — a plain caption-height row
+        // would otherwise land short of it, same reasoning `ZonePicker`'s
+        // AddItemSheet host rows already satisfy via their own padding.
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Home time zone: \(captionText)")
+        .accessibilityHint("Double tap to change")
+        .sheet(isPresented: $isPresented) {
+            HomeZonePickerList(selectionID: $selectionID)
+        }
+    }
+}
+
+private struct HomeZonePickerList: View {
+    @Binding var selectionID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var identifiers: [String] { zoneIdentifiers(matching: query) }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Button {
+                    selectionID = ""
+                    dismiss()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Automatic")
+                                .foregroundStyle(Palette.ink)
+                            Text("Uses this device\u{2019}s time zone")
+                                .font(Typo.body(Typo.Size.caption))
+                                .foregroundStyle(Palette.slate)
+                        }
+                        Spacer()
+                        if selectionID.isEmpty {
+                            Image(systemName: "checkmark").foregroundStyle(Palette.amber).accessibilityHidden(true)
+                        }
+                    }
+                }
+                .frame(minHeight: 44)
+                .accessibilityAddTraits(selectionID.isEmpty ? .isSelected : [])
+
+                ForEach(identifiers, id: \.self) { identifier in
+                    Button {
+                        selectionID = identifier
+                        dismiss()
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(ItineraryTimeZone.citySegment(of: identifier).replacingOccurrences(of: "_", with: " "))
+                                    .foregroundStyle(Palette.ink)
+                                Text(identifier)
+                                    .font(Typo.body(Typo.Size.caption))
+                                    .foregroundStyle(Palette.slate)
+                            }
+                            Spacer()
+                            if identifier == selectionID {
+                                Image(systemName: "checkmark").foregroundStyle(Palette.amber).accessibilityHidden(true)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityAddTraits(identifier == selectionID ? .isSelected : [])
+                }
+            }
+            .listStyle(.plain)
+            .searchable(text: $query, prompt: "Search cities or zones")
+            .navigationTitle("Home time zone")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+#Preview("Home time zone") {
+    @Previewable @State var selectionID = ""
+    return Form {
+        HomeZonePicker(selectionID: $selectionID)
+    }
 }

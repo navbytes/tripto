@@ -95,6 +95,9 @@ struct ItineraryTabView: View {
     /// comment).
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// F6 (1.3): same device-local "home zone" override `HomeView` reads —
+    /// feeds `tripCalendar`'s `liveTimeZone(...)` fallback below.
+    @AppStorage(HomeTimeZonePreference.appStorageKey) private var homeTimeZoneID = ""
     /// One-shot: only auto-scroll to "today" the first time this view's
     /// `.task` fires, not on every subsequent data refresh.
     @State private var hasAutoScrolledToToday = false
@@ -116,7 +119,9 @@ struct ItineraryTabView: View {
     /// the next.
     private var tripCalendar: Calendar {
         var calendar = Calendar.current
-        calendar.timeZone = TripDateBucketing.liveTimeZone(items: allTripItems)
+        calendar.timeZone = TripDateBucketing.liveTimeZone(
+            items: allTripItems, deviceTimeZone: HomeTimeZonePreference.resolve(id: homeTimeZoneID)
+        )
         return calendar
     }
 
