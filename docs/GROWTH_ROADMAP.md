@@ -36,26 +36,31 @@ localization) + the Gen-Z targeting research (leverage is channel & copy, not UI
   Apple's data: **+2.5pp conversion (156% over the 1.6% default)**. Highest-ROI
   steady-growth lever. Then **Product Page Optimization** A/B tests (≤3 icon/
   screenshot/preview treatments).
-- [ ] ⏳ **Metadata localization — Tier 1** (name/subtitle/keywords/description)
-  for **es, de, fr, ja, pt-BR**. Cheap, no code; both an ASO win and a named
-  featuring criterion. Install data picks which locales earn Tier-2 (in-app).
+- [~] ⏸ **Metadata localization — Tier 1** (name/subtitle/keywords/promo) for
+  **es, de, fr, ja, pt-BR**. **es-ES entered & verified in ASC** (staged on a new
+  v1.3 "Prepare for Submission" record — not submitted, no build). Rest **parked
+  per owner 2026-07-23** ("listing/submission later"). Cleanup owed: a stray
+  **English (U.K.)** locale was accidentally added and wedges the atomic App-Info
+  save — remove it when resuming. ASC React forms are automation-fragile; entering
+  the remaining 4 by hand (validated strings ready) is the reliable path.
 - [ ] 🔄 **Brand coherence** — landing dusk reconciliation **SHIPPED & LIVE**
   (PR #76). Follow-ups: **share page as a growth loop** (Tripto-branded,
   "make your own trip" CTA, clean OG cards for iMessage/WhatsApp/Stories —
   every shared trip is a free ad); mobile screenshot spot-check.
 
-### 1.3 app — "finish the capture loop" (pure client, no backend, no new opex)
+### 1.3 app — "finish the capture loop" — ✅ CODE-COMPLETE on `main`
 > Updates the 1.3 definition in PRODUCT_PLAN.md (owner-agreed 2026-07-23);
 > a docs-sync should reconcile PRODUCT_PLAN's 1.3–1.4 mapping later.
-Built in parallel. **No store build until fully ready + owner approval** —
-iCloud/Xcode-Cloud build minutes are limited (see Constraints).
-- [ ] 🔄 **G1 — Camera capture in the attach flow.** Camera source alongside the
-  Photos/Files pickers. Needs `NSCameraUsageDescription`. Reuse the
-  downsample→upload pattern (`ImageProcessing.downsampledJPEG`). Client-only.
-  *(Sim has no camera — verify plumbing via unit tests + a real-device pass.)*
-- [ ] 🔄 **F6 — Home-timezone setting.** User-set "home" zone (`@AppStorage`),
-  threaded through `Trip+Bucketing.liveTimeZone(...)`, surfaced in `SettingsView`.
-  Client-only.
+Both merged; suite green (1098 tests). **No `v*` tag / Xcode Cloud build pushed** —
+the release build waits for owner go (build minutes limited, see Constraints).
+- [x] ✅ **G1 — Camera capture in the attach flow** (PR #79). Camera source +
+  `NSCameraUsageDescription`; reuses the `downsampledJPEG`→upload pipeline.
+  **Deferred nits:** on-device sensor round-trip (orientation + peak memory —
+  can't run on Simulator) to verify before submission; permission-denied →
+  Settings deep-link (soft, not built).
+- [x] ✅ **F6 — Home-timezone setting** (PR #78). `@AppStorage` home zone threaded
+  through `Trip+Bucketing.liveTimeZone(...)` + per-card pills; §7.4 per-item
+  display untouched.
 
 ---
 
@@ -80,7 +85,12 @@ iCloud/Xcode-Cloud build minutes are limited (see Constraints).
   is featuring currency (Flighty won a 2023 ADA for exactly this).
   `LiveActivityCoordinator` already exists (see ROADMAP §4.1).
 - [ ] **Tier-2 localization** — full in-app via String Catalogs (`.xcstrings`)
-  for the locales that convert from Tier-1.
+  for the locales that convert from Tier-1. **Sized 2026-07-23: Large, ~15–20
+  dev-days** — zero infra today (~210 bare `Text("...")` literals, no catalog),
+  and the real cost is fixing ~30–40 i18n-hostile patterns (manual pluralization,
+  hardcoded connectors, concatenated fragments, low `.formatted()` coverage), not
+  extraction. **Parked** pending Tier-1 install signal; don't localize the app for
+  markets the listing hasn't proven.
 - [ ] **Friends onboarding path** — surface `trip_type:friends` (already in schema,
   **zero backend**) as first-class. Gen-Z leverage.
 - [ ] **Faster instant-value onboarding** — see a trip before sign-in (Gen-Z bail ~3.7s).
@@ -134,3 +144,7 @@ Detail lives in [ROADMAP.md](ROADMAP.md) Phase 4/5 and
 - **2026-07-23 — Landing page brand reconciliation SHIPPED & LIVE** (PR #76):
   unicorn gradient → dusk/sunset (matches app icon + UI); rented Gen-Z slang →
   warm cross-gen copy; favicon fixed. Deployed to `tripto.navbytes.io`, verified live.
+- **2026-07-23 — 1.3 code merged to `main`:** F6 home-timezone (PR #78) + G1 camera
+  capture (PR #79). Reviewed, 1098 tests green. No release tag/build pushed yet.
+- **2026-07-23 — es-ES App Store metadata** entered & verified in ASC (staged on a
+  v1.3 record, not submitted). Remaining locales + submission parked per owner.
