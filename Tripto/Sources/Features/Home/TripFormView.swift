@@ -16,6 +16,12 @@ struct TripFormView: View {
         case edit(Trip)
     }
 
+    /// Feature A2's own testable source of truth for `tripTypeSection`'s
+    /// segment order — `Friends` leads (see that property's doc comment).
+    /// A `static let`, not an inline literal, so `TripFormViewTests` can
+    /// assert the order without standing up a full view/ViewInspector.
+    static let tripTypeOptions: [TripType] = [.friends, .family, .solo]
+
     /// E2 (docs/BACKLOG.md §E2 "Duplicate trip"): create-mode field values to
     /// seed this sheet with instead of the ordinary blank defaults — `mode`
     /// stays `.create` (a genuinely new trip row gets created), this only
@@ -570,10 +576,19 @@ struct TripFormView: View {
         }
     }
 
+    /// Feature A2 (adoption onboarding, light touch): `Friends` leads the
+    /// segment order — previously "Family, Friends, Solo" (mirroring
+    /// `TripType`'s declaration order) visually reinforced family as the
+    /// "default" case even though `SegmentedControl` gives every option
+    /// equal weight. No behavior change: still no type-driven logic
+    /// anywhere (deferred to v2, BUILD_PLAN.md), and create mode still
+    /// seeds `.family` (`Prefill`'s own default, unchanged) — this is
+    /// ordering/copy only, making the choice feel deliberate rather than a
+    /// silent default to skip past.
     private var tripTypeSection: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             sectionHeading("Trip type")
-            SegmentedControl(options: ["Family", "Friends", "Solo"], selection: tripTypeSelection)
+            SegmentedControl(options: Self.tripTypeOptions.map { $0.rawValue.capitalized }, selection: tripTypeSelection)
         }
     }
 
