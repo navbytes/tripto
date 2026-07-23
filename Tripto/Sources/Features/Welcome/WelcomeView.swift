@@ -106,7 +106,11 @@ struct WelcomeView: View {
 
             invitePreviewCard
 
-            samplePreviewSection
+            // Only pitch the generic sample to cold, uninvited visitors — an
+            // invited user's real invite card shouldn't compete with it.
+            if appRouter.pendingInviteToken == nil {
+                samplePreviewSection
+            }
 
             Spacer()
 
