@@ -75,7 +75,17 @@ extension UIImage {
     /// anything) the EXIF tag says downstream.
     func normalizedForUpload() -> UIImage {
         guard imageOrientation != .up else { return self }
-        let renderer = UIGraphicsImageRenderer(size: size)
+        // Review fix: `UIGraphicsImageRendererFormat.default()`'s `scale`
+        // defaults to the MAIN SCREEN's scale (3.0 on a Pro), not this
+        // image's own (1.0 for a camera capture) — left at the default, a
+        // ~12MP portrait capture (.right orientation, so it hits this path)
+        // redraws into a ~110MP/~440MB intermediate bitmap before
+        // `downsampledJPEG` ever gets to shrink it. Pinning the format's
+        // scale to the source image's own scale keeps this redraw at the
+        // image's real pixel size.
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = scale
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
         return renderer.image { _ in draw(in: CGRect(origin: .zero, size: size)) }
     }
 }

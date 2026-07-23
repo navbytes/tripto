@@ -76,7 +76,11 @@ final class CameraCaptureTests: XCTestCase {
     /// The fix-up this pins: a rotated capture must come out `.up` with the
     /// SAME displayed size it reported going in (`UIGraphicsImageRenderer
     /// (size: size)` in `normalizedForUpload`) — never silently swapped
-    /// width/height, never left rotated.
+    /// width/height, never left rotated. Also pins the review fix: `scale`
+    /// must stay the SOURCE image's own scale (a camera capture's real 1.0),
+    /// never silently inflated to the main screen's scale (3.0 on a Pro) —
+    /// that inflation is exactly what turned a ~12MP capture into a
+    /// ~110MP/~440MB intermediate bitmap before this bug was fixed.
     func testNormalizedForUploadBakesInARotatedOrientationToUpAndPreservesReportedSize() {
         let image = makeTestImage(width: 40, height: 20, orientation: .right)
         let originalSize = image.size
@@ -84,6 +88,7 @@ final class CameraCaptureTests: XCTestCase {
         let normalized = image.normalizedForUpload()
         XCTAssertEqual(normalized.imageOrientation, .up)
         XCTAssertEqual(normalized.size, originalSize)
+        XCTAssertEqual(normalized.scale, image.scale)
     }
 
     private func makeTestImage(width: Int, height: Int, orientation: UIImage.Orientation = .up) -> UIImage {
