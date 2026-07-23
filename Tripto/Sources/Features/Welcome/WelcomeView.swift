@@ -106,6 +106,12 @@ struct WelcomeView: View {
 
             invitePreviewCard
 
+            // Only pitch the generic sample to cold, uninvited visitors — an
+            // invited user's real invite card shouldn't compete with it.
+            if appRouter.pendingInviteToken == nil {
+                samplePreviewSection
+            }
+
             Spacer()
 
             VStack(spacing: Spacing.md) {
@@ -275,6 +281,47 @@ struct WelcomeView: View {
             // five separate swipes.
             .accessibilityElement(children: .combine)
         }
+    }
+
+    /// Feature A1 (adoption onboarding): a fabricated, in-memory sample
+    /// trip rendered through the exact `TripCard` `HomeView` uses for a real
+    /// one, so a brand-new signed-out user can feel the product before
+    /// creating an account. Deliberately static (no `NavigationLink`/
+    /// button) — `TripCard`'s real tap target is wired up by `HomeView`
+    /// against its own `@Query`/`AppRouter` navigation stack, none of which
+    /// exists pre-sign-in; a tappable read-only itinerary would need to pull
+    /// those coupled pieces in just for this one screen, so this stays card
+    /// + a short teaser line instead (flagged for design review — see this
+    /// change's handoff notes).
+    private var samplePreviewSection: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Peek at a sample trip")
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.slate)
+                .tracking(0.4)
+                .textCase(.uppercase)
+                // `.textCase(.uppercase)` risks an all-caps spell-out once
+                // this collapses into the combined element below (same
+                // reasoning as `loadedInviteCard`'s "You're invited" eyebrow).
+                .accessibilityLabel(Text("Sample trip preview"))
+
+            TripCard(trip: SampleTrip.trip, people: SampleTrip.people, isPending: false)
+
+            Text(SampleTrip.teaserText)
+                .font(Typo.body(Typo.Size.caption))
+                .foregroundStyle(Palette.slate)
+
+            Text("Sign in to make your own")
+                .font(Typo.body(Typo.Size.caption, weight: .semibold))
+                .foregroundStyle(Palette.ink)
+        }
+        .padding(.horizontal, Spacing.xl)
+        // One combined VoiceOver stop, "Sample trip preview" always
+        // leading — so a screen-reader user can never land on TripCard's
+        // own real-trip-shaped label ("Costa Rica with the Crew, in 21
+        // days, ...") in isolation and mistake it for an actual trip. This
+        // is the quality-bar requirement this pass calls out by name.
+        .accessibilityElement(children: .combine)
     }
 
     /// Shared card chrome for every `invitePreviewCard` state, so
