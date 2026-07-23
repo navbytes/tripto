@@ -108,6 +108,12 @@ targets:
         # duplicate search (E1, docs/BACKLOG.md §E1 — TripView).
         NSCalendarsWriteOnlyAccessUsageDescription: "Tripto adds bookings to your calendar when you ask it to."
         NSCalendarsFullAccessUsageDescription: "Tripto adds your trip's bookings to your calendar and checks for ones it already added so it doesn't create duplicates."
+        # G1: `AttachmentStrip`'s new Camera source (`CameraCapture.swift`,
+        # `UIImagePickerController(sourceType: .camera)`). The pre-existing
+        # Photos/Files sources (`PhotosPicker`) need no usage-description key
+        # at all (see `AvatarPhotoPicker`'s own doc comment) — this key is
+        # new specifically because live capture is.
+        NSCameraUsageDescription: "Tripto uses the camera so you can snap a photo to attach to a booking."
         ITSAppUsesNonExemptEncryption: false
         # PLAN-signature-layer.md §D6: required for the app to start a Live
         # Activity (`Platform/LiveActivityCoordinator.swift`, W2-B) — the

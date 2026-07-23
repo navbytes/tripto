@@ -265,4 +265,58 @@ final class DateBucketingTests: XCTestCase {
             "same tie, opposite array order: the first element now flips which zone wins"
         )
     }
+
+    // MARK: - HomeTimeZonePreference (F6, 1.3)
+
+    /// Empty stored id ("Automatic") falls back to whatever device zone the
+    /// caller supplies — this is the exact fallback `HomeView`/
+    /// `ItineraryTabView` thread into `liveTimeZone(deviceTimeZone:)` below.
+    func testHomeTimeZonePreferenceResolvesEmptyIdToDeviceZone() {
+        let device = TimeZone(identifier: "Pacific/Auckland")!
+        XCTAssertEqual(HomeTimeZonePreference.resolve(id: "", deviceTimeZone: device), device)
+    }
+
+    /// A stored, valid identifier wins over the device zone — the whole
+    /// point of the override.
+    func testHomeTimeZonePreferenceHonorsAStoredOverride() {
+        let device = TimeZone(identifier: "Pacific/Auckland")!
+        let resolved = HomeTimeZonePreference.resolve(id: "America/New_York", deviceTimeZone: device)
+        XCTAssertEqual(resolved.identifier, "America/New_York")
+    }
+
+    /// A corrupt/stale identifier (e.g. an iOS zone database change since it
+    /// was stored) degrades to the device zone rather than crashing or
+    /// silently resolving to UTC.
+    func testHomeTimeZonePreferenceFallsBackToDeviceZoneForAnUnknownIdentifier() {
+        let device = TimeZone(identifier: "Pacific/Auckland")!
+        XCTAssertEqual(HomeTimeZonePreference.resolve(id: "Not/AZone", deviceTimeZone: device), device)
+    }
+
+    /// End-to-end: `liveTimeZone`'s own `deviceTimeZone` fallback (used when
+    /// a trip has no items yet) honors the resolved home-zone override
+    /// exactly as it would honor any other device zone — confirms the two
+    /// pieces compose the way `HomeView`/`ItineraryTabView` rely on.
+    func testLiveTimeZoneHonorsResolvedHomeZoneOverrideWithNoItems() {
+        let resolved = HomeTimeZonePreference.resolve(
+            id: "Europe/Lisbon", deviceTimeZone: TimeZone(identifier: "Pacific/Auckland")!
+        )
+        XCTAssertEqual(TripDateBucketing.liveTimeZone(items: [], deviceTimeZone: resolved).identifier, "Europe/Lisbon")
+    }
+
+    /// The per-item display rule (BUILD_PLAN §7.4) is untouched by this
+    /// preference: `liveTimeZone` only ever changes the *fallback* used when
+    /// there are no items to derive a zone from — an item's own
+    /// `effectiveTz` still wins outright once any item exists, regardless of
+    /// what the home-zone override resolves to.
+    func testHomeTimeZoneOverrideNeverOverridesAnActualItemsOwnZone() {
+        let stay = TestFixtures.makeItineraryItem(
+            category: .hotel, title: "Naha stay",
+            startsAt: instant(2026, 7, 20, 15, 0, tz: "Asia/Tokyo"),
+            endsAt: instant(2026, 7, 26, 23, 0, tz: "Asia/Tokyo"),
+            tz: "Asia/Tokyo"
+        )
+        let resolvedHome = HomeTimeZonePreference.resolve(id: "America/New_York")
+        let tz = TripDateBucketing.liveTimeZone(items: [stay], deviceTimeZone: resolvedHome)
+        XCTAssertEqual(tz.identifier, "Asia/Tokyo", "an item's own effective zone wins over the home-zone fallback")
+    }
 }

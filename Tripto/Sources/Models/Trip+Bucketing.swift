@@ -91,6 +91,33 @@ enum TripDateBucketing {
     }
 }
 
+/// F6 (1.3): the user's chosen "home" zone for the app's own "current"/
+/// "home vs away" framing — device-local (no backend field, same reasoning
+/// as `HomePastTripsVisibility`: every device can have its own idea of
+/// "home"). Empty string is "Automatic" (follow the device's zone), the
+/// same "empty = unset" convention `SettingsView`'s `avatarColor` already
+/// uses. This is the ONLY place the stored id is resolved to a `TimeZone` —
+/// callers (`HomeView`, `ItineraryTabView`) read the `@AppStorage` string and
+/// pass it through `resolve(id:)` rather than constructing
+/// `TimeZone(identifier:)` themselves, so a bad/stale identifier always
+/// degrades to the device zone in one place, not at every call site.
+///
+/// Deliberately narrow scope: this only feeds the *reference* zone
+/// `TripDateBucketing.liveTimeZone`'s `deviceTimeZone` fallback resolves
+/// against for "is this trip live right now"/bucketing math. Each
+/// `ItineraryItem` still renders in its own stored `tz` (BUILD_PLAN §7.4,
+/// `ItineraryTimeZone.swift`) — untouched by this preference.
+enum HomeTimeZonePreference {
+    static let appStorageKey = "homeTimeZoneID"
+
+    /// `id` empty or unrecognized -> `deviceTimeZone` (defaults to
+    /// `.current`, overridable for hermetic tests).
+    static func resolve(id: String, deviceTimeZone: TimeZone = .current) -> TimeZone {
+        guard !id.isEmpty, let zone = TimeZone(identifier: id) else { return deviceTimeZone }
+        return zone
+    }
+}
+
 extension Trip {
     func bucket(asOf today: Date = .now, calendar: Calendar = .current) -> TripBucket {
         TripDateBucketing.bucket(startDate: startDate, endDate: endDate, today: today, calendar: calendar)

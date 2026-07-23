@@ -19,6 +19,17 @@ struct TripCard: View {
     let trip: Trip
     let people: [AvatarStack.Person]
     let isPending: Bool
+    /// F6 review should-fix (1.3): `HomeView` passes its own
+    /// `homeAdjustedToday` here (not the raw device `.now`) so this card's
+    /// bucket pill/countdown reads the same "today" its Ahead/Been section
+    /// bucketing already does (`bucketsByTripId`, `HomeTripDayLabels.bucket`)
+    /// — see `homeAdjustedToday`'s own doc comment for why the FIX is
+    /// shifting this `Date`, not swapping in a different `Calendar`:
+    /// `trip.startDate`/`endDate` carry no time zone of their own (device-
+    /// calendar-anchored `date` columns), so reading them through a foreign
+    /// `Calendar` would reinterpret already-anchored instants — the exact
+    /// footgun `HomeTripDayLabels`'s own doc comment (`HomeRegisters.swift`)
+    /// warns about.
     var today: Date = .now
     var register: HomeCardRegister = .plain
 

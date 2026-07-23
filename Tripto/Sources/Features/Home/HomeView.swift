@@ -40,6 +40,42 @@ struct HomeView: View {
     /// `true` so a fresh install/existing user sees today's unchanged
     /// behavior until they explicitly opt to hide.
     @AppStorage(HomePastTripsVisibility.appStorageKey) private var showPastTrips = true
+    /// F6 (1.3): device-local "home zone" override — read side. `resolvedHomeTimeZone`
+    /// below is what actually feeds every `liveTimeZone(...)` call in this
+    /// file (`HomeTimeZonePreference`'s own doc comment).
+    @AppStorage(HomeTimeZonePreference.appStorageKey) private var homeTimeZoneID = ""
+
+    /// The single resolved reference zone this screen judges "today"/trip
+    /// liveness against — empty preference falls back to the device's own
+    /// zone (`HomeTimeZonePreference.resolve`).
+    private var resolvedHomeTimeZone: TimeZone { HomeTimeZonePreference.resolve(id: homeTimeZoneID) }
+
+    /// F6 review should-fix (1.3): "today" as a `Date`, shifted so its
+    /// device-calendar day matches `resolvedHomeTimeZone`'s current calendar
+    /// day — threaded into every per-card bucket/countdown (`TripCard.today`,
+    /// `HeroFlightModel.State.flying`'s `today`) so a card's own pill/
+    /// countdown can never disagree with the Ahead/Been section (`tripList`'s
+    /// `bucketsByTripId`, also keyed off `resolvedHomeTimeZone` via
+    /// `HomeTripDayLabels.bucket`) it's sorted into. Before this fix, the
+    /// section bucketed against the home zone while each card's own pill/
+    /// countdown still fell back to `Date.now`/`Calendar.current` (the
+    /// device zone/moment) — the two could contradict each other right at a
+    /// day boundary when device != home.
+    ///
+    /// Deliberately a shifted `Date` through the DEVICE calendar, not a
+    /// swapped `Calendar` fed directly to `Trip.bucket(asOf:calendar:)`/
+    /// `daysUntilStart(asOf:calendar:)`: `Trip.startDate`/`endDate` carry no
+    /// time zone of their own (`HomeTripDayLabels`'s own doc comment above),
+    /// so reading them through a foreign calendar would reinterpret those
+    /// already-anchored instants — silently misbucketing a trip whenever the
+    /// home zone sits on the other side of a day boundary from the device.
+    /// `HomeTripDayLabels.todayLabel` already derives the correct "today" AS
+    /// A DAY LABEL in the home zone; `.asDate(calendar:)` re-anchors that
+    /// label to device-calendar midnight, so every existing device-calendar
+    /// comparison downstream (`TripDateMath`) stays internally consistent.
+    private var homeAdjustedToday: Date {
+        HomeTripDayLabels.todayLabel(liveTimeZone: resolvedHomeTimeZone).asDate()
+    }
 
     @State private var isPresentingCreate = false
     @State private var editingTrip: Trip?
@@ -669,7 +705,8 @@ struct HomeView: View {
         heroFlight.destFrame = nil
         heroFlight.state = .flying(
             trip: trip, people: people(for: trip),
-            isPending: syncStatus.pendingRowIds.contains(trip.id), register: register, sourceFrame: sourceFrame
+            isPending: syncStatus.pendingRowIds.contains(trip.id), register: register,
+            today: homeAdjustedToday, sourceFrame: sourceFrame
         )
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -701,7 +738,12 @@ struct HomeView: View {
     private var tripList: some View {
         let itemsByTripId = itemsByTripId
         let bucketsByTripId = Dictionary(uniqueKeysWithValues: trips.map { trip in
-            (trip.id, HomeTripDayLabels.bucket(trip: trip, liveTimeZone: TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])))
+            (trip.id, HomeTripDayLabels.bucket(
+                trip: trip,
+                liveTimeZone: TripDateBucketing.liveTimeZone(
+                    items: itemsByTripId[trip.id] ?? [], deviceTimeZone: resolvedHomeTimeZone
+                )
+            ))
         })
         let bucketLookup: (Trip) -> TripBucket = { bucketsByTripId[$0.id] ?? .upcoming }
         let aheadTrips = HomeTripOrdering.ahead(trips, bucket: bucketLookup)
@@ -744,6 +786,7 @@ struct HomeView: View {
                         trip: trip,
                         people: people(for: trip),
                         isPending: syncStatus.pendingRowIds.contains(trip.id),
+                        today: homeAdjustedToday,
                         register: register
                     )
                     .padding(.horizontal, Spacing.xl)
@@ -867,7 +910,7 @@ struct HomeView: View {
             let firstUp = HomeFirstUp.pick(from: itemsByTripId[trip.id] ?? [])
             return .next(firstUp: firstUp.map(HomeFirstUp.init))
         case .now:
-            let tz = TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [])
+            let tz = TripDateBucketing.liveTimeZone(items: itemsByTripId[trip.id] ?? [], deviceTimeZone: resolvedHomeTimeZone)
             let todayRows = HomeTodayPlan.items(
                 in: itemsByTripId[trip.id] ?? [], tripStart: HomeTripDayLabels.tripStart(trip), liveTimeZone: tz
             )
