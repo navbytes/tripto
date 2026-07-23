@@ -6,7 +6,9 @@ This is the execution plan for everything open in the backlog, sequenced and
 sized. BUILD_PLAN.md remains the product source of truth; this doc orders the
 work and records what each item needs to ship. The UX-redesign adoption
 program (2026-07-15) runs as its own phased track in
-[UX_REDESIGN_ROADMAP.md](UX_REDESIGN_ROADMAP.md).
+[UX_REDESIGN_ROADMAP.md](UX_REDESIGN_ROADMAP.md). The current adoption-focused
+growth plan (2026-07-23 — ASO, featuring, localization, brand, 1.3 scope) lives
+in [GROWTH_ROADMAP.md](GROWTH_ROADMAP.md).
 
 > **Post-1.1 product scope (2026-07-21):** [PRODUCT_PLAN.md](PRODUCT_PLAN.md)
 > defines releases 1.2–1.4 (attachments + screenshot/PDF import; flight
